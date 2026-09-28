@@ -2,7 +2,7 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 0.6.0-dev. This is a development build.
+Version 0.6.1-dev. This is a development build.
 
 ## The four options
 
@@ -69,7 +69,7 @@ Land and naval combat units, including Warrior Monks and Nihangs. The unit must:
 - be at full health;
 - stand in your own territory;
 - not be embarked;
-- have movement left and not have attacked this turn;
+- have full movement points, so it can't have moved or attacked this turn;
 - not be part of a Corps, Army, Fleet or Armada.
 
 A naval unit also needs a free water tile near the destination city.
@@ -143,6 +143,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
+- 0.6.1-dev: A unit can only be sent with full movement points. A unit that has moved or attacked this turn has to wait until next turn.
 - 0.6.0-dev: Entrust is in. The capture screen can give a city you just captured to a partner that was at war with its former owner. New warning when a lent unit won't heal because its owner has none of its strategic resource.
 - 0.5.2-dev: New fees (Expeditionary and City-State free for a 1-turn trip, then 10, 20 or 30%; Volunteers 20 to 50%). Safer tracking: a unit killed in combat is never sent home, and a unit that gets a new identity through a levy or an upgrade is followed only when it is certainly the same unit, unique units included. Combat damage a mutinying unit takes just before the end-of-turn heal is kept. A restored unit's experience stops just below its next promotion. When a host's last city falls, its lent units start home at once. The short name in the game is now "VEF".
 - 0.5.1-dev: Volunteers never come home by themselves. A lapsed Volunteer on your land or the host's is paused until you recall it. New "Volunteer Lapse Paused" notification, and "(paused)" in the tracker and on the flag.

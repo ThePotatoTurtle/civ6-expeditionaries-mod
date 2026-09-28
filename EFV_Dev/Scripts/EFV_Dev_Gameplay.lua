@@ -38,8 +38,8 @@ EFV_Dev = {}
 -- for (EFV_Config.VERSION). EFV_Dev may be bumped on its own (final-session
 -- scenarios: 0.6.0-dev.1); a mismatch of FOR_EFV with the loaded EFV build is
 -- logged at load.
-EFV_Dev.VERSION = "0.6.0-dev.1"
-EFV_Dev.FOR_EFV = "0.6.0-dev"
+EFV_Dev.VERSION = "0.6.1-dev"
+EFV_Dev.FOR_EFV = "0.6.1-dev"
 
 -- ---------------------------------------------------------------------------
 -- Helpers

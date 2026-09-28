@@ -175,6 +175,8 @@ def appendix_b_codes(plan_text):
 # text key needed (reported as INFO).
 RETIRED_REASON_CODES = {
     "RECALL_DAMAGED": "designer answers to PLAN 7.3/7.4 (DECISIONS.md): recall needs no full HP; never emitted",
+    "NO_MOVES": "DECISIONS.md 'Send requirement: full movement points' (0.6.1): replaced by NOT_FULL_MOVES",
+    "ATTACKED": "DECISIONS.md 'Send requirement: full movement points' (0.6.1): replaced by NOT_FULL_MOVES",
     "ENTRUST_PENDING": "Phase 6 (INTERFACES note 31): the city is the capturer's from the moment of capture "
                        "(Session F T15/T16), so a request is never 'pending'; a city no longer owned is ENTRUST_STALE",
 }

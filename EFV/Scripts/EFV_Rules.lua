@@ -25,8 +25,8 @@
 --   HasUnitsOnPlot    G: plot:GetUnitCount (A13) / UI: Units.GetUnitsInPlot
 --                     (A15); both + GetUnitsInPlotLayerID(x, y, ANY) (A16)
 --   TinyLake          G only: IsLake + GetArea():GetPlotCount (A14)
---   HasAttackedCtx    both: GetAttacksRemaining (G confirmed, Session A T09);
---                     UI only: IsCannotAttack (nil in G)
+--   HasFullMovesCtx   both: GetMovesRemaining / GetMaxMoves (A23, CONFIRMED
+--                     in both contexts; no branch needed)
 -- Calls available in both contexts but unverified in G (IsRevealed,
 -- GetUnitsInPlotLayerID) go through pcall with a logged, documented fallback.
 --
@@ -48,6 +48,10 @@
 -- Designer answers (DECISIONS.md, "Designer answers to PLAN.md 7.3 and 7.4")
 -- applied here: Volunteer recall no longer requires full HP (RECALL_DAMAGED
 -- retired); Volunteer lapse conditions are shared via EFV_VolunteerLapseReason.
+-- Designer decision "Send requirement: full movement points" (0.6.1): a unit
+-- is sent only with full movement points (NOT_FULL_MOVES). It replaces spec
+-- 6.2.6 ("has not attacked this turn and has movement remaining"), so
+-- NO_MOVES and ATTACKED are retired (attacking spends moves).
 -- ===========================================================================
 
 if EFV_Rules ~= nil and EFV_Rules.LOADED == 1 then
@@ -62,11 +66,12 @@ EFV_Rules = {}
 -- Every reason code the rules may emit (PLAN Appendix B, updated). Each has a
 -- text key "LOC_EFV_REASON_" .. code (PLAN 3.7, 4.2).
 -- RECALL_DAMAGED is retired (designer answer: recall needs no full HP).
+-- NO_MOVES and ATTACKED are retired (designer decision: NOT_FULL_MOVES).
 -- NOT_IMPLEMENTED is interim (PLAN 5.1 WP1.1: unreleased VOL/CS branches).
 EFV_Rules.ALL_REASON_CODES = {
 	-- unit level
 	"NOT_HUMAN_MAJOR", "NOT_OWNER", "CLASS_NEVER", "FORMATION", "DAMAGED",
-	"NOT_OWN_TERRITORY", "EMBARKED", "NO_MOVES", "ATTACKED", "ALREADY_TRACKED",
+	"NOT_OWN_TERRITORY", "EMBARKED", "NOT_FULL_MOVES", "ALREADY_TRACKED",
 	-- destination level
 	"NOT_PARTNER", "VOL_NEEDS_ACCESS", "CS_NOT_MET", "AT_WAR_WITH_RECIPIENT",
 	"NO_COMMON_WAR", "CITY_NOT_OWNED", "NOT_REVEALED", "GOLD", "NAVAL_NO_SPAWN",
@@ -349,28 +354,23 @@ local function IsEmbarkedCtx(pUnit, plot, row)
 	return row.Domain == "DOMAIN_LAND" and okW and water == true
 end
 
--- Attacked this turn (spec 6.2.6, SPIKES 3 row 6): GetAttacksRemaining() <= 0
--- (G CONFIRMED, Session A T09). The UI additionally excludes units that can
--- never attack (IsCannotAttack, UI only: nil in G); EFV only sends combat
--- units, so both contexts agree in practice.
-local function HasAttackedCtx(pUnit)
-	if not EFV_Has(pUnit, "GetAttacksRemaining") then
-		LogOnce("attacks", 2, "unit:GetAttacksRemaining unavailable in %s; ATTACKED check skipped",
+-- Full movement points (designer decision "Send requirement: full movement
+-- points", replaces spec 6.2.6): GetMovesRemaining() > 0 and >=
+-- GetMaxMoves() (A23, CONFIRMED in both contexts, so UI and G agree). A unit
+-- that moved or attacked this turn has spent moves. Unreadable moves -> not
+-- full; unreadable max moves -> logged once, falls back to moves > 0.
+local function HasFullMovesCtx(pUnit)
+	local okM, moves = pcall(function() return pUnit:GetMovesRemaining() end)
+	if not okM or type(moves) ~= "number" or moves <= 0 then
+		return false
+	end
+	local okX, maxMoves = pcall(function() return pUnit:GetMaxMoves() end)
+	if not okX or type(maxMoves) ~= "number" then
+		LogOnce("maxmoves", 2, "unit:GetMaxMoves unavailable in %s; full-moves check uses moves > 0",
 			EFV_IsGameplay() and "G" or "UI")
-		return false
+		return true
 	end
-	local cannotAttack = false
-	if not EFV_IsGameplay() then
-		-- EFV:UI-ONLY begin
-		local okC, c = pcall(function() return pUnit:IsCannotAttack() end)
-		cannotAttack = (okC and c == true)
-		-- EFV:UI-ONLY end
-	end
-	if cannotAttack then
-		return false
-	end
-	local ok, res = pcall(function() return pUnit:GetAttacksRemaining() <= 0 end)
-	return ok and res == true
+	return moves >= maxMoves
 end
 
 -- Levy / foreign-origin test (D4, spec 1.2 "levied units"): owner differs
@@ -744,8 +744,8 @@ end
 -- (CLASS_NEVER, from EFV_UnitClass, so the G handler re-validates it),
 -- formation STANDARD (FORMATION, D3, A33), damage 0 (DAMAGED), plot owner ==
 -- sender (NOT_OWN_TERRITORY), not embarked (EMBARKED; fallback land unit on
--- water), moves > 0 (NO_MOVES), not attacked (ATTACKED; skipped in G unless
--- EFV_Has(unit, "GetAttacksRemaining"), T09), not tracked by any record
+-- water), full movement points (NOT_FULL_MOVES: moves remaining == max
+-- moves, designer decision replacing spec 6.2.6), not tracked by any record
 -- (ALREADY_TRACKED, DV8). All failing conditions are listed (spec 6).
 -- A nil unit (not found / not the requester's) returns { "REQ_STALE" }.
 -- Params:  pUnit unit object, senderID player ID, store = gameplay store or
@@ -793,12 +793,8 @@ function EFV_UnitSendReasons(pUnit, senderID, store)
 	if IsEmbarkedCtx(pUnit, plot, UnitRowOf(pUnit)) then
 		Add(reasons, "EMBARKED")
 	end
-	local okM, moves = pcall(function() return pUnit:GetMovesRemaining() end)
-	if not okM or type(moves) ~= "number" or moves <= 0 then
-		Add(reasons, "NO_MOVES")
-	end
-	if HasAttackedCtx(pUnit) then
-		Add(reasons, "ATTACKED")
+	if not HasFullMovesCtx(pUnit) then
+		Add(reasons, "NOT_FULL_MOVES")
 	end
 	if IsTracked(store, owner, pUnit:GetID()) then
 		Add(reasons, "ALREADY_TRACKED")

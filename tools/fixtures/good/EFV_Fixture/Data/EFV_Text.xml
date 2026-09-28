@@ -48,8 +48,7 @@
 		<Row Tag="LOC_EFV_REASON_DAMAGED" Language="en_US"><Text>Reason: damaged</Text></Row>
 		<Row Tag="LOC_EFV_REASON_NOT_OWN_TERRITORY" Language="en_US"><Text>Reason: not own territory</Text></Row>
 		<Row Tag="LOC_EFV_REASON_EMBARKED" Language="en_US"><Text>Reason: embarked</Text></Row>
-		<Row Tag="LOC_EFV_REASON_NO_MOVES" Language="en_US"><Text>Reason: no moves</Text></Row>
-		<Row Tag="LOC_EFV_REASON_ATTACKED" Language="en_US"><Text>Reason: attacked</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NOT_FULL_MOVES" Language="en_US"><Text>Reason: not full moves</Text></Row>
 		<Row Tag="LOC_EFV_REASON_ALREADY_TRACKED" Language="en_US"><Text>Reason: already tracked</Text></Row>
 		<Row Tag="LOC_EFV_REASON_NOT_PARTNER" Language="en_US"><Text>Reason: not partner</Text></Row>
 		<Row Tag="LOC_EFV_REASON_VOL_NEEDS_ACCESS" Language="en_US"><Text>Reason: vol needs access</Text></Row>

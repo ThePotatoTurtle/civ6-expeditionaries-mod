@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Mod id="94ec021d-9956-4a30-b9c1-5ccf136679bf" version="1">
   <Properties>
-    <Name>VEF Dev Tools (testing only) v0.6.0-dev.1</Name>
+    <Name>VEF Dev Tools (testing only) v0.6.1-dev</Name>
     <Teaser>Test helpers for Volunteer &amp; Expeditionary Forces (VEF). Not for normal play.</Teaser>
-    <Description>Developer panel for the VEF in-game tests. One-click scenarios for the final test session, plus tools to spawn units, set damage, XP and promotions, change gold and resources, set alliances, friendships and wars, move VEF timers and list VEF records. Open it with Ctrl+Shift+D. Writes to Lua.log. Requires Volunteer &amp; Expeditionary Forces (VEF) 0.6.0-dev. Never enable it in a real game. Version 0.6.0-dev.1.</Description>
+    <Description>Developer panel for the VEF in-game tests. One-click scenarios for the final test session, plus tools to spawn units, set damage, XP and promotions, change gold and resources, set alliances, friendships and wars, move VEF timers and list VEF records. Open it with Ctrl+Shift+D. Writes to Lua.log. Requires Volunteer &amp; Expeditionary Forces (VEF) 0.6.1-dev. Never enable it in a real game. Version 0.6.1-dev.</Description>
     <Authors>VEF project</Authors>
     <AffectsSavedGames>1</AffectsSavedGames>
     <CompatibleVersions>2.0</CompatibleVersions>

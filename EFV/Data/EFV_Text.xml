@@ -182,11 +182,11 @@
 		<Row Tag="LOC_EFV_REASON_EMBARKED" Language="en_US">
 			<Text>The unit is embarked.</Text>
 		</Row>
-		<Row Tag="LOC_EFV_REASON_NO_MOVES" Language="en_US">
-			<Text>The unit has no movement left this turn.</Text>
-		</Row>
-		<Row Tag="LOC_EFV_REASON_ATTACKED" Language="en_US">
-			<Text>The unit has attacked this turn.</Text>
+		<!-- LOC_EFV_REASON_NO_MOVES and LOC_EFV_REASON_ATTACKED removed in 0.6.1:
+		     designer decision "Send requirement: full movement points" retires
+		     both codes (tools/validate_data.py RETIRED_REASON_CODES). -->
+		<Row Tag="LOC_EFV_REASON_NOT_FULL_MOVES" Language="en_US">
+			<Text>Needs full movement points (it has moved or attacked this turn).</Text>
 		</Row>
 		<Row Tag="LOC_EFV_REASON_ALREADY_TRACKED" Language="en_US">
 			<Text>The unit is already serving abroad.</Text>

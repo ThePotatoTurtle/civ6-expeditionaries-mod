@@ -1,5 +1,5 @@
 [h1]Volunteer & Expeditionary Forces[/h1]
-[i]Version 0.6.0-dev (development build). Requires Gathering Storm.[/i]
+[i]Version 0.6.1-dev (development build). Requires Gathering Storm.[/i]
 
 Lend your combat units to the civs and city-states that fight your wars, and hand captured cities to your partners.
 
@@ -10,6 +10,8 @@ Lend your combat units to the civs and city-states that fight your wars, and han
 [*][b]City-State Expeditionary:[/b] lend a unit for 10 turns to a city-state you have met that fights one of your enemies.
 [*][b]Entrust:[/b] give a city you just captured to an ally, teammate or declared friend who was at war with its former owner (any partner for a Free City). Works for capitals and city-state cities too. The capture screen gets an Entrust button that lists who can take the city, or says why nobody can.
 [/list]
+
+To be sent, a unit must be at full health, stand in your own territory, not be embarked and have full movement points. A unit that has moved or attacked this turn has to wait until next turn.
 
 Units leave the map for 1 to 4 turns, depending on the distance between the two cities (up to 10, 20, 35 or more tiles on a Standard map, scaled by map size). They keep their promotions and any upgrade the host gives them. Their level may reset on arrival.
 

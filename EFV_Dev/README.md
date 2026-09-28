@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteer & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 0.6.0-dev.1, made for VEF 0.6.0-dev. Never enable it in a real game.
+Version 0.6.1-dev, made for VEF 0.6.1-dev. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -74,7 +74,7 @@ Units. These act on the selected unit. With Extra `rec=<id>` they act on that re
 | Damage = Amount / Heal | `damage` / `heal` | sets the damage to Amount / to 0 |
 | XP + Amount | `xp` | adds experience (default 15) |
 | Promote (Type) | `promote` | gives promotion Type, or the first one of the unit's class it lacks |
-| Finish moves | `finish` | uses up the unit's moves (tests the "no movement left" reason) |
+| Finish moves | `finish` | uses up the unit's moves (tests the "needs full movement points" reason) |
 | Corps on/off (Amt 0) | `corps` | makes the unit a Corps; Amount 0 turns it back |
 | Kill (Destroy) | `kill` | removes the unit |
 | Place at tx,ty (extra) | `place` | moves the unit to Extra `tx=<x>;ty=<y>` (no stacking or terrain check) |

@@ -125,10 +125,11 @@ test("gameplay reads open borders from deals; FLAG_VOLUNTEER_FRIENDS_OB modes", 
 	H.ok(not EFV_HasOpenBordersFrom(0, 2), "OFF")
 	EFV_Config.FLAG_VOLUNTEER_FRIENDS_OB = "HAS_OB_FROM"
 	H.ok(EFV_HasOpenBordersFrom(0, 2), "legacy value behaves like DEALS")
-	-- Free Cities and ATTACKED in G use the G-safe paths.
+	-- Free Cities and the full-moves check (replaces ATTACKED) in G use the
+	-- G-safe paths (GetMovesRemaining / GetMaxMoves, A23).
 	H.eq(EFV_PlayerKind(62), "FREE_CITIES")
-	local u = H.unit(0, "UNIT_SWORDSMAN", 11, 10, { attacks = 0 })
-	H.contains(EFV_UnitSendReasons(u, 0, EFV_Records.Load()), "ATTACKED")
+	local u = H.unit(0, "UNIT_SWORDSMAN", 11, 10, { moves = 1 })
+	H.contains(EFV_UnitSendReasons(u, 0, EFV_Records.Load()), "NOT_FULL_MOVES")
 	H.clean()
 end)
 

@@ -33,8 +33,8 @@ function EFV_Rules.SendReasons(pUnit)
 	if pUnit:GetDamage() > 0 then
 		reasons[#reasons + 1] = "DAMAGED"
 	end
-	if pUnit:GetMovesRemaining() == 0 then
-		reasons[#reasons + 1] = "NO_MOVES"
+	if pUnit:GetMovesRemaining() < pUnit:GetMaxMoves() then
+		reasons[#reasons + 1] = "NOT_FULL_MOVES"
 	end
 	return reasons
 end
