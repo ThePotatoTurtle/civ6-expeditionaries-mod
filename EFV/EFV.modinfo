@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mod id="fcc83bd7-1abf-4d9a-bddb-01633574bf40" version="1">
+	<Properties>
+		<Name>LOC_EFV_MOD_TITLE</Name>
+		<Teaser>LOC_EFV_MOD_TEASER</Teaser>
+		<Description>LOC_EFV_MOD_DESCRIPTION</Description>
+		<Authors>VEF project</Authors>
+		<AffectsSavedGames>1</AffectsSavedGames>
+		<CompatibleVersions>2.0</CompatibleVersions>
+	</Properties>
+
+	<Dependencies>
+		<Mod id="4873eb62-8ccc-4574-b784-dda455e74e68" title="Expansion: Gathering Storm"/>
+	</Dependencies>
+
+	<ActionCriteria>
+		<Criteria id="EFV_XP2">
+			<GameCoreInUse>Expansion2</GameCoreInUse>
+		</Criteria>
+	</ActionCriteria>
+
+	<InGameActions>
+		<!-- 1. Notification types (PLAN 4.1). Default LoadOrder (GS data is -100). -->
+		<UpdateDatabase id="EFV_Data" criteria="EFV_XP2">
+			<File>Data/EFV_Notifications.sql</File>
+		</UpdateDatabase>
+
+		<!-- 2. Notification icon aliases (PLAN 4.1, D9). -->
+		<UpdateIcons id="EFV_Icons" criteria="EFV_XP2">
+			<File>Data/EFV_Icons.sql</File>
+		</UpdateIcons>
+
+		<!-- 3. In-game text (PLAN 4.2). -->
+		<UpdateText id="EFV_Text" criteria="EFV_XP2">
+			<File>Data/EFV_Text.xml</File>
+		</UpdateText>
+
+		<!-- 4. Modules for include(): shared (Config, Util, Rules), gameplay-only
+		     modules, the UI shared module, and the UnitFlagManager wrapper
+		     (imported like other ReplaceUIScript wrappers, e.g. GITM, Pirates). -->
+		<ImportFiles id="EFV_Imports" criteria="EFV_XP2">
+			<File>Scripts/EFV_Config.lua</File>
+			<File>Scripts/EFV_Util.lua</File>
+			<File>Scripts/EFV_Rules.lua</File>
+			<File>Scripts/EFV_Records.lua</File>
+			<File>Scripts/EFV_Units.lua</File>
+			<File>Scripts/EFV_Spawn.lua</File>
+			<File>Scripts/EFV_Notify.lua</File>
+			<File>Scripts/EFV_Transit.lua</File>
+			<File>Scripts/EFV_Lifecycle.lua</File>
+			<File>Scripts/EFV_Entrust.lua</File>
+			<File>UI/EFV_UIShared.lua</File>
+			<File>UI/EFV_UnitFlagManager.lua</File>
+		</ImportFiles>
+
+		<!-- 5. Gameplay entry point (PLAN 1.7, 2.11). -->
+		<AddGameplayScripts id="EFV_Gameplay" criteria="EFV_XP2">
+			<File>Scripts/EFV_Gameplay.lua</File>
+		</AddGameplayScripts>
+
+		<!-- 6. UI contexts (PLAN 3.2-3.6). With the E2 fallback (T24 fails)
+		     remove UI/EFV_EntrustPopup.xml from this list. -->
+		<AddUserInterfaces id="EFV_UI" criteria="EFV_XP2">
+			<Properties>
+				<Context>InGame</Context>
+			</Properties>
+			<File>UI/EFV_UnitActions.xml</File>
+			<File>UI/EFV_DestinationPicker.xml</File>
+			<File>UI/EFV_EntrustPopup.xml</File>
+			<File>UI/EFV_Tracker.xml</File>
+		</AddUserInterfaces>
+
+		<!-- 7. Unit flag badge wrapper (PLAN 3.5, D8). LoadOrder 1000: above CQUI (50)
+		     and Better Builder Charges (666), below Gift It To Me (13066).
+		     Drop this action if EFV_Config.FLAG_FLAG_BADGES is set to false. -->
+		<ReplaceUIScript id="EFV_UnitFlags" criteria="EFV_XP2">
+			<Properties>
+				<LoadOrder>1000</LoadOrder>
+				<LuaContext>UnitFlagManager</LuaContext>
+				<LuaReplace>UI/EFV_UnitFlagManager.lua</LuaReplace>
+			</Properties>
+		</ReplaceUIScript>
+
+		<!-- 8. E2 FALLBACK ONLY (T24 fails; EFV_Config.FLAG_ENTRUST_UI = "REPLACE").
+		     To activate: uncomment both actions, add UI/RazeCity.xml (a copy of the
+		     base RazeCity.xml with an EFV_EntrustStack) to Files, and remove
+		     UI/EFV_EntrustPopup.xml from action 6.
+		<ReplaceUIScript id="EFV_RazeCity" criteria="EFV_XP2">
+			<Properties>
+				<LoadOrder>1000</LoadOrder>
+				<LuaContext>RazeCity</LuaContext>
+				<LuaReplace>UI/EFV_RazeCity.lua</LuaReplace>
+			</Properties>
+		</ReplaceUIScript>
+		<ImportFiles id="EFV_RazeCityXml" criteria="EFV_XP2">
+			<File>UI/RazeCity.xml</File>
+		</ImportFiles>
+		-->
+	</InGameActions>
+
+	<!-- Mod browser text (front end). These keys are defined only here, not in
+	     Data/EFV_Text.xml (workshop pattern, e.g. WS 3323036834). -->
+	<LocalizedText>
+		<Text id="LOC_EFV_MOD_TITLE">
+			<en_US>Volunteer &amp; Expeditionary Forces v0.6.0-dev</en_US>
+		</Text>
+		<Text id="LOC_EFV_MOD_TEASER">
+			<en_US>Lend combat units to allies, friends and city-states as Expeditionary Forces or Volunteers, and hand captured cities to your partners.</en_US>
+		</Text>
+		<Text id="LOC_EFV_MOD_DESCRIPTION">
+			<en_US>Version 0.6.0-dev (development build).[NEWLINE][NEWLINE]Lend combat units to the civs and city-states that fight your wars. Expeditionary Forces serve an ally, teammate or declared friend for 20 turns under their control. Volunteers stay yours, with no time limit, and you can recall them after 10 turns. City-State Expeditionary units serve a city-state for 10 turns. Units leave the map for 1 to 4 turns and keep their promotions. Expeditionary and City-State units are free for a 1-turn trip, then cost 10 to 30% of the unit's gold price; Volunteers cost 20 to 50%. The host does not need the tech for a unit it receives. When the service ends, a unit must be on the host's land or yours, or it gets 5 turns of grace and then mutinies (20 damage per turn). The VEF button on the launch bar lists every unit you sent or received, and a red banner warns you while one has to get back.[NEWLINE][NEWLINE]Entrust: when you capture a city, the capture screen can give it for good to an ally, teammate or declared friend who was at war with its former owner (any partner for a Free City).[NEWLINE][NEWLINE]Requires Gathering Storm. VEF replaces the unit flag script with a thin wrapper for its badges; Gift It To Me and other mods that replace the same script can hide the badges, and everything else still works. CQUI and multiplayer have not been tested.[NEWLINE][NEWLINE]Known limitations:[NEWLINE]- The new owner of an entrusted city takes no extra penalty and gets no loyalty help. A matching grievance penalty is planned but needs a game function that does not exist yet.[NEWLINE]- Units keep their promotions when they arrive or come home, but their level may reset.[NEWLINE]- A unit whose owner has none of its strategic resource does not heal (a game rule), lent units included. VEF warns about it.[NEWLINE]- A host can merge a lent unit into a Corps or Army. An absorbed unit is lost to you; a surviving unit comes home alone.[NEWLINE]- If a host is eliminated, its lent units come home as they were when its last city fell. A unit killed in that fight is lost.[NEWLINE]- Volunteers lapse when the partnership or the shared war ends: 5 turns of grace, then mutiny. They never come home on their own, but on your land or the partner's the countdown waits until you recall them.[NEWLINE]- Levied units and units another player gave you cannot be sent.</en_US>
+		</Text>
+	</LocalizedText>
+
+	<Files>
+		<File>Data/EFV_Notifications.sql</File>
+		<File>Data/EFV_Icons.sql</File>
+		<File>Data/EFV_Text.xml</File>
+		<File>Scripts/EFV_Config.lua</File>
+		<File>Scripts/EFV_Util.lua</File>
+		<File>Scripts/EFV_Rules.lua</File>
+		<File>Scripts/EFV_Records.lua</File>
+		<File>Scripts/EFV_Units.lua</File>
+		<File>Scripts/EFV_Spawn.lua</File>
+		<File>Scripts/EFV_Notify.lua</File>
+		<File>Scripts/EFV_Transit.lua</File>
+		<File>Scripts/EFV_Lifecycle.lua</File>
+		<File>Scripts/EFV_Entrust.lua</File>
+		<File>Scripts/EFV_Gameplay.lua</File>
+		<File>UI/EFV_UIShared.lua</File>
+		<File>UI/EFV_UnitActions.xml</File>
+		<File>UI/EFV_UnitActions.lua</File>
+		<File>UI/EFV_DestinationPicker.xml</File>
+		<File>UI/EFV_DestinationPicker.lua</File>
+		<File>UI/EFV_EntrustPopup.xml</File>
+		<File>UI/EFV_EntrustPopup.lua</File>
+		<File>UI/EFV_Tracker.xml</File>
+		<File>UI/EFV_Tracker.lua</File>
+		<File>UI/EFV_UnitFlagManager.lua</File>
+		<File>UI/EFV_RazeCity.lua</File>
+	</Files>
+</Mod>

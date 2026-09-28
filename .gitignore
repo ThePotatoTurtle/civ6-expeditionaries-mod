@@ -1,0 +1,21 @@
+# Internal design and research docs (not public)
+EFV_mod_spec.md
+PLAN.md
+SPIKES.md
+DECISIONS.md
+FUTURE.md
+INTEGRATION_NOTES*.md
+preview_discord.md
+research/
+spike/
+EFV/INTERFACES.md
+EFV/TESTING_*.md
+
+# Local tooling state
+.claude/
+__pycache__/
+*.pyc
+*.log
+
+# Generated from the local game database (Firaxis data, not redistributed); run_tests.py rebuilds it
+tests/offline/data/gameinfo_data.lua

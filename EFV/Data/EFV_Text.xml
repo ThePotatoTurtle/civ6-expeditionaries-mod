@@ -1,0 +1,712 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ======================================================================
+     EFV_Text.xml  (modinfo InGameActions UpdateText EFV_Text)
+     Owner: WP1.6 (complete key set for all phases; later phases may reword).
+     Format (PLAN 4.2, R4 7): <Row Tag="LOC_EFV_..." Language="en_US">.
+     Plurals: {1_Num : plural 1?turn; other?turns;} (base-game syntax).
+
+     NOT here: LOC_EFV_MOD_TITLE / _TEASER / _DESCRIPTION live in the
+     EFV.modinfo <LocalizedText> block (INTERFACES note 10).
+
+     ARGUMENT ORDER (Locale.Lookup(key, a1, a2, ...)). Names are strings
+     already localized by the caller; N values are numbers.
+
+     Notifications (EFV_Notify.Queue args array; the SAME array is used for
+     _MESSAGE and _SUMMARY; _MESSAGE headlines take no arguments).
+     Order = order of first appearance in the spec 14.3 text:
+       DEPARTED         1 Unit, 2 City (destination), 3 N transit turns
+       ARRIVED          1 Unit, 2 Sender civ, 3 City
+       SPAWN_BLOCKED    1 Unit, 2 City
+       EXPIRY_SOON      1 Unit, 2 N turns left, 3 Sender civ
+       GRACE            1 Unit, 2 Sender civ, 3 N grace turns left
+       MUTINY           1 Unit, 2 N turns until destroyed, 3 Sender civ
+       MUTINY_DEATH     1 Unit
+         D9 alert types (Phase 2): the texts above go to the RECIPIENT (the
+         unit's owner). The SENDER gets LOC_<type>_SENDER_MESSAGE / _SUMMARY
+         (EXPIRY_SOON, GRACE, MUTINY) with the same argument order, but the
+         civ argument is the RECIPIENT civ. Lapsed Volunteers (owned by the
+         sender, Phase 3) get only the _SENDER texts.
+       RETURNING        1 Unit, 2 City (return city), 3 N transit turns
+       RETURNED         1 Unit, 2 City
+       REROUTED         1 City (lost), 2 Unit, 3 NewCity
+       VOLUNTEER_LAPSE  1 Recipient civ, 2 N grace turns
+       ENTRUSTED        1 Capturer civ, 2 City, 3 Recipient civ
+       ACCESS_LAPSE     1 Recipient civ, 2 N grace turns          (added)
+       UNIT_LOST        1 Unit, 2 loss text = Locale.Lookup(LOC_EFV_LOSS_*) (added)
+       MERGED           1 Unit (base text); variants _SURVIVOR / _ABSORBED /
+                        _VOLUNTEER: 1 Unit, 2 Sender civ, 3 Recipient civ (Phase 5)
+       REVERTED         1 Unit, 2 Sender civ, 3 Recipient civ      (added)
+       REQUEST_FAILED   1 reason text = Locale.Lookup(LOC_EFV_REASON_<code>, ...) (added)
+       LAPSE_CANCELLED  1 Recipient civ, 2 Unit                    (added)
+       LAPSE_PAUSED     1 Unit, 2 Recipient civ, 3 State text = Locale.Lookup(
+                        LOC_EFV_STATE_GRACE / _MUTINY, N) (added 0.5.1, note 29)
+       GRACE / MUTINY _VOLUNTEER variants (lapsed Volunteers, 0.5.1): the
+                        _SENDER argument order (civ = the recipient)
+     (Matches EFV_Transit.lua / EFV_Lifecycle.lua as of WP1.4; the types
+     not yet implemented follow the same rule.)
+     Other keys (matching the UI call sites in UI/*.lua):
+       LOC_EFV_REASON_GOLD              1 fee (UI also passes 2 = gold balance, unused)
+       LOC_EFV_REASON_FEE_CHANGED       1 new fee
+       LOC_EFV_REASON_RECALL_MIN_TURNS  1 N turns until recall is allowed
+       LOC_EFV_REASON_NOT_PARTNER, _VOL_NEEDS_ACCESS, _CS_NOT_MET,
+         _AT_WAR_WITH_RECIPIENT, _NO_COMMON_WAR
+                                        1 recipient name(s) (EFV_UIShared
+                                          NAME_REASON_LIST; comma-joined list
+                                          in the Send-button summary)
+       LOC_EFV_STATE_*                  1 N (turns; see each row); _BLOCKED,
+                                          _DEPLOYED_EXPIRED, _DEPLOYED_VOLUNTEER_READY
+                                          take none
+       LOC_EFV_LAPSE_WAR / _PARTNER     none (appended to the state text)
+       LOC_EFV_STATE_GRACE_PAUSED / _MUTINY_PAUSED
+                                        1 N (grace turns left / turns until
+                                          destroyed once the mutiny resumes)
+       LOC_EFV_DURATION_TURNS           1 N
+       LOC_EFV_FEE_GOLD                 1 fee (> 0); LOC_EFV_FEE_FREE none
+                                        (EFV_UI_FeeText, 0.5.2: a fee of 0)
+       LOC_EFV_CONFIRM_SEND             1 Unit, 2 City, 3 Recipient civ, 4 Fee
+                                        text (EFV_UI_FeeText: "Free" or
+                                        "N [ICON_Gold] Gold"),
+                                        5 Transit turns, 6 Duration text,
+                                        7 Force label (EFV_DestinationPicker.lua)
+       LOC_EFV_CONFIRM_RECALL           1 Unit
+       LOC_EFV_ENTRUST_TO               1 Recipient civ
+       LOC_EFV_ENTRUST_TO_TT            1 City, 2 Recipient civ
+       LOC_EFV_ENTRUST_CONFIRM          1 City, 2 Recipient civ (armed row tooltip)
+       LOC_EFV_ENTRUST_CONFIRM_BUTTON   1 Recipient civ (two-click confirm, PLAN 3.4)
+       LOC_EFV_ENTRUST_TT_RECIPIENTS    1 comma list of recipient civs
+       LOC_EFV_ENTRUST_NOT_AT_WAR       1 comma list of partner civs, 2 former owner civ
+       LOC_EFV_REASON_ENTRUST_NO_PARTNER 1 former owner civ
+       LOC_EFV_BANNER_ALERT             1 N units in grace or mutiny, 2 M in mutiny
+       LOC_EFV_BANNER_TT_LINE           1 Unit, 2 State text (EFV_UI_StateText)
+       LOC_EFV_FLAG_TT                  1 Force label, 2 Unit, 3 Sender civ,
+                                        4 Recipient civ, 5 State text
+                                        (EFV_UI_StatusTooltip)
+       LOC_EFV_WARN_NO_HEAL             1 owner civ, 2 resource (icon + name) (0.6.0)
+       LOC_EFV_PLAYER_GENERIC           none (G passes the player ID, UI passes
+                                          nothing; the text ignores it)
+     Action tooltips: the UI shows Lookup(key) .. [NEWLINE] .. Lookup(key_TT),
+     so the _TT texts do not repeat the action name.
+     All other keys take no arguments.
+     ====================================================================== -->
+<GameData>
+	<LocalizedText>
+		<!-- ============================================================
+		     Unit actions (spec 14.1, PLAN 3.2)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_ACTION_SEND_EXPEDITIONARY" Language="en_US">
+			<Text>Send as Expeditionary</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_SEND_EXPEDITIONARY_TT" Language="en_US">
+			<Text>Lend this unit to an ally, teammate or declared friend who shares one of your wars. The unit travels off-map, then serves under their control for 20 turns and returns to you. It keeps its promotions; experience is kept only up to its next promotion. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_SEND_VOLUNTEER" Language="en_US">
+			<Text>Send as Volunteers</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_SEND_VOLUNTEER_TT" Language="en_US">
+			<Text>Send this unit to fight alongside an ally, teammate, or declared friend who grants you open borders, while you share a war. You keep control and pay its upkeep. It serves with no time limit and can be recalled after 10 turns. Costs a one-time [ICON_Gold] Gold fee (higher for farther destinations) plus normal maintenance while in transit.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_SEND_CS" Language="en_US">
+			<Text>Send to City-State</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_SEND_CS_TT" Language="en_US">
+			<Text>Lend this unit to a city-state you have met that is at war with one of your enemies. The city-state controls it for 10 turns, then it returns to you. It keeps its promotions; experience is kept only up to its next promotion. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_RECALL" Language="en_US">
+			<Text>Recall Volunteers</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_RECALL_TT" Language="en_US">
+			<Text>Bring this unit home. It leaves the map, travels back and reappears near its home city.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_STATUS" Language="en_US">
+			<Text>Lent Unit</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ACTION_STATUS_TT" Language="en_US">
+			<Text>This unit is serving abroad under a Volunteer &amp; Expeditionary Forces agreement.</Text>
+		</Row>
+		<!-- Send-button tooltip (EFV_UnitActions.lua): heading of the destination
+		     summary, followed by the distinct row reasons; and the line shown when
+		     there is no candidate recipient at all (also the picker's EmptyLabel). -->
+		<Row Tag="LOC_EFV_SEND_NO_DESTINATION" Language="en_US">
+			<Text>No eligible destination:</Text>
+		</Row>
+		<Row Tag="LOC_EFV_SEND_NO_RECIPIENTS" Language="en_US">
+			<Text>No eligible recipients: you need an ally, teammate, declared friend or met city-state that shares one of your wars.</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Merge warnings (D3 ruling, PLAN 3.2)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_WARN_MERGE_EXPEDITIONARY" Language="en_US">
+			<Text>If this unit is absorbed into a Corps or Army, it is lost to its sender and never returns. If it is the surviving unit, it returns alone; the formation is not kept.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_WARN_MERGE_VOLUNTEER" Language="en_US">
+			<Text>Merging ends Volunteer status: the unit will not be returned or recalled.</Text>
+		</Row>
+		<!-- Heal gate (designer ruling "Strategic-resource heal gate", 0.6.0):
+		     picker row tooltip / confirm dialog, flag, tracker and unit-panel
+		     status tooltips. 1 owner civ, 2 resource (icon + name). -->
+		<Row Tag="LOC_EFV_WARN_NO_HEAL" Language="en_US">
+			<Text>Will not heal: {1_Civ} has no {2_Resource}. A unit that needs a strategic resource cannot heal while its owner has none of it.</Text>
+		</Row>
+		<!-- Status button (WP5.4): heading of the merge warning section -->
+		<Row Tag="LOC_EFV_WARN_MERGE_HEADER" Language="en_US">
+			<Text>Before merging into a Corps or Army:</Text>
+		</Row>
+		<Row Tag="LOC_EFV_STATUS_MERGED_SURVIVOR" Language="en_US">
+			<Text>This unit already leads a merged formation; it will return as a single unit.</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Reason codes (PLAN Appendix B, INTERFACES 8). One line each,
+		     shown in red by EFV_UI_ReasonsText.
+		     ============================================================ -->
+		<!-- unit level -->
+		<Row Tag="LOC_EFV_REASON_NOT_HUMAN_MAJOR" Language="en_US">
+			<Text>Only a human player's major civilization can send units.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_NOT_OWNER" Language="en_US">
+			<Text>You do not own this unit.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_CLASS_NEVER" Language="en_US">
+			<Text>Only land and naval combat units can be sent.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_FORMATION" Language="en_US">
+			<Text>Units in a Corps, Army, Fleet or Armada cannot be sent.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_DAMAGED" Language="en_US">
+			<Text>The unit is not at full health.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_NOT_OWN_TERRITORY" Language="en_US">
+			<Text>The unit must be in your own territory.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_EMBARKED" Language="en_US">
+			<Text>The unit is embarked.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_NO_MOVES" Language="en_US">
+			<Text>The unit has no movement left this turn.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_ATTACKED" Language="en_US">
+			<Text>The unit has attacked this turn.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_ALREADY_TRACKED" Language="en_US">
+			<Text>The unit is already serving abroad.</Text>
+		</Row>
+		<!-- destination level -->
+		<Row Tag="LOC_EFV_REASON_NOT_PARTNER" Language="en_US">
+			<Text>Not an eligible partner (needs an alliance, a shared team, or a declared friendship): {1_Name}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_VOL_NEEDS_ACCESS" Language="en_US">
+			<Text>Volunteers need an alliance, a shared team, or open borders from: {1_Name}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_CS_NOT_MET" Language="en_US">
+			<Text>City-state not met: {1_Name}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_AT_WAR_WITH_RECIPIENT" Language="en_US">
+			<Text>You are at war with: {1_Name}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_NO_COMMON_WAR" Language="en_US">
+			<Text>No common enemy (Barbarians do not count): {1_Name}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_CITY_NOT_OWNED" Language="en_US">
+			<Text>This city no longer belongs to the recipient.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_NOT_REVEALED" Language="en_US">
+			<Text>You have not discovered this city.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_GOLD" Language="en_US">
+			<Text>Not enough [ICON_Gold] Gold (fee {1_Num}).</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_NAVAL_NO_SPAWN" Language="en_US">
+			<Text>No free water tile near this city for a naval unit.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_FEE_CHANGED" Language="en_US">
+			<Text>The fee has risen to {1_Num} [ICON_Gold] Gold since the list was opened. Try again.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_REQ_STALE" Language="en_US">
+			<Text>The unit or city is no longer available.</Text>
+		</Row>
+		<!-- recall -->
+		<Row Tag="LOC_EFV_REASON_RECALL_MIN_TURNS" Language="en_US">
+			<Text>Volunteers can be recalled in {1_Num} {1_Num : plural 1?turn; other?turns;} (minimum service 10 turns).</Text>
+		</Row>
+		<!-- LOC_EFV_REASON_RECALL_DAMAGED removed in WP7.3: the code is retired
+		     (designer answer: recall needs no full HP) and never emitted;
+		     tools/validate_data.py RETIRED_REASON_CODES exempts it from the
+		     PLAN Appendix B check. -->
+		<Row Tag="LOC_EFV_REASON_RECALL_TERRITORY" Language="en_US">
+			<Text>The unit must be in your territory or its host's territory to be recalled.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_RECALL_NOT_VOLUNTEER" Language="en_US">
+			<Text>Only Volunteers can be recalled.</Text>
+		</Row>
+		<!-- entrust -->
+		<Row Tag="LOC_EFV_REASON_ENTRUST_NO_PARTNER" Language="en_US">
+			<Text>Nobody can take this city: none of your allies, teammates or declared friends was at war with {1_Name} when you captured it.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_STALE" Language="en_US">
+			<Text>A city can only be entrusted in the capture decision, on the turn you captured it.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_RECIPIENT_INVALID" Language="en_US">
+			<Text>That civilization can no longer receive the city (it was eliminated or is now at war with you).</Text>
+		</Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_FAILED" Language="en_US">
+			<Text>The city could not be transferred.</Text>
+		</Row>
+		<!-- interim (INTERFACES note 9): remove before release -->
+		<Row Tag="LOC_EFV_REASON_NOT_IMPLEMENTED" Language="en_US">
+			<Text>Not available yet in this version.</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Forces, states, durations (PLAN 3.1, spec 14.4)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_FORCE_EXPEDITIONARY" Language="en_US">
+			<Text>Expeditionary Force</Text>
+		</Row>
+		<Row Tag="LOC_EFV_FORCE_VOLUNTEER" Language="en_US">
+			<Text>Volunteers</Text>
+		</Row>
+		<Row Tag="LOC_EFV_FORCE_CS_EXPEDITIONARY" Language="en_US">
+			<Text>City-State Expeditionary</Text>
+		</Row>
+		<!-- {1_Num}: turns until arrival -->
+		<Row Tag="LOC_EFV_STATE_OUTBOUND" Language="en_US">
+			<Text>In transit, arrives in {1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
+		</Row>
+		<!-- {1_Num}: service turns left (Expeditionary / City-State) -->
+		<Row Tag="LOC_EFV_STATE_DEPLOYED" Language="en_US">
+			<Text>Deployed, {1_Num} {1_Num : plural 1?turn; other?turns;} left</Text>
+		</Row>
+		<!-- {1_Num}: turns until recall is allowed (Volunteers) -->
+		<Row Tag="LOC_EFV_STATE_DEPLOYED_VOLUNTEER" Language="en_US">
+			<Text>Deployed (Volunteers, recall in {1_Num} {1_Num : plural 1?turn; other?turns;})</Text>
+		</Row>
+		<Row Tag="LOC_EFV_STATE_DEPLOYED_VOLUNTEER_READY" Language="en_US">
+			<Text>Deployed (Volunteers, can be recalled)</Text>
+		</Row>
+		<Row Tag="LOC_EFV_STATE_DEPLOYED_EXPIRED" Language="en_US">
+			<Text>Service ended, must return</Text>
+		</Row>
+		<Row Tag="LOC_EFV_STATE_BLOCKED" Language="en_US">
+			<Text>Waiting for a free tile to disembark</Text>
+		</Row>
+		<!-- {1_Num}: grace turns left before mutiny -->
+		<Row Tag="LOC_EFV_STATE_GRACE" Language="en_US">
+			<Text>Must return: mutiny in {1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
+		</Row>
+		<!-- {1_Num}: turns until the unit is destroyed -->
+		<Row Tag="LOC_EFV_STATE_MUTINY" Language="en_US">
+			<Text>Mutiny: destroyed in {1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
+		</Row>
+		<!-- Paused lapse (0.5.1, INTERFACES note 29): a lapsed Volunteer on the
+		     sender's or the recipient's land. {1_Num}: grace turns left /
+		     turns until destroyed once the mutiny resumes. -->
+		<Row Tag="LOC_EFV_STATE_GRACE_PAUSED" Language="en_US">
+			<Text>Grace {1_Num} (paused): recall it now. The countdown resumes if it leaves your or the partner's territory.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_STATE_MUTINY_PAUSED" Language="en_US">
+			<Text>Mutiny {1_Num} (paused): recall it now. If it leaves your or the partner's territory, it takes 20 damage per turn again.</Text>
+		</Row>
+		<!-- {1_Num}: turns until arrival home -->
+		<Row Tag="LOC_EFV_STATE_RETURNING" Language="en_US">
+			<Text>Returning, arrives in {1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
+		</Row>
+		<!-- appended after the state text of a lapsed Volunteer (rec.lapseReason) -->
+		<Row Tag="LOC_EFV_LAPSE_WAR" Language="en_US">
+			<Text>(lapsed: no common war)</Text>
+		</Row>
+		<Row Tag="LOC_EFV_LAPSE_PARTNER" Language="en_US">
+			<Text>(lapsed: no longer an eligible partner)</Text>
+		</Row>
+		<Row Tag="LOC_EFV_DURATION_TURNS" Language="en_US">
+			<Text>{1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_DURATION_UNLIMITED" Language="en_US">
+			<Text>Unlimited</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Destination picker (spec 14.2, PLAN 3.3)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_PICKER_TITLE" Language="en_US">
+			<Text>Choose Destination</Text>
+		</Row>
+		<Row Tag="LOC_EFV_COL_RECIPIENT" Language="en_US">
+			<Text>Recipient</Text>
+		</Row>
+		<Row Tag="LOC_EFV_COL_CITY" Language="en_US">
+			<Text>City</Text>
+		</Row>
+		<Row Tag="LOC_EFV_COL_DISTANCE" Language="en_US">
+			<Text>Distance</Text>
+		</Row>
+		<Row Tag="LOC_EFV_COL_TRANSIT" Language="en_US">
+			<Text>Transit</Text>
+		</Row>
+		<Row Tag="LOC_EFV_COL_FEE" Language="en_US">
+			<Text>Fee</Text>
+		</Row>
+		<Row Tag="LOC_EFV_COL_DURATION" Language="en_US">
+			<Text>Duration</Text>
+		</Row>
+		<!-- 0.5.2 fee ruling: band 1 is free for Expeditionary and City-State
+		     Expeditionary; EFV_UI_FeeText shows "Free" for a fee of 0. -->
+		<Row Tag="LOC_EFV_FEE_FREE" Language="en_US">
+			<Text>Free</Text>
+		</Row>
+		<Row Tag="LOC_EFV_FEE_GOLD" Language="en_US">
+			<Text>{1_Num} [ICON_Gold] Gold</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CONFIRM_SEND" Language="en_US">
+			<Text>Send {1_Unit} to {2_City} ({3_Recipient}) as {7_Force}?[NEWLINE][NEWLINE]Fee: {4_Fee}[NEWLINE]Transit: {5_Turns} {5_Turns : plural 1?turn; other?turns;}[NEWLINE]Service: {6_Duration}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CONFIRM_RECALL" Language="en_US">
+			<Text>Recall {1_Unit}? It leaves the map now and reappears near its home city when it arrives.</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Entrust (spec 12, PLAN 3.4)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_ENTRUST_HEADER" Language="en_US">
+			<Text>Entrust...</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_TO" Language="en_US">
+			<Text>Entrust to {1_Civ}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_TO_TT" Language="en_US">
+			<Text>Give {1_City} to {2_Civ} for good. Click once, then click again to confirm.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_TT" Language="en_US">
+			<Text>Give this city to a partner who is at war with its former owner. You take the normal penalty for capturing it; in this version the recipient takes none. There is no loyalty protection: if the new owner cannot hold the city, it may flip.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_TT_RECIPIENTS" Language="en_US">
+			<Text>Can receive it: {1_List}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_TT_DISABLED" Language="en_US">
+			<Text>Entrust is not available for this city.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_NOT_AT_WAR" Language="en_US">
+			<Text>Your partners ({1_List}) were not at war with {2_Name}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_NO_PARTNERS" Language="en_US">
+			<Text>You have no ally, teammate or declared friend among the major civilizations.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_CONFIRM" Language="en_US">
+			<Text>Entrust {1_City} to {2_Civ}? The city becomes theirs at once and this cannot be undone. Click again to confirm.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_CONFIRM_BUTTON" Language="en_US">
+			<Text>Click again to entrust to {1_Civ}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_DISABLED_NO_PARTNER" Language="en_US">
+			<Text>Entrust (no eligible partner)</Text>
+		</Row>
+		<Row Tag="LOC_EFV_ENTRUST_DISABLED" Language="en_US">
+			<Text>Entrust (not available)</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Tracker, alert banner, unit flag (spec 14.4, 14.5; D9)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_TRACKER_TITLE" Language="en_US">
+			<Text>Volunteer &amp; Expeditionary Forces</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_COL_UNIT" Language="en_US">
+			<Text>Unit</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_COL_PARTNER" Language="en_US">
+			<Text>Partner</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_COL_FORCE" Language="en_US">
+			<Text>Force</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_COL_STATE" Language="en_US">
+			<Text>State</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_COL_TURNS" Language="en_US">
+			<Text>Turns</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_COL_DEST" Language="en_US">
+			<Text>Destination</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_EMPTY" Language="en_US">
+			<Text>No units sent or received.</Text>
+		</Row>
+		<!-- Tracker panel (WP7.2). State column: short labels; the turns column
+		     holds the number and the row tooltip the full sentence
+		     (LOC_EFV_STATE_*). Arguments:
+		       LOC_EFV_TRACKER_ST_LAPSE     1 State label (a lapsed Volunteer)
+		       LOC_EFV_TRACKER_ST_LAPSE_PAUSED 1 State label, 2 N (grace turns
+		                                    left / turns until destroyed; 0.5.1)
+		       LOC_EFV_TRACKER_TO / _FROM   1 Civ (partner)
+		       LOC_EFV_TRACKER_TT_TRANSIT   1 City (destination or return city)
+		       LOC_EFV_TRACKER_SUMMARY      1 N sent, 2 N received, 3 N must return
+		     all other tracker keys: none. -->
+		<Row Tag="LOC_EFV_TRACKER_ST_OUTBOUND" Language="en_US">
+			<Text>Outbound</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_DEPLOYED" Language="en_US">
+			<Text>Deployed</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_EXPIRED" Language="en_US">
+			<Text>Service ended</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_GRACE" Language="en_US">
+			<Text>Grace</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_MUTINY" Language="en_US">
+			<Text>Mutiny</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_RETURNING" Language="en_US">
+			<Text>Returning</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_BLOCKED" Language="en_US">
+			<Text>Blocked</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_LAPSE" Language="en_US">
+			<Text>Lapse: {1_State}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_LAPSE_PAUSED" Language="en_US">
+			<Text>Lapse: {1_State} {2_Num} (paused)</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_TO" Language="en_US">
+			<Text>To {1_Civ}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_FROM" Language="en_US">
+			<Text>From {1_Civ}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_TT_SELECT" Language="en_US">
+			<Text>Click: select this unit and show it on the map.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_TT_LOOK" Language="en_US">
+			<Text>Another player controls this unit. Click: show it on the map if you can see it.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_TT_TRANSIT" Language="en_US">
+			<Text>Off the map, travelling to {1_City}. Click: show {1_City} on the map.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_SUMMARY" Language="en_US">
+			<Text>Sent: {1_Num}   Received: {2_Num}   Must return: {3_Num}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_BANNER_ALERT" Language="en_US">
+			<Text>VEF: {1_Num} {1_Num : plural 1?unit; other?units;} must return - {2_Num} in mutiny</Text>
+		</Row>
+		<!-- one line of the banner tooltip per unit in grace or mutiny -->
+		<Row Tag="LOC_EFV_BANNER_TT_LINE" Language="en_US">
+			<Text>{1_Unit}: {2_State}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_BANNER_ALERT_TT" Language="en_US">
+			<Text>Click: show the next unit that must return. Right-click: open or close the list of your sent and received units (also on the VEF button of the launch bar).</Text>
+		</Row>
+		<Row Tag="LOC_EFV_FLAG_TT" Language="en_US">
+			<Text>{2_Unit}: {1_Force}[NEWLINE]From {3_Sender} to {4_Recipient}[NEWLINE]{5_State}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_BADGE_EXP" Language="en_US">
+			<Text>EXP</Text>
+		</Row>
+		<Row Tag="LOC_EFV_BADGE_VOL" Language="en_US">
+			<Text>VOL</Text>
+		</Row>
+		<Row Tag="LOC_EFV_BADGE_CS" Language="en_US">
+			<Text>CS</Text>
+		</Row>
+		<Row Tag="LOC_EFV_PLAYER_GENERIC" Language="en_US">
+			<Text>Unknown Player</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Loss reasons (argument 2 of EFV_NOTIF_UNIT_LOST)
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_LOSS_KILLED" Language="en_US">
+			<Text>It was killed in combat.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_LOSS_DISBANDED" Language="en_US">
+			<Text>It was disbanded.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_LOSS_MERGED_ABSORBED" Language="en_US">
+			<Text>It was absorbed into a Corps or Army.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_LOSS_NO_CITY" Language="en_US">
+			<Text>Its sender has no city left for it to return to.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_LOSS_RECIPIENT_GONE" Language="en_US">
+			<Text>Its host was eliminated and no record of the unit was left to bring it home.</Text>
+		</Row>
+
+		<!-- ============================================================
+		     Notifications (spec 14.3; PLAN 4.1; D9). _MESSAGE = headline
+		     (no arguments), _SUMMARY = body. Argument order: header.
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_NOTIF_DEPARTED_MESSAGE" Language="en_US">
+			<Text>Unit Departed</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_DEPARTED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} departed for {2_City}. Arrives in {3_Num} {3_Num : plural 1?turn; other?turns;}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_MESSAGE" Language="en_US">
+			<Text>Unit Arrived</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} from {2_Sender} has arrived at {3_City}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_SPAWN_BLOCKED_MESSAGE" Language="en_US">
+			<Text>Arrival Delayed</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_SPAWN_BLOCKED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} cannot disembark at {2_City}: no free tile. Retrying next turn.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_MESSAGE" Language="en_US">
+			<Text>Service Ending Soon</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_SUMMARY" Language="en_US">
+			<Text>{1_Unit}'s service ends in {2_Num} {2_Num : plural 1?turn; other?turns;}. Keep it inside your or {3_Sender}'s territory to return it.</Text>
+		</Row>
+		<!-- sender text: 1 Unit, 2 N turns left, 3 Recipient civ -->
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_SENDER_MESSAGE" Language="en_US">
+			<Text>Service Ending Soon</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_SENDER_SUMMARY" Language="en_US">
+			<Text>The service of your {1_Unit} with {3_Recipient} ends in {2_Num} {2_Num : plural 1?turn; other?turns;}. It returns home by itself if it is inside {3_Recipient}'s or your territory then; otherwise a grace period starts, after which it mutinies.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_GRACE_MESSAGE" Language="en_US">
+			<Text>WARNING: Unit Must Return</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_GRACE_SUMMARY" Language="en_US">
+			<Text>[COLOR_RED]WARNING:[ENDCOLOR] {1_Unit} must return. Move it into your or {2_Sender}'s territory within {3_Num} {3_Num : plural 1?turn; other?turns;} or it will MUTINY and take 20 HP damage per turn.</Text>
+		</Row>
+		<!-- sender text: 1 Unit, 2 Recipient civ, 3 N grace turns left -->
+		<Row Tag="LOC_EFV_NOTIF_GRACE_SENDER_MESSAGE" Language="en_US">
+			<Text>WARNING: Your Unit Must Return</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_GRACE_SENDER_SUMMARY" Language="en_US">
+			<Text>[COLOR_RED]WARNING:[ENDCOLOR] Your {1_Unit} with {2_Recipient} must return. It must be inside {2_Recipient}'s or your territory within {3_Num} {3_Num : plural 1?turn; other?turns;} or it will MUTINY and take 20 HP damage per turn.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_MESSAGE" Language="en_US">
+			<Text>MUTINY</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_SUMMARY" Language="en_US">
+			<Text>[COLOR_RED]MUTINY:[ENDCOLOR] {1_Unit} is taking 20 damage per turn and cannot heal. It will be destroyed in {2_Num} {2_Num : plural 1?turn; other?turns;} unless moved into your or {3_Sender}'s territory.</Text>
+		</Row>
+		<!-- sender text: 1 Unit, 2 N turns until destroyed, 3 Recipient civ -->
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_SENDER_MESSAGE" Language="en_US">
+			<Text>MUTINY</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_SENDER_SUMMARY" Language="en_US">
+			<Text>[COLOR_RED]MUTINY:[ENDCOLOR] Your {1_Unit} with {3_Recipient} is taking 20 damage per turn and cannot heal. It will be destroyed in {2_Num} {2_Num : plural 1?turn; other?turns;} unless it enters {3_Recipient}'s or your territory.</Text>
+		</Row>
+		<!-- Lapsed Volunteers (sender only, 0.5.1, note 29): same arguments as
+		     the _SENDER texts. Volunteers never return by themselves: on your
+		     or the partner's land the countdown pauses and they must be
+		     recalled. -->
+		<Row Tag="LOC_EFV_NOTIF_GRACE_VOLUNTEER_MESSAGE" Language="en_US">
+			<Text>WARNING: Recall Your Volunteers</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_GRACE_VOLUNTEER_SUMMARY" Language="en_US">
+			<Text>[COLOR_RED]WARNING:[ENDCOLOR] Your {1_Unit} serving with {2_Recipient} must come home. Move it into your or {2_Recipient}'s territory and recall it. Outside that territory it will MUTINY in {3_Num} {3_Num : plural 1?turn; other?turns;} (20 HP damage per turn); inside, the countdown is paused.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_VOLUNTEER_MESSAGE" Language="en_US">
+			<Text>MUTINY</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_VOLUNTEER_SUMMARY" Language="en_US">
+			<Text>[COLOR_RED]MUTINY:[ENDCOLOR] Your {1_Unit} serving with {3_Recipient} is taking 20 damage per turn and cannot heal. It will be destroyed in {2_Num} {2_Num : plural 1?turn; other?turns;}. Move it into {3_Recipient}'s or your territory (the mutiny pauses there) and recall it.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_DEATH_MESSAGE" Language="en_US">
+			<Text>Unit Lost to Mutiny</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_DEATH_SUMMARY" Language="en_US">
+			<Text>{1_Unit} was lost to mutiny.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_MESSAGE" Language="en_US">
+			<Text>Unit Returning</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_SUMMARY" Language="en_US">
+			<Text>{1_Unit} is returning to {2_City}. Arrives in {3_Num} {3_Num : plural 1?turn; other?turns;}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNED_MESSAGE" Language="en_US">
+			<Text>Unit Returned</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} has returned to {2_City}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_REROUTED_MESSAGE" Language="en_US">
+			<Text>Unit Rerouted</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_REROUTED_SUMMARY" Language="en_US">
+			<Text>{1_City} fell. {2_Unit} rerouted to {3_NewCity}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_VOLUNTEER_LAPSE_MESSAGE" Language="en_US">
+			<Text>Volunteers Must Return</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_VOLUNTEER_LAPSE_SUMMARY" Language="en_US">
+			<Text>You are no longer at war with any of {1_Recipient}'s enemies. Your Volunteers must come home: recall them from your or {1_Recipient}'s territory. They never return by themselves. Inside that territory the countdown is paused; elsewhere they MUTINY after {2_Num} {2_Num : plural 1?turn; other?turns;}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ENTRUSTED_MESSAGE" Language="en_US">
+			<Text>City Entrusted</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ENTRUSTED_SUMMARY" Language="en_US">
+			<Text>{1_Capturer} entrusted {2_City} to {3_Recipient}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ACCESS_LAPSE_MESSAGE" Language="en_US">
+			<Text>Volunteers Must Return</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ACCESS_LAPSE_SUMMARY" Language="en_US">
+			<Text>{1_Recipient} is no longer an eligible Volunteer partner (alliance, shared team, or declared friendship with open borders). If their open borders ended, your Volunteers are moved out of their territory. Your Volunteers must come home: recall them from your or {1_Recipient}'s territory. They never return by themselves. Inside that territory the countdown is paused; elsewhere they MUTINY after {2_Num} {2_Num : plural 1?turn; other?turns;}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_UNIT_LOST_MESSAGE" Language="en_US">
+			<Text>Lent Unit Lost</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_UNIT_LOST_SUMMARY" Language="en_US">
+			<Text>{1_Unit} was lost. {2_Reason}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_MESSAGE" Language="en_US">
+			<Text>Lent Unit Merged</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} was merged into a Corps or Army. An absorbed unit is lost to its sender; a surviving Expeditionary unit returns alone when its service ends; a merged Volunteer is no longer returned or recalled.</Text>
+		</Row>
+		<!-- D3 variants (Phase 5, WP5.2): 1 Unit, 2 Sender civ, 3 Recipient civ.
+		     _SURVIVOR / _ABSORBED go to the sender and the recipient (EXP / CS),
+		     _VOLUNTEER to the sender only. -->
+		<Row Tag="LOC_EFV_NOTIF_MERGED_SURVIVOR_MESSAGE" Language="en_US">
+			<Text>Lent Unit Merged</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_SURVIVOR_SUMMARY" Language="en_US">
+			<Text>{1_Unit} from {2_Sender} now leads a Corps or Army of {3_Recipient}. It keeps serving, but it returns to {2_Sender} as a single unit: the formation is not kept.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_ABSORBED_MESSAGE" Language="en_US">
+			<Text>Lent Unit Absorbed</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_ABSORBED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} from {2_Sender} was absorbed into a Corps or Army of {3_Recipient}. It is lost to {2_Sender} and will not return.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_VOLUNTEER_MESSAGE" Language="en_US">
+			<Text>Volunteer Status Ended</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_VOLUNTEER_SUMMARY" Language="en_US">
+			<Text>Your {1_Unit} serving with {3_Recipient} was merged into a Corps or Army. It is no longer a Volunteer: it will not be returned or recalled.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_REVERTED_MESSAGE" Language="en_US">
+			<Text>Lent Unit Reverted</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_REVERTED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} has reverted to {2_Sender}, because {2_Sender} and {3_Recipient} are now at war.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_REQUEST_FAILED_MESSAGE" Language="en_US">
+			<Text>Order Failed</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_REQUEST_FAILED_SUMMARY" Language="en_US">
+			<Text>The order could not be carried out: {1_Reason}</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_LAPSE_CANCELLED_MESSAGE" Language="en_US">
+			<Text>Volunteer Lapse Cancelled</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_LAPSE_CANCELLED_SUMMARY" Language="en_US">
+			<Text>{1_Recipient} is once again an eligible partner. The Volunteers' lapse is cancelled: {2_Unit} stays deployed.</Text>
+		</Row>
+		<!-- 0.5.1 (note 29): 1 Unit, 2 Recipient civ, 3 State text (LOC_EFV_STATE_GRACE / _MUTINY) -->
+		<Row Tag="LOC_EFV_NOTIF_LAPSE_PAUSED_MESSAGE" Language="en_US">
+			<Text>Volunteer Lapse Paused: Recall Now</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_LAPSE_PAUSED_SUMMARY" Language="en_US">
+			<Text>Your {1_Unit} serving with {2_Recipient} stands in your or {2_Recipient}'s territory, so its lapse is PAUSED ({3_State}). Recall it now. It never returns by itself, and the countdown resumes as soon as it leaves this territory.</Text>
+		</Row>
+	</LocalizedText>
+</GameData>

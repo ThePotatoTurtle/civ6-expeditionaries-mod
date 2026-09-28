@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Context Name="EFV_Panel">
+	<Container ID="Main" Size="200,200">
+		<Label ID="Title" String="LOC_EFV_PANEL_TITLE"/>
+		<!-- duplicate ID -->
+		<Label ID="Title" String=""/>
+	</Container>
+	<Instance Name="RowInstance">
+		<Label ID="RowLabel"/>
+	</Instance>
+</Context>

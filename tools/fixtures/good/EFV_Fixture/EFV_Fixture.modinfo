@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fixture mod for tools/test_tools.py: follows the PLAN 1.1 / 4.3 layout and must pass every check. -->
+<Mod id="0f6b6a8e-7c1e-4a55-9d1e-3c2b8a0e5f11" version="1">
+  <Properties>
+    <Name>LOC_EFV_MOD_TITLE</Name>
+    <Teaser>LOC_EFV_MOD_TEASER</Teaser>
+    <Description>LOC_EFV_MOD_DESCRIPTION</Description>
+    <Authors>VEF project</Authors>
+    <AffectsSavedGames>1</AffectsSavedGames>
+    <CompatibleVersions>2.0</CompatibleVersions>
+  </Properties>
+  <Dependencies>
+    <Mod id="4873eb62-8ccc-4574-b784-dda455e74e68" title="Expansion: Gathering Storm" />
+  </Dependencies>
+  <ActionCriteria>
+    <Criteria id="EFV_XP2">
+      <GameCoreInUse>Expansion2</GameCoreInUse>
+    </Criteria>
+  </ActionCriteria>
+  <InGameActions>
+    <UpdateDatabase id="EFV_Data" criteria="EFV_XP2">
+      <File>Data/EFV_Notifications.sql</File>
+    </UpdateDatabase>
+    <UpdateIcons id="EFV_Icons" criteria="EFV_XP2">
+      <File>Data/EFV_Icons.sql</File>
+    </UpdateIcons>
+    <UpdateText id="EFV_Text" criteria="EFV_XP2">
+      <File>Data/EFV_Text.xml</File>
+    </UpdateText>
+    <ImportFiles id="EFV_Imports" criteria="EFV_XP2">
+      <File>Scripts/EFV_Util.lua</File>
+      <File>Scripts/EFV_Rules.lua</File>
+      <File>UI/EFV_UIShared.lua</File>
+    </ImportFiles>
+    <AddGameplayScripts id="EFV_Gameplay" criteria="EFV_XP2">
+      <File>Scripts/EFV_Gameplay.lua</File>
+    </AddGameplayScripts>
+    <AddUserInterfaces id="EFV_UI" criteria="EFV_XP2">
+      <Properties>
+        <Context>InGame</Context>
+      </Properties>
+      <File>UI/EFV_Tracker.xml</File>
+    </AddUserInterfaces>
+    <ReplaceUIScript id="EFV_UnitFlags" criteria="EFV_XP2">
+      <Properties>
+        <LoadOrder>1000</LoadOrder>
+        <LuaContext>UnitFlagManager</LuaContext>
+        <LuaReplace>UI/EFV_UnitFlagManager.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+  </InGameActions>
+  <Files>
+    <File>Data/EFV_Icons.sql</File>
+    <File>Data/EFV_Notifications.sql</File>
+    <File>Data/EFV_Text.xml</File>
+    <File>Scripts/EFV_Gameplay.lua</File>
+    <File>Scripts/EFV_Rules.lua</File>
+    <File>Scripts/EFV_Util.lua</File>
+    <File>UI/EFV_Tracker.lua</File>
+    <File>UI/EFV_Tracker.xml</File>
+    <File>UI/EFV_UIShared.lua</File>
+    <File>UI/EFV_UnitFlagManager.lua</File>
+  </Files>
+</Mod>

@@ -1,0 +1,2348 @@
+{
+ "_comment": [
+  "Manual additions/overrides merged over api_allowlist.json (generated from PLAN.md Appendix A).",
+  "Sections: globals, static ('Root.Member' / 'Root:Method', wildcards allowed), methods (':Name' without receiver),",
+  "events ('Events.X', 'GameEvents.X', 'LuaEvents.X'), gameinfo (table names), base_includes (base-game include name ->",
+  "globals it defines), forbidden ([{name, why}] extra forbidden identifiers).",
+  "Entry shape: {\"ctx\": {\"G\": \"C\"|\"L\"|\"NV\"|\"PENDING\", \"UI\": ...}, \"refs\": [...], \"note\": ..., \"only_paths\": [\"EFV_Dev/\"], \"replace\": true}",
+  "Levels: C confirmed; L likely; NV new-verify; PENDING waits for an in-game test. Anything but C prints a WARN.",
+  "Add an entry here only with evidence (base-game file:line or a closed in-game test) and put it in refs.",
+  "2026-09-28 Session A in-game results (research/phase0_results/SESSION_A_REPORT.md): entries marked 'Session A' come from the Phase 0 harness. A context missing from an entry with replace=true means the call is UNAVAILABLE there (nil in that Lua state): using it is an ERROR.",
+  "WP1.7 additions (2026-09-28): LuaEvents.DiplomacyActionView_HideIngameUI, MilitaryFormationTypes.CORPS_FORMATION, UI.GetHeadSelectedCity (evidence in refs). Events.X.Remove / LuaEvents.X.Remove are accepted for every allowlisted event (base UnitFlagManager.lua:2000-2002 Events.PlayerTurnActivated.Remove / Events.UnitAddedToMap.Remove; InGame.lua:371 / PiratesIntro.lua:139 LuaEvents pattern); api_audit checks the member (.Add / .Remove / call).",
+  "Phase 2 / Session C integration (2026-09-28): GameEvents.PlayerTurnStarted (G C, fires for every player, Session C T04), GameEvents.OnPlayerTurnEnded downgraded to L (registered but never fires in GS single player, Session C; api_audit warns on every use), GameInfo.UnitUpgrades (unit identity check: upgrade chain).",
+  "Sessions D/E integration (2026-09-28): GameEvents.OnGameTurnEnded (G C, Session E T26: once per round, after the engine heal; EFV's mutiny-floor boundary), notes on GameEvents.PlayerTurnStarted / PlayerTurnStartComplete (every living player incl. the human), Events.PlayerDefeat / PlayerDestroyed (G C, after the units are gone), GameEvents.PlayerDefeat (L, never fired), deal items GetDuration / GetEnactedTurn (G C), FindItemByType / GetFromPlayerID confirmed by behaviour (Session D T09/T19), HasAllied / HasDeclaredFriendship G only (nil/err in UI, Session E), city GetGold nil in G (Session D T09). Not added for rules: Events.PlayerTurnDeactivated, Events.TurnEnd (fire in G but are asynchronous UI events).",
+  "Session F integration (0.5.2, 2026-09-28): GameInfo.UnitReplaces / CivilizationTraits / LeaderTraits (upgrade into a civilization's unique unit, T30), PlayerConfigurations :GetCivilizationTypeName / :GetLeaderTypeName (owner of the unique unit), Events.UnitUpgraded (G, async: carries the NEW unit ID; not used for rules), UnitManager.PlaceUnit G confirmed (T29; EFV_Dev only).",
+  "EFV_Dev 0.6.0-dev.1 final-session scenarios (2026-09-28): :GetTechs / :SetTech (G, grant the upgrade target's tech, S5), GameInfo.Technologies, and the UI promotion command UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the S6 veteran route B. EFV_Dev only."
+ ],
+ "globals": {
+  "include": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "PLAN 3.1 (UI include of EFV_Config/Util/Rules)"
+   ]
+  },
+  "Controls": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "UI context control table"
+   ]
+  },
+  "Mouse": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "PLAN 6.1 globals list"
+   ]
+  },
+  "GetUnitFlag": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U14",
+    "UnitFlagManager.lua:1987"
+   ]
+  },
+  "WarTypes": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "PLAN 5.0 EFV_Dev war cmd",
+    "NubiaScenario.lua:172"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "CityTransferTypes": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_F_REPORT.md 7.1 (T15 / T16 / T17: 8 transfers in gameplay, KEEP first and without KEEP, a capital with wonders; new city ID, re-fetch by plot)",
+    "research/phase0_results/raw/sessionF_Lua.log:5507-5529, 8696-8789"
+   ],
+   "note": "CONFIRMED-INGAME (Session F T15 / T16). Used by EFV_Entrust (Phase 6)."
+  }
+ },
+ "static": {
+  "include": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "PLAN 3.1"
+   ]
+  },
+  "GetUnitFlag": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U14"
+   ]
+  },
+  "Mouse.*": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "PLAN 6.1 (Mouse.eLClick for RegisterCallback)"
+   ]
+  },
+  "Keys.*": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11"
+   ]
+  },
+  "KeyEvents.*": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11"
+   ]
+  },
+  "GameConfiguration.GetValue": {
+   "ctx": {
+    "G": "NV",
+    "UI": "NV"
+   },
+   "refs": [
+    "A52 fallback (MapUtilities.lua:729); PLAN 2.1: UI uses the same fallback as G"
+   ],
+   "note": "fallback only if GetGameSpeedType is missing in G"
+  },
+  "WarTypes.FORMAL_WAR": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "PLAN 5.0",
+    "NubiaScenario.lua:172"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "ContextPtr:IsHidden": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetHide": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetInputHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetInitHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetShutdown": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:BuildInstanceForControl": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:LookUpControl": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:IsVisible": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:RequestRefresh": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetShowHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetHideHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetRefreshHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetUpdate": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:LoadNewContext": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:GetID": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:ClearUpdate": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:CallParentShowHideHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetShowHideHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:ClearRequestRefresh": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetAutoSize": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:ClearRefreshHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetPostInit": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:GetParentByType": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:DestroyChild": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:ChangeParent": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:BuildInstance": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetSizeY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:SetSizeX": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:IsHotLoad": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:GetParent": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "ContextPtr:ReprocessAnchoring": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28"
+   ]
+  },
+  "GameConfiguration.GetGameSpeedType": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A52",
+    "Session A T09 (research/phase0_results/T09.log): AVAILABLE in G -> 327976177; GameInfo.GameSpeeds[hash].CostMultiplier -> 100"
+   ]
+  },
+  "DealManager.GetPlayerDeals": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "A40",
+    "Debug/Diplomacy.ltp:360",
+    "Session A T09 (research/phase0_results/T09.log): callable in G (returned nil: no deals existed)"
+   ],
+   "note": "Callable; returns nil when the pair has no active deal. Handle nil."
+  },
+  "NotificationManager.GetList": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "U15",
+    "Session A T21 (research/phase0_results/T21.log): G GetList/Find found the test notification"
+   ]
+  },
+  "NotificationManager.Find": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "U15",
+    "Session A T21 (research/phase0_results/T21.log)"
+   ]
+  },
+  "NotificationManager.Dismiss": {
+   "ctx": {
+    "G": {
+     "level": "L",
+     "tests": [
+      "T21"
+     ]
+    },
+    "UI": "C"
+   },
+   "refs": [
+    "U15",
+    "Session A T21 (research/phase0_results/T21.log): UI Dismiss works but is deferred (list unchanged immediately, gone later); G Dismiss(25) did not throw, effect not re-checked"
+   ],
+   "note": "UI Dismiss is asynchronous: never re-read the list in the same call to confirm."
+  },
+  "Units.GetUnitsInPlotLayerID": {
+   "ctx": {
+    "G": {
+     "level": "L",
+     "tests": [
+      "T09"
+     ]
+    },
+    "UI": "C"
+   },
+   "refs": [
+    "A16",
+    "Session A T09 (research/phase0_results/T09.log): exists in G, (plot, 1) form -> table #0"
+   ],
+   "note": "EFV calls the (x, y, MapLayers.ANY) form; that form in G is probed by the Session D T09 re-run."
+  },
+  "MilitaryFormationTypes.CORPS_FORMATION": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/DLC/WarMachineScenario/Scripts/WarMachineScenario.lua:190-191 (G: CanFormMilitaryFormation / SetMilitaryFormation(CORPS_FORMATION))",
+    "GAME/Base/Assets/UI/UnitFlagManager.lua:841 (UI)",
+    "SPIKES S6"
+   ],
+   "note": "Enum value; EFV_Dev 'corps' command (D3 merge tests)."
+  },
+  "UI.GetHeadSelectedCity": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/ActionPanel.lua:669",
+    "GAME/Base/Assets/UI/WorldInput.lua:2224",
+    "GAME/Base/Assets/UI/WorldView/PlotInfo.lua:57"
+   ],
+   "note": "Base UI selection API; used by EFV_Dev only (EFV itself does not need it)."
+  },
+  "UnitManager.PlaceUnit": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "DLC/AustraliaScenario/Scripts/AustraliaScenario.lua:854, :886 (UnitManager.PlaceUnit(pUnit, x, y) in a gameplay script)",
+    "research/phase0_results/SESSION_F_REPORT.md 4.3 (T29: keeps the ID, zeroes moves; refused tiles leave the unit in place)"
+   ],
+   "note": "EFV_Dev test tool only (place cmd, Phase 2 tests); EFV itself never teleports units",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "CityTransferTypes.BY_GIFT": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_F_REPORT.md 7.1 (T15 / T16 / T17: 8 transfers in gameplay, KEEP first and without KEEP, a capital with wonders; new city ID, re-fetch by plot)",
+    "research/phase0_results/raw/sessionF_Lua.log:5507-5529, 8696-8789"
+   ],
+   "note": "CONFIRMED-INGAME (Session F T15 / T16). Used by EFV_Entrust (Phase 6)."
+  },
+  "CityManager.TransferCity": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_F_REPORT.md 7.1 (T15 / T16 / T17: 8 transfers in gameplay, KEEP first and without KEEP, a capital with wonders; new city ID, re-fetch by plot)",
+    "research/phase0_results/raw/sessionF_Lua.log:5507-5529, 8696-8789"
+   ],
+   "note": "CONFIRMED-INGAME (Session F T15 / T16). Used by EFV_Entrust (Phase 6)."
+  },
+  "UnitManager.RequestCommand": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:70-72 (the human promotion route)",
+    "spike/EFV_SpikeTest/UI/EFV_SpikeTest_Panel.lua T08G (Session G plan)"
+   ],
+   "note": "EFV_Dev S6 route B only (PROMOTE); EFV itself never issues unit commands",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandTypes.PROMOTE": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:72, :81"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandTypes.PARAM_PROMOTION_TYPE": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:71"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  }
+ },
+ "methods": {
+  "SetHide": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetText": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "CalculateSize": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetDisabled": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "LocalizeAndSetText": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U17"
+   ]
+  },
+  "GetSizeY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetSizeY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "Play": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetToolTipString": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetToBeginning": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetTexture": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetSizeX": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetSizeX": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetSelected": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetColor": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ReprocessAnchoring": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsHidden": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "LocalizeAndSetToolTip": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U17"
+   ]
+  },
+  "SetOffsetY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetOffsetX": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetText": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetShow": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetIcon": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetCheck": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetScrollValue": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetColorByName": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterEndCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsChecked": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetPercent": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "Reverse": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetButton": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetOffsetY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "CalculateInternalSize": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetEntries": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetStepAndCall": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "Stop": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterSizeChanged": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsVisible": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsReversing": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "DestroyAllChildren": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterCheckHandler": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetSelectedIndex": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "DoAutoSize": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetValue": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetSpeed": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetEntrySelectedCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ChangeParent": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "BuildEntry": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetEnabled": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetBeginVal": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterStringChangedCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ClearString": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetEndVal": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterSliderCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetSizeVal": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetSizeVal": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetSelectedEntry": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "CalculateInternals": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetTextureOffsetVal": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetPauseTime": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetOffsetVal": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterCommitCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetScrollBar": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ClearCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsStopped": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "UnloadTexture": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "TrySetIcon": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsSelected": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetTextControl": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetParentRelativeSizeY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetTextButton": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetScreenOffset": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetOffsetX": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "TakeFocus": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsDisabled": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SortChildren": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetToEnd": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "Reparent": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterScrollCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterMouseExitCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterMouseEnterCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "HasFocus": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetValue": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ClearEntries": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetAnimationSpeed": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetAnchor": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterHasFocusCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetWrapWidth": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetToolTipType": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetProgress": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetAlpha": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "RegisterSelectionCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetStep": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetInstance": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "DeleteAllDataSets": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "Close": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetAndCall": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ResetInstances": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsOpen": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetRatio": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetChildren": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "ClearToolTipCallback": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetVisState": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetStep": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetRange": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetParentRelativeSizeX": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "SetDomain": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "IsPlaying": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetProgress": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "AddChildAtIndex": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetID": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
+   ]
+  },
+  "GetKey": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11 input handler (harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28)"
+   ]
+  },
+  "GetMessageType": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11 input handler (harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28)"
+   ]
+  },
+  "IsShiftDown": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11 input handler (harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28)"
+   ]
+  },
+  "IsControlDown": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11 input handler (harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28)"
+   ]
+  },
+  "IsAltDown": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U11 input handler (harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28)"
+   ]
+  },
+  "GetUnit": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U14 (UnitFlag instance: self:GetUnit(), UnitFlagManager.lua:216)"
+   ]
+  },
+  "SetHasAllied": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "PLAN 5.0 ally (VikingScenario.lua:18-20)"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "SetHasDeclaredFriendship": {
+   "ctx": {
+    "G": "L"
+   },
+   "refs": [
+    "PLAN 5.0 friend (Tuner, LIKELY)"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DeclareWarOn": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "PLAN 5.0 war (NubiaScenario.lua:172)"
+   ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "HasOpenBordersFrom": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "A39",
+    "DiplomacyActionView.lua:1429-1433 (UI)",
+    "Session A T09 (research/phase0_results/T09.log): type(diplo.HasOpenBordersFrom)=nil in G, both directions"
+   ],
+   "note": "UI-ONLY. Gameplay must use the open-borders deal scan (A40: DealManager.GetPlayerDeals + AGREEMENTS/OPEN_BORDERS item), being verified with a real agreement in Session D T19.",
+   "replace": true
+  },
+  "IsCannotAttack": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "A24",
+    "Session A T09 (research/phase0_results/T09.log): unit:IsCannotAttack() 'function expected instead of nil' in G"
+   ],
+   "note": "UI-ONLY. In G use GetAttacksRemaining() alone.",
+   "replace": true
+  },
+  "IsFreeCities": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "RazeCity_Expansion2.lua:67",
+    "DLC/Expansion2/UI/CityBanners/CityBannerManager.lua:1502",
+    "Session A T09 (research/phase0_results/T09.log): player:IsFreeCities() nil in G"
+   ],
+   "note": "UI-ONLY. In G compare with PlayerManager.GetFreeCitiesPlayerID() (A43; Session A returned 62).",
+   "replace": true
+  },
+  "GetPurchaseCost": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "Base/Assets/UI/Panels/ProductionPanel.lua:1673",
+    "Session A T09 (research/phase0_results/T09.log): city:GetGold():GetPurchaseCost(...) 'function expected instead of nil' in G (GetGold or GetPurchaseCost is nil; split probe added for the T09 re-run)"
+   ],
+   "note": "UI-ONLY. EFV computes its fee from GameInfo (spec 5.1), not from this call.",
+   "replace": true
+  },
+  "IsOccupied": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "Base/Assets/UI/CitySupport.lua:574",
+    "Session A T09 (research/phase0_results/T09.log): city:IsOccupied() nil in G"
+   ],
+   "note": "UI-ONLY.",
+   "replace": true
+  },
+  "GetLevyTurnCounter": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "Base/Assets/UI/UnitFlagManager.lua:749",
+    "Session A T09 (research/phase0_results/T09.log): cs:GetInfluence():GetLevyTurnCounter() nil in G"
+   ],
+   "note": "UI-ONLY. Gameplay levy fallback: unit:GetOwner() ~= unit:GetOriginalOwner() (SPIKES S10).",
+   "replace": true
+  },
+  "GetAllianceLevel": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "Base/Assets/UI/DiplomacyDealView.lua:1492",
+    "Session A T09 (research/phase0_results/T09.log): diplo:GetAllianceLevel() nil in G"
+   ],
+   "note": "UI-ONLY.",
+   "replace": true
+  },
+  "IsDiplomaticActionValid": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "Base/Assets/UI/DiplomacyStatementSupport.lua:167",
+    "Session A T09 (research/phase0_results/T09.log): diplo:IsDiplomaticActionValid() nil in G"
+   ],
+   "note": "UI-ONLY.",
+   "replace": true
+  },
+  "GetLevel": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U19",
+    "Session A T09 (research/phase0_results/T09.log): exp:GetLevel() nil in G"
+   ],
+   "note": "UI-ONLY (confirmed in game).",
+   "replace": true
+  },
+  "GetPromotions": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "U19",
+    "Session A T09 (research/phase0_results/T09.log): exp:GetPromotions() nil in G"
+   ],
+   "note": "UI-ONLY (confirmed in game).",
+   "replace": true
+  },
+  "GetAttacksRemaining": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A24",
+    "Session A T09 (research/phase0_results/T09.log): AVAILABLE in G -> 1"
+   ]
+  },
+  "HasDeclaredFriendship": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "A38",
+    "Session A T09 (research/phase0_results/T09.log): type=function in G, call ok",
+    "research/phase0_results/SESSION_E_REPORT.md 6 (UI: friend=err)"
+   ],
+   "note": "G only: nil/err in UI (Session E, sessionE_Lua.log:17464); availability in G confirmed (Session A T09).",
+   "replace": true
+  },
+  "IsEmbarked": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A32",
+    "Session A T09 (research/phase0_results/T09.log): AVAILABLE in G -> false"
+   ]
+  },
+  "GetOriginalOwner": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A32",
+    "Session A T09 (research/phase0_results/T09.log): AVAILABLE in G -> 0"
+   ]
+  },
+  "IsHero": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "Session A T09 (research/phase0_results/T09.log): AVAILABLE in G -> false"
+   ]
+  },
+  "CanPromote": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "Session A T09 (research/phase0_results/T09.log): exp:CanPromote() AVAILABLE in G -> false"
+   ]
+  },
+  "GetInfluence": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "AlexanderScenario.lua:25 (G)",
+    "UnitFlagManager.lua:749 (UI)",
+    "Session A T09 (research/phase0_results/T09.log)"
+   ]
+  },
+  "GetSuzerain": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "Base/Assets/UI/PartialScreens/CityStates.lua:1454",
+    "Session A T09 (research/phase0_results/T09.log): AVAILABLE in G -> -1"
+   ]
+  },
+  "GetResources": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A50",
+    "Session A T09 (research/phase0_results/T09.log): pPlayer:GetResources() works in G"
+   ],
+   "note": "Availability only; ChangeResourceAmount behaviour is T14."
+  },
+  "GetResourceAmount": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A50",
+    "Session A T09 (research/phase0_results/T09.log): GetResourceAmount(RESOURCE_OIL) AVAILABLE in G -> 0"
+   ]
+  },
+  "FindItemByType": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "A40",
+    "DiplomacyDealView.lua:1369,1397 (UI, working deals only)",
+    "Session A T09 (research/phase0_results/T09.log): GetPlayerDeals returned nil (no deals), so FindItemByType was never reached",
+    "research/phase0_results/SESSION_D_REPORT.md 2.2: the exact EFV call read 1 while the agreement was active, 0 without (two-way swap)"
+   ],
+   "note": "Confirmed by behaviour (Session D). One-way agreement direction still open (Session F T27).",
+   "replace": true
+  },
+  "GetFromPlayerID": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "A40",
+    "DiplomacyDealView.lua:2145 (UI)",
+    "Debug/Diplomacy.ltp:364 (GameCore Tuner)",
+    "research/phase0_results/SESSION_D_REPORT.md 2.2 (items carry their giver)"
+   ],
+   "note": "Confirmed by behaviour (Session D, two-way swap). One-way direction: Session F T27.",
+   "replace": true
+  },
+  "ChangeResourceAmount": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "A50",
+    "Session B T14 (research/phase0_results/T14.log, SESSION_B_REPORT 6): +2/-1 exact, -5 clamps at 0, top panel matches"
+   ],
+   "note": "CONFIRMED-INGAME (Session B). The engine clamps at 0; EFV's own floor keeps the [Maint] log exact."
+  },
+  "HasAllied": {
+   "ctx": {
+    "G": "C"
+   },
+   "replace": true,
+   "refs": [
+    "A37",
+    "research/phase0_results/SESSION_E_REPORT.md 6 (UI: allied=err, sessionE_Lua.log:17464)"
+   ],
+   "note": "G only: nil/err in UI (Session E); UI reads GetDiplomaticAI():GetDiplomaticStateIndex. SetHasAllied does not end a war (Session E): test war first."
+  },
+  "GetDuration": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_D_REPORT.md 2.2 (T09, sessionD_Lua.log:377: open-borders deal item duration 30)"
+   ],
+   "note": "deal item; G confirmed (Session D). Phase 3 uses it for the open-borders expiry prediction."
+  },
+  "GetEnactedTurn": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_D_REPORT.md 2.2 (T09, sessionD_Lua.log:377)"
+   ],
+   "note": "deal item; G confirmed (Session D)."
+  },
+  "GetGold": {
+   "ctx": {
+    "UI": "L"
+   },
+   "replace": true,
+   "refs": [
+    "research/phase0_results/SESSION_D_REPORT.md (T09 split, sessionD_Lua.log:347-348): city:GetGold() is nil in G"
+   ],
+   "note": "city:GetGold is UI only (nil in G, Session D); gameplay prices use the formula (INTERFACES.md:53)."
+  },
+  "GetCivilizationTypeName": {
+   "ctx": {
+    "G": "L",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/DLC/AustraliaScenario/Scripts/AustraliaScenario.lua:1200 (pPlayerConfig:GetCivilizationTypeName() in a gameplay script), :1389 (GetLeaderTypeName)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_Announcer.lua:53"
+   ],
+   "note": "PlayerConfigurations[pid] (receiver cfg): the unit owner's civilization / leader for EFV_UpgradeTargets; pcall-guarded, unreadable -> any unique unit accepted"
+  },
+  "GetLeaderTypeName": {
+   "ctx": {
+    "G": "L",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/DLC/AustraliaScenario/Scripts/AustraliaScenario.lua:1200 (pPlayerConfig:GetCivilizationTypeName() in a gameplay script), :1389 (GetLeaderTypeName)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_Announcer.lua:53"
+   ],
+   "note": "PlayerConfigurations[pid] (receiver cfg): the unit owner's civilization / leader for EFV_UpgradeTargets; pcall-guarded, unreadable -> any unique unit accepted"
+  },
+  "GetTechs": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/AlexanderScenario/Scripts/AlexanderScenario.lua:38 (Players[0]:GetTechs():SetTech(..., true) in a gameplay script)",
+    "GAME/DLC/AustraliaScenario/Scripts/AustraliaScenario.lua:1368"
+   ],
+   "note": "EFV_Dev S5 upgrade scenario only",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "SetTech": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/AlexanderScenario/Scripts/AlexanderScenario.lua:38",
+    "GAME/Base/Assets/Scenarios/ColdWarScenario/ColdWarScenario_StartScript.lua:15"
+   ],
+   "note": "EFV_Dev S5 upgrade scenario only",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  }
+ },
+ "events": {
+  "LuaEvents.DiplomacyActionView_HideIngameUI": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/InGame.lua:371 (LuaEvents.DiplomacyActionView_HideIngameUI.Add)",
+    "GAME/Base/Assets/UI/Menus/InGameTopOptionsMenu.lua:726 (.Add)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:2122 (raised when the leader screen opens)",
+    "PLAN 3.3 / R4 2.2 (picker closes on it)"
+   ]
+  },
+  "GameEvents.PlayerTurnStarted": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/raw/sessionC_Lua.log:16 (subscribed), :349 ff. (PlayerTurnStarted(0) and every AI in ID order, Session C T04)",
+    "DLC/AlexanderScenario/Scripts/AlexanderScenario.lua:247 (GameEvents.PlayerTurnStarted.Add)",
+    "INTERFACES.md note 23 (turn-boundary abstraction)",
+    "research/phase0_results/SESSION_E_REPORT.md 2 (T26): fires for every living player incl. the human (17 per round), 186 rounds"
+   ],
+   "note": "fires for every living player incl. the human (Session E T26); no engine heal ever falls inside a PTS -> PTSC window"
+  },
+  "GameEvents.OnPlayerTurnEnded": {
+   "ctx": {
+    "G": "L"
+   },
+   "replace": true,
+   "refs": [
+    "A03",
+    "research/phase0_results/SESSION_C_REPORT.md 4-5: subscribed OK but fired 0 times in 28 rounds (GS single player)"
+   ],
+   "note": "registered but never fires in GS single player (Session C); EFV keeps it only as a harmless idempotent extra turn boundary (INTERFACES note 23)"
+  },
+  "GameEvents.OnGameTurnEnded": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_E_REPORT.md 2 (T26): exactly once in each of 186 complete rounds, after PlayerTurnStartComplete[63] and the engine heal (29/29 heals), arg = ending turn, Game.GetCurrentGameTurn() still the ending turn",
+    "research/phase0_results/raw/sessionE_Lua.log:1019-1021",
+    "INTERFACES.md note 23 (turn boundary: mutiny heal floor)"
+   ],
+   "note": "CONFIRMED-INGAME (Session E T26). Synchronous GameEvent; first gameplay hook after the once-per-round heal."
+  },
+  "GameEvents.PlayerTurnStartComplete": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_E_REPORT.md 2 (T26): fires for every living player incl. the human (17 per round)"
+   ],
+   "note": "fires for every living player incl. the human (Session E T26)"
+  },
+  "GameEvents.PlayerDefeat": {
+   "ctx": {
+    "G": "L"
+   },
+   "replace": true,
+   "refs": [
+    "research/phase0_results/SESSION_D_REPORT.md 4 (subscribed; never fired in Sessions A-D, incl. a major and a city-state elimination)"
+   ],
+   "note": "subscribes, never fired in Sessions A-D; use Events.PlayerDefeat / PlayerDestroyed (async hints) and the IsAlive() poll"
+  },
+  "Events.PlayerDefeat": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_D_REPORT.md 4 (Babylon, Jerusalem)",
+    "research/phase0_results/raw/sessionE_Lua.log:13114-13117 (city-state 12)"
+   ],
+   "note": "fires in G after Events.PlayerDestroyed, AFTER the eliminated player's units are gone (IsAlive() already false); asynchronous: hint only (DV13)"
+  },
+  "Events.PlayerDestroyed": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_D_REPORT.md 4",
+    "research/phase0_results/raw/sessionE_Lua.log:13114"
+   ],
+   "note": "fires in G after the units are gone; asynchronous: hint only"
+  },
+  "Events.UnitFormCorps": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/UnitFlagManager.lua:1825, 2054-2055 (Events.UnitFormCorps.Add, UI)",
+    "research/R2_unit_map_apis.md 119, 268 (fires on the surviving unit, (playerID, unitID))",
+    "research/phase0_results/SESSION_D_REPORT.md 8 (T11): fires for a player merge and for scripted SetMilitaryFormation"
+   ],
+   "note": "EFV_UnitActions uses it only as a UI refresh hint (Phase 5, WP5.4); gameplay detects merges at the turn boundary (MP rule)"
+  },
+  "Events.UnitFormArmy": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/UnitFlagManager.lua:1825, 2054-2055 (Events.UnitFormArmy.Add, UI)",
+    "research/R2_unit_map_apis.md 119, 268 (fires on the surviving unit, (playerID, unitID))",
+    "research/phase0_results/SESSION_D_REPORT.md 8 (T11): fires for a player merge and for scripted SetMilitaryFormation"
+   ],
+   "note": "EFV_UnitActions uses it only as a UI refresh hint (Phase 5, WP5.4); gameplay detects merges at the turn boundary (MP rule)"
+  },
+  "Events.UnitUpgraded": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "research/phase0_results/SESSION_F_REPORT.md 2 (T30, T22: sessionF_Lua.log:2083 args=(0, 1048584, 101), the NEW unit ID)"
+   ],
+   "note": "fires in G but is asynchronous (DV13): not used for rules; EFV relinks at the turn boundaries instead"
+  }
+ },
+ "gameinfo": {
+  "UnitUpgrades": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civilopedia/CivilopediaPage_Unit.lua:177 (for row in GameInfo.UnitUpgrades())",
+    "DB schema UnitUpgrades(Unit, UpgradeUnit); GameInfo tables are the same DB in both contexts",
+    "INTERFACES.md note 23 (EFV_IsUpgradeOf)"
+   ]
+  },
+  "UnitReplaces": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "DB schema (DebugGameplay.sqlite): UnitReplaces(CivUniqueUnitType, ReplacesUnitType), CivilizationTraits(CivilizationType, TraitType), LeaderTraits(LeaderType, TraitType); GameInfo tables are the same DB in both contexts",
+    "research/phase0_results/SESSION_F_REPORT.md 4.3 (T30: Warrior -> UNIT_MACEDONIAN_HYPASPIST, sessionF_Lua.log:3804)",
+    "GAME/Base/Assets/UI/Civilopedia/CivilopediaPage_Unit.lua:102 (for row in GameInfo.UnitReplaces()), GAME/Base/Assets/UI/Civ6Common.lua:355 (GameInfo.LeaderTraits()), :442 (GameInfo.CivilizationTraits())"
+   ],
+   "note": "unique unit -> the unit it replaces; EFV_BaseUnitType / EFV_IsUpgradeOf / EFV_UpgradeTargets (Session F item 3)"
+  },
+  "CivilizationTraits": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "DB schema (DebugGameplay.sqlite): UnitReplaces(CivUniqueUnitType, ReplacesUnitType), CivilizationTraits(CivilizationType, TraitType), LeaderTraits(LeaderType, TraitType); GameInfo tables are the same DB in both contexts",
+    "research/phase0_results/SESSION_F_REPORT.md 4.3 (T30: Warrior -> UNIT_MACEDONIAN_HYPASPIST, sessionF_Lua.log:3804)",
+    "GAME/Base/Assets/UI/Civilopedia/CivilopediaPage_Unit.lua:102 (for row in GameInfo.UnitReplaces()), GAME/Base/Assets/UI/Civ6Common.lua:355 (GameInfo.LeaderTraits()), :442 (GameInfo.CivilizationTraits())"
+   ],
+   "note": "civilization -> trait; which unique units an owner can upgrade into (EFV_UpgradeTargets)"
+  },
+  "LeaderTraits": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "DB schema (DebugGameplay.sqlite): UnitReplaces(CivUniqueUnitType, ReplacesUnitType), CivilizationTraits(CivilizationType, TraitType), LeaderTraits(LeaderType, TraitType); GameInfo tables are the same DB in both contexts",
+    "research/phase0_results/SESSION_F_REPORT.md 4.3 (T30: Warrior -> UNIT_MACEDONIAN_HYPASPIST, sessionF_Lua.log:3804)",
+    "GAME/Base/Assets/UI/Civilopedia/CivilopediaPage_Unit.lua:102 (for row in GameInfo.UnitReplaces()), GAME/Base/Assets/UI/Civ6Common.lua:355 (GameInfo.LeaderTraits()), :442 (GameInfo.CivilizationTraits())"
+   ],
+   "note": "leader -> trait; which unique units an owner can upgrade into (EFV_UpgradeTargets)"
+  },
+  "Technologies": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/DLC/AlexanderScenario/Scripts/AlexanderScenario.lua:38 (GameInfo.Technologies[\"TECH_SAILING\"].Index in a gameplay script)"
+   ],
+   "note": "EFV_Dev S5: the upgrade target's PrereqTech",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  }
+ },
+ "base_includes": {
+  "_comment": "top-level globals defined by base-game UI files (and their includes), harvested 2026-09-28",
+  "InstanceManager": [
+   "GenerationalInstanceManager",
+   "InstanceManager",
+   "PullDownInstanceManager"
+  ],
+  "PopupDialog": [
+   "GenerationalInstanceManager",
+   "InstanceManager",
+   "PopupDialog",
+   "PopupDialogInGame",
+   "PullDownInstanceManager"
+  ],
+  "SupportFunctions": [
+   "Clamp",
+   "DeepCompare",
+   "DeepCopy",
+   "FormatTableAsNewLineString",
+   "FormatTableAsString",
+   "GetIPType",
+   "PolarToCartesian",
+   "PolarToRatioCartesian",
+   "RBGtoHSV",
+   "RandRange",
+   "RandWeight",
+   "RemoveTableEntry",
+   "Round",
+   "ShuffleTable",
+   "SoftRound",
+   "Split",
+   "Triangular",
+   "TruncateSelfWithTooltip",
+   "TruncateString",
+   "TruncateStringByLength",
+   "TruncateStringWithTooltip",
+   "TruncateStringWithTooltipClean",
+   "__genOrderedIndex",
+   "bitNot",
+   "bitsTableToNumber",
+   "lshift",
+   "numberToBitsTable",
+   "orderedNext",
+   "orderedPairs",
+   "rshift"
+  ],
+  "Civ6Common": [
+   "AddBuildingEntertainmentTooltip",
+   "AddBuildingExtraCostTooltip",
+   "AddBuildingYieldTooltip",
+   "AddGovernmentExtraInfoTooltip",
+   "AddProjectStrategicResourceTooltip",
+   "AddReactorProjectData",
+   "AddUnitResourceMaintenanceTooltip",
+   "AddUnitStrategicResourceTooltip",
+   "AutoSizeGridButton",
+   "COLORS",
+   "CanEverUnlock",
+   "DarkenLightenColor",
+   "DifferentiateCiv",
+   "FormatTimeRemaining",
+   "GetCivilizationUniqueTraits",
+   "GetColorPercentString",
+   "GetFilteredUnlockableItems",
+   "GetGreatPersonGenderSuffix",
+   "GetGreatWorksForCity",
+   "GetLeaderUniqueTraits",
+   "GetTopBarHeight",
+   "GetTraitMapForPlayer",
+   "GetUnitIcon",
+   "GetUnitPortraitEraSuffix",
+   "GetUnitPortraitIconNames",
+   "GetUnitPortraitIconNamesFromDefinition",
+   "GetUnitPortraitPrefix",
+   "GetUnitStats",
+   "GetUnlockableItems",
+   "GetUnlockablesForCivic",
+   "GetUnlockablesForTech",
+   "GetYieldString",
+   "GetYieldTextColor",
+   "GetYieldTextIcon",
+   "IsDiplomacyOpen",
+   "IsDiplomacyPending",
+   "IsExpansion1Active",
+   "IsExpansion1Enabled",
+   "IsExpansion2Active",
+   "IsExpansion2Enabled",
+   "IsPlayerCityless",
+   "IsTutorialRunning",
+   "MoveUnitToPlot",
+   "ProductionType",
+   "RGBAValuesToABGRHex",
+   "ReadCustomData",
+   "RemoveReplacedUnlockables",
+   "RequestMoveOperation",
+   "ToolTipHelper",
+   "WriteCustomData",
+   "g_ToolTipGenerators",
+   "toPlusMinusNoneString",
+   "toPlusMinusString"
+  ],
+  "UnitFlagManager": [
+   "ALPHA_DIM",
+   "AddBuildingEntertainmentTooltip",
+   "AddBuildingExtraCostTooltip",
+   "AddBuildingYieldTooltip",
+   "AddGovernmentExtraInfoTooltip",
+   "AddProjectStrategicResourceTooltip",
+   "AddReactorProjectData",
+   "AddUnitResourceMaintenanceTooltip",
+   "AddUnitStrategicResourceTooltip",
+   "AutoSizeGridButton",
+   "COLORS",
+   "COLOR_GREEN",
+   "COLOR_RED",
+   "COLOR_YELLOW",
+   "CanEverUnlock",
+   "CanRangeAttack",
+   "CanSelectUnit",
+   "Clamp",
+   "CreateUnitFlag",
+   "DarkenLightenColor",
+   "DeepCompare",
+   "DeepCopy",
+   "DifferentiateCiv",
+   "FLAGSTATE_EMBARKED",
+   "FLAGSTATE_FORTIFIED",
+   "FLAGSTATE_NORMAL",
+   "FLAGSTYLE_CIVILIAN",
+   "FLAGSTYLE_MILITARY",
+   "FLAGSTYLE_NAVAL",
+   "FLAGSTYLE_RELIGION",
+   "FLAGSTYLE_SUPPORT",
+   "FLAGSTYLE_TRADE",
+   "FLAGTYPE_UNIT",
+   "FormatTableAsNewLineString",
+   "FormatTableAsString",
+   "FormatTimeRemaining",
+   "GenerationalInstanceManager",
+   "GetCityPlotLeftOf",
+   "GetCityPlotRightOf",
+   "GetCivilizationUniqueTraits",
+   "GetColorPercentString",
+   "GetFilteredUnlockableItems",
+   "GetGreatPersonGenderSuffix",
+   "GetGreatWorksForCity",
+   "GetIPType",
+   "GetLeaderUniqueTraits",
+   "GetLevyTurnsRemaining",
+   "GetTopBarHeight",
+   "GetTraitMapForPlayer",
+   "GetUnitFlag",
+   "GetUnitIcon",
+   "GetUnitPortraitEraSuffix",
+   "GetUnitPortraitIconNames",
+   "GetUnitPortraitIconNamesFromDefinition",
+   "GetUnitPortraitPrefix",
+   "GetUnitStats",
+   "GetUnlockableItems",
+   "GetUnlockablesForCivic",
+   "GetUnlockablesForTech",
+   "GetYieldString",
+   "GetYieldTextColor",
+   "GetYieldTextIcon",
+   "HEALTH_PERCENT_BAD",
+   "HEALTH_PERCENT_GOOD",
+   "Initialize",
+   "InstanceManager",
+   "IsDiplomacyOpen",
+   "IsDiplomacyPending",
+   "IsExpansion1Active",
+   "IsExpansion1Enabled",
+   "IsExpansion2Active",
+   "IsExpansion2Enabled",
+   "IsPlayerCityless",
+   "IsTutorialRunning",
+   "LateInitialize",
+   "MoveUnitToPlot",
+   "OnBarbarianSpottedCity",
+   "OnCityVisibilityChanged",
+   "OnCombatVisBegin",
+   "OnCombatVisEnd",
+   "OnEnterFormation",
+   "OnEventPlaybackComplete",
+   "OnInit",
+   "OnLensLayerOff",
+   "OnLensLayerOn",
+   "OnLevyCounterChanged",
+   "OnLocalPlayerChanged",
+   "OnMilitaryFormationChanged",
+   "OnObjectPairingChanged",
+   "OnPlayerConnectChanged",
+   "OnPlayerTurnActivated",
+   "OnShutdown",
+   "OnTutorial_DisableMapSelect",
+   "OnUnitAbilityGained",
+   "OnUnitActivityChanged",
+   "OnUnitAddedToMap",
+   "OnUnitArtifactChanged",
+   "OnUnitCommandStarted",
+   "OnUnitDamageChanged",
+   "OnUnitEmbarkedStateChanged",
+   "OnUnitFlagClick",
+   "OnUnitFortificationChanged",
+   "OnUnitMovementPointsChanged",
+   "OnUnitMovementPointsRestored",
+   "OnUnitPromotionChanged",
+   "OnUnitRemovedFromMap",
+   "OnUnitSelected",
+   "OnUnitSelectionChanged",
+   "OnUnitTeleported",
+   "OnUnitUpgraded",
+   "OnUnitVisibilityChanged",
+   "PolarToCartesian",
+   "PolarToRatioCartesian",
+   "PositionFlagForUnitToView",
+   "PositionFlagsToView",
+   "ProductionType",
+   "PullDownInstanceManager",
+   "RBGtoHSV",
+   "RGBAValuesToABGRHex",
+   "RandRange",
+   "RandWeight",
+   "ReadCustomData",
+   "Refresh",
+   "RegisterDirtyEvents",
+   "RemoveReplacedUnlockables",
+   "RemoveTableEntry",
+   "RequestMoveOperation",
+   "Round",
+   "SetForceHideForID",
+   "ShouldHideFlag",
+   "ShuffleTable",
+   "SoftRound",
+   "Split",
+   "Subscribe",
+   "TEXTURE_BASE",
+   "TEXTURE_CIVILIAN",
+   "TEXTURE_EMBARK",
+   "TEXTURE_FORTIFY",
+   "TEXTURE_NAVAL",
+   "TEXTURE_RELIGION",
+   "TEXTURE_SUPPORT",
+   "TEXTURE_TRADE",
+   "TXT_UNITFLAG_ACTIVITY_AWAKE",
+   "TXT_UNITFLAG_ACTIVITY_HEALING",
+   "TXT_UNITFLAG_ACTIVITY_HOLD",
+   "TXT_UNITFLAG_ACTIVITY_NO_ACTIVITY",
+   "TXT_UNITFLAG_ACTIVITY_ON_INTERCEPT",
+   "TXT_UNITFLAG_ACTIVITY_ON_SENTRY",
+   "TXT_UNITFLAG_ACTIVITY_SLEEP",
+   "TXT_UNITFLAG_ARMADA_SUFFIX",
+   "TXT_UNITFLAG_ARMY_SUFFIX",
+   "TXT_UNITFLAG_CORPS_SUFFIX",
+   "TXT_UNITFLAG_FLEET_SUFFIX",
+   "ToolTipHelper",
+   "Triangular",
+   "TruncateSelfWithTooltip",
+   "TruncateString",
+   "TruncateStringByLength",
+   "TruncateStringWithTooltip",
+   "TruncateStringWithTooltipClean",
+   "UnitFlag",
+   "UnitSimPositionChanged",
+   "Unsubscribe",
+   "UpdateFlagPositions",
+   "UpdateIconStack",
+   "WriteCustomData",
+   "YOFFSET_2DVIEW",
+   "ZOFFSET_3DVIEW",
+   "__genOrderedIndex",
+   "bitNot",
+   "bitsTableToNumber",
+   "g_ToolTipGenerators",
+   "g_UnitsArcheology",
+   "g_UnitsCivilian",
+   "g_UnitsMilitary",
+   "g_UnitsReligious",
+   "lshift",
+   "m_FlagOffsets",
+   "m_LinkOffsets",
+   "numberToBitsTable",
+   "orderedNext",
+   "orderedPairs",
+   "rshift",
+   "toPlusMinusNoneString",
+   "toPlusMinusString"
+  ],
+  "RazeCity": [
+   "Close",
+   "Initialize",
+   "LateInitialize",
+   "OnButton1",
+   "OnButton2",
+   "OnButton3",
+   "OnButton4",
+   "OnClose",
+   "OnInit",
+   "OnInputHandler",
+   "OnOpen",
+   "g_pSelectedCity"
+  ]
+ },
+ "forbidden": []
+}

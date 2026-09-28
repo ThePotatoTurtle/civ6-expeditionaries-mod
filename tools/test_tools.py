@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""test_tools.py - self-test for the EFV static tools, using tools/fixtures.
+
+    python tools/test_tools.py            (exit 0 = all tests pass)
+
+fixtures/good/EFV_Fixture   PLAN-shaped mini mod: every tool must report 0 errors.
+fixtures/bad/EFV_Broken     one planted defect per check: every expected finding must be reported.
+fixtures/logs/{good,bad}    synthetic game logs for check_logs.py.
+"""
+from __future__ import annotations
+
+import io
+import os
+import shutil
+import sqlite3
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import efvlib as L  # noqa: E402
+import check_lua  # noqa: E402
+import validate_data  # noqa: E402
+import api_audit  # noqa: E402
+import check_logs  # noqa: E402
+import check_all  # noqa: E402
+
+FIX = os.path.join(L.TOOLS_DIR, "fixtures")
+GOOD = os.path.join(FIX, "good")
+BAD = os.path.join(FIX, "bad")
+
+
+def found(rep, level=None):
+    return {(os.path.basename(f.path), f.line, f.code) for f in rep.items if level is None or f.level == level}
+
+
+def codes(rep, level="ERROR"):
+    return {f.code for f in rep.items if f.level == level}
+
+
+class TestCheckLua(unittest.TestCase):
+    def test_runtime_is_lua51(self):
+        self.assertIsNotNone(check_lua.lua_runtime(), "lupa Lua 5.1 runtime missing: pip install lupa")
+
+    def test_good_clean(self):
+        rep = check_lua.check(GOOD, luacheck="off")
+        self.assertEqual(rep.count("ERROR"), 0, [vars(f) for f in rep.items])
+        self.assertEqual(rep.count("WARN"), 0, [vars(f) for f in rep.items])
+
+    def test_bad_detected(self):
+        rep = check_lua.check(BAD, luacheck="off")
+        f = found(rep)
+        for exp in [("EFV_Gameplay.lua", 21, "undefined-global"),      # Plyers typo
+                    ("EFV_Gameplay.lua", 23, "undefined-global"),      # pUnit
+                    ("EFV_Gameplay.lua", 42, "undefined-global"),      # defined only in the UI state
+                    ("EFV_Syntax.lua", 6, "syntax"),                   # missing end
+                    ("EFV_Havok.lua", 2, "syntax"),                    # local x:number
+                    ("EFV_Havok.lua", 2, "type-annotation"),
+                    ("EFV_Gameplay.lua", 17, "global-assign-in-function")]:
+            self.assertIn(exp, f)
+
+    def test_basic_mode(self):
+        rep = check_lua.check(BAD, basic=True, luacheck="off")
+        f = found(rep)
+        self.assertIn(("EFV_Syntax.lua", 2, "syntax-basic"), f)   # 'function' block never closed
+        self.assertIn(("EFV_Havok.lua", 2, "type-annotation"), f)
+
+    def test_syntax_variants(self):
+        bad = {"goto x": "5.2 goto", "local a = 1 // 2": "floor div", "local a = 1 & 2": "bitwise",
+               "if x then": "unclosed if", "local t = {1, 2": "unclosed table"}
+        for src, why in bad.items():
+            ok, _ = check_lua.compile_lua(src.encode(), "@t.lua")
+            self.assertFalse(ok, why)
+        ok, dump = check_lua.compile_lua(b"local x = Foo.Bar\nBaz = 1\nfunction f() Qux = 2 end", "@t.lua")
+        self.assertTrue(ok)
+        gl = {(op, n, d) for op, n, _l, d in check_lua.read_globals(dump)}
+        self.assertEqual(gl, {("get", "Foo", 0), ("set", "Baz", 0), ("set", "f", 0), ("set", "Qux", 1)})
+
+
+class TestValidateData(unittest.TestCase):
+    def test_make_hash_matches_game(self):
+        if not os.path.exists(L.GAMEPLAY_DB):
+            self.skipTest("no gameplay DB")
+        con = sqlite3.connect("file:%s?mode=ro" % L.GAMEPLAY_DB.replace("\\", "/"), uri=True)
+        rows = con.execute("SELECT Type, Hash FROM Types LIMIT 500").fetchall()
+        con.close()
+        for t, h in rows:
+            self.assertEqual(validate_data.make_hash(t), h, t)
+
+    def test_good_clean(self):
+        rep = validate_data.validate(GOOD)
+        self.assertEqual(rep.count("ERROR"), 0, [vars(f) for f in rep.items if f.level == "ERROR"])
+        self.assertEqual(rep.count("WARN"), 0, [vars(f) for f in rep.items if f.level == "WARN"])
+
+    def test_display_name_efv_is_an_error(self):
+        # Designer ruling 0.5.2: displayed text says "VEF"; "EFV_" identifiers are fine.
+        tmp = tempfile.mkdtemp()
+        try:
+            dst = os.path.join(tmp, "EFV_Fixture")
+            shutil.copytree(os.path.join(GOOD, "EFV_Fixture"), dst)
+            txt = os.path.join(dst, "Data", "EFV_Text.xml")
+            with open(txt, encoding="utf-8") as fh:
+                src = fh.read()
+            self.assertIn("VEF forces", src)
+            with open(txt, "w", encoding="utf-8") as fh:
+                fh.write(src.replace("VEF forces", "EFV forces"))
+            rep = validate_data.validate(tmp)
+            hits = [f for f in rep.items if f.code == "text-display-name"]
+            self.assertEqual(len(hits), 1, [vars(f) for f in hits])
+            self.assertIn("LOC_EFV_TRACKER_TITLE", hits[0].msg)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_original_db_untouched(self):
+        if not os.path.exists(L.GAMEPLAY_DB):
+            self.skipTest("no gameplay DB")
+        before = (os.path.getmtime(L.GAMEPLAY_DB), os.path.getsize(L.GAMEPLAY_DB))
+        validate_data.validate(BAD)
+        self.assertEqual(before, (os.path.getmtime(L.GAMEPLAY_DB), os.path.getsize(L.GAMEPLAY_DB)))
+
+    def test_bad_detected(self):
+        rep = validate_data.validate(BAD)
+        f = found(rep)
+        c = codes(rep)
+        for exp in [("EFV_Bad.sql", 9, "sql"),          # unknown column
+                    ("EFV_Bad.sql", 12, "sql"),         # unknown table
+                    ("EFV_Bad.sql", 15, "sql"),         # CHECK constraint
+                    ("EFV_Icons.sql", 2, "sql-icons"),
+                    ("EFV_Malformed.xml", 5, "xml"),
+                    ("EFV_Gameplay.lua", 29, "text-args"),
+                    ("EFV_Gameplay.lua", 30, "text-missing"),
+                    ("EFV_Gameplay.lua", 32, "notification-missing"),
+                    ("EFV_Panel.lua", 4, "ui-instance"),
+                    ("EFV_Panel.lua", 10, "ui-control"),
+                    ("EFV_Panel.lua", 23, "text-args"),         # L(key, ...) wrapper (WP7.3)
+                    ("EFV_Text.xml", 0, "text-plural")]:        # malformed plural / fixed noun (WP7.3)
+            self.assertIn(exp, f)
+        for code in ["sql-fk", "sql-notification", "text-duplicate", "text-collision", "text-reason", "ui-id",
+                     "modinfo-action", "modinfo-deps", "modinfo-files", "modinfo-props", "modinfo-replace",
+                     "modinfo-ui", "modinfo-unlisted", "notification-plan", "notification-icon"]:
+            self.assertIn(code, c)
+        msgs = " | ".join(x.msg for x in rep.items)
+        for frag in ["Data/EFV_Missing.sql does not exist", "EFV_Missing.sql is not listed in <Files>",
+                     "UpdateText id=EFV_Text has no criteria", "undefined criteria 'EFV_NOPE'",
+                     "action id EFV_Gameplay used twice", "UI/EFV_Gone.lua does not exist",
+                     "Scripts/efv_havok.lua differs in case", "Scripts/EFV_Unlisted.lua exists on disk",
+                     "AffectsSavedGames must be 1", "LuaReplace missing", "KIND_NOPE",
+                     "malformed plural form", "fixed noun after a number"]:
+            self.assertIn(frag, msgs)
+
+
+class TestApiAudit(unittest.TestCase):
+    def test_allowlist_parse(self):
+        al = api_audit.load_allowlist(regen=True, quiet=True)
+        s, m, e = al["static"], al["methods"], al["events"]
+        self.assertEqual(set(s["Map.GetPlot"]["ctx"]), {"G", "UI"})
+        self.assertEqual(set(s["Game:SetProperty"]["ctx"]), {"G"})
+        self.assertEqual(set(s["Game:GetProperty"]["ctx"]), {"G", "UI"})
+        self.assertEqual(set(s["Game.GetLocalPlayer"]["ctx"]), {"UI"})
+        # Session A (T09) results merged from api_allowlist_extra.json: GetAttacksRemaining is available in G,
+        # HasOpenBordersFrom is UI-only (no G context: gameplay use is an ERROR).
+        self.assertEqual(m["GetAttacksRemaining"]["ctx"]["G"]["level"], "C")
+        self.assertEqual(m["HasOpenBordersFrom"]["ctx"]["UI"]["level"], "C")
+        self.assertNotIn("G", m["HasOpenBordersFrom"]["ctx"])
+        self.assertEqual(m["IsRevealed"]["ctx"]["G"]["level"], "NV")
+        self.assertEqual(set(m["ChangeGoldBalance"]["ctx"]), {"G"})
+        self.assertIn("Events.UnitMovementPointsCleared", e)
+        self.assertIn("Events.NotificationAdded", e)
+        self.assertIn("GameEvents.EFV_*", e)
+        self.assertIn("MapLayers.ANY", s)
+        self.assertIn("PlayerOperations.EXECUTE_SCRIPT", s)
+        self.assertNotIn("ImportFiles", al["globals"])
+
+    def test_good_clean(self):
+        rep, _ = api_audit.audit(GOOD)
+        self.assertEqual(rep.count("ERROR"), 0, [vars(f) for f in rep.items if f.level == "ERROR"])
+        w = found(rep, "WARN")
+        self.assertIn(("EFV_Gameplay.lua", 16, "async-dv13"), w)       # DV13 exception is a warning
+        # Events.PlayerDefeat is G C since Sessions D/E (was L [T20]): no longer a warning.
+        self.assertNotIn(("EFV_Gameplay.lua", 63, "api-unverified"), w)
+
+    def test_bad_detected(self):
+        rep, _ = api_audit.audit(BAD)
+        f = found(rep)
+        for exp in [("EFV_Gameplay.lua", 5, "async-mutation"),      # ChangeGoldBalance via helper
+                    ("EFV_Gameplay.lua", 6, "async-mutation"),      # GetRandNum via helper
+                    ("EFV_Gameplay.lua", 14, "forbidden-pairs"),
+                    ("EFV_Gameplay.lua", 18, "forbidden"),          # math.random
+                    ("EFV_Gameplay.lua", 19, "forbidden"),          # os.time
+                    ("EFV_Gameplay.lua", 20, "api-context"),        # Game.GetLocalPlayer in G
+                    ("EFV_Gameplay.lua", 22, "lua52"),
+                    ("EFV_Gameplay.lua", 23, "unknown-method"),
+                    ("EFV_Gameplay.lua", 24, "api-context"),        # UI.RequestPlayerOperation in G
+                    ("EFV_Gameplay.lua", 25, "forbidden"),          # ExposedMembers
+                    ("EFV_Gameplay.lua", 26, "unknown-member"),
+                    ("EFV_Gameplay.lua", 28, "forbidden"),          # :Kill(
+                    ("EFV_Gameplay.lua", 33, "gameinfo-unknown"),
+                    ("EFV_Gameplay.lua", 35, "unknown-api"),        # MapLayers.ANYY
+                    ("EFV_Gameplay.lua", 39, "unknown-event"),      # OnGameTurnStartd
+                    ("EFV_Gameplay.lua", 41, "api-context"),        # UI event in G
+                    ("EFV_Util.lua", 8, "region-marker"),
+                    ("EFV_Panel.lua", 7, "onstart-unhandled"),
+                    ("EFV_Panel.lua", 9, "api-context"),            # Game.GetRandNum in UI
+                    ("EFV_Panel.lua", 17, "api-context"),           # GameEvents in UI
+                    ("EFV_Panel.lua", 19, "unknown-event")]:
+            self.assertIn(exp, f)
+        self.assertIn(("EFV_Gameplay.lua", 34, "gameinfo-unlisted"), found(rep, "WARN"))
+        self.assertIn(("EFV_Panel.lua", 12, "pairs-records"), found(rep, "WARN"))
+
+
+class TestCheckLogsAndAll(unittest.TestCase):
+    def test_logs(self):
+        out = io.StringIO()
+        old = sys.stdout
+        sys.stdout = out
+        try:
+            bad = check_logs.main(["--logs", os.path.join(FIX, "logs", "bad")])
+            good = check_logs.main(["--logs", os.path.join(FIX, "logs", "good")])
+        finally:
+            sys.stdout = old
+        self.assertEqual(bad, 1)
+        self.assertEqual(good, 0)
+        text = out.getvalue()
+        self.assertIn("EFV_Transit.lua:42", text)
+        self.assertIn("no column named NoSuchColumn", text)
+        self.assertIn("EFV_Text - Failed loading XML", text)
+        self.assertNotIn("something unrelated", text)
+
+    def test_check_all_exit_codes(self):
+        out = io.StringIO()
+        self.assertEqual(check_all.run([GOOD], out=out)[0], 0)
+        self.assertEqual(check_all.run([BAD], out=out)[0], 1)
+        self.assertEqual(check_all.run([GOOD], strict=True, out=out)[0], 1)   # good fixture has 2 WARNs
+
+
+class TestOfflineRunnerClassify(unittest.TestCase):
+    """tests/offline/run_tests.py: XFAIL only for an explicit, WP/phase-named mark (Phase 5)."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(os.path.dirname(L.TOOLS_DIR), "tests", "offline"))
+        import run_tests  # noqa: E402
+        cls.rt = run_tests
+
+    def test_stub_hit_is_not_an_excuse(self):
+        status, detail, _ = self.rt.classify(False, "ASSERT boom", None, ["EFV_Entrust.CleanupSnapshots"])
+        self.assertEqual(status, "FAIL")
+        self.assertIn("not an excuse", detail)
+
+    def test_explicit_mark(self):
+        self.assertEqual(self.rt.classify(False, "x", "Phase 6 (WP6.1): Entrust", [])[0], "XFAIL")
+        self.assertEqual(self.rt.classify(True, "", "WP6.2 popup", [])[0], "XPASS")
+        self.assertEqual(self.rt.classify(True, "", None, ["EFV_X.Y"])[0], "PASS")
+
+    def test_mark_must_name_pending_work(self):
+        status, detail, xfail = self.rt.classify(False, "x", "flaky", [])
+        self.assertEqual((status, xfail), ("FAIL", None))
+        self.assertIn("names no pending work package", detail)
+        self.assertEqual(self.rt.classify(True, "", "someday", [])[0], "FAIL")
+
+
+if __name__ == "__main__":
+    L.configure_stdout()
+    unittest.main(verbosity=2)

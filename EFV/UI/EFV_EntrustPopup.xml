@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ======================================================================
+     EFV_EntrustPopup (AddUserInterfaces, Context InGame) - PLAN 3.4, E1,
+     SPIKES UI-S2 (T24 CONFIRMED in game, Session F). Companion context with
+     no visible controls of its own: on
+     LuaEvents.NotificationPanel_OpenRazeCityChooser the Lua moves
+     EFV_EntrustStack into /InGame/RazeCity/PopupStack (ChangeParent, the
+     pattern the T24 harness proved visible and clickable):
+       EntrustMainButton   "Entrust..." (disabled with the reasons when
+                           nobody qualifies); a click opens / closes the
+                           recipient picker below it
+       EFV_RecipientStack  the picker: one EFV_EntrustButtonInstance per
+                           recipient of the capture-time snapshot ("Entrust
+                           to [Civ]"; first click arms, second click sends)
+     Rebuilt on every open. Owner: WP6.2. Used only while
+     EFV_Config.FLAG_ENTRUST_UI = "INJECT"; with the E2 fallback this file
+     is removed from the AddUserInterfaces action.
+     ====================================================================== -->
+<Context Name="EFV_EntrustPopup">
+	<Stack ID="EFV_EntrustStack" Anchor="L,T" StackGrowth="Bottom" StackPadding="6" Hidden="1">
+		<GridButton ID="EntrustMainButton" Size="400,41" Style="MainButton" String="LOC_EFV_ENTRUST_HEADER"/>
+		<Stack ID="EFV_RecipientStack" Anchor="L,T" StackGrowth="Bottom" StackPadding="4" Hidden="1"/>
+	</Stack>
+
+	<Instance Name="EFV_EntrustButtonInstance">
+		<GridButton ID="EntrustButton" Size="400,41" Style="MainButton"/>
+	</Instance>
+</Context>

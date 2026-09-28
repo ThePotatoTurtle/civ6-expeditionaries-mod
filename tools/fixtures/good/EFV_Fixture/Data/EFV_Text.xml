@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameData>
+	<LocalizedText>
+		<Row Tag="LOC_EFV_MOD_TITLE" Language="en_US"><Text>Expeditionary Forces, Volunteers and Entrust (fixture)</Text></Row>
+		<Row Tag="LOC_EFV_MOD_TEASER" Language="en_US"><Text>Fixture for tools/ tests.</Text></Row>
+		<Row Tag="LOC_EFV_MOD_DESCRIPTION" Language="en_US"><Text>Fixture mod used by tools/test_tools.py. Not a real mod.</Text></Row>
+		<Row Tag="LOC_EFV_TRACKER_TITLE" Language="en_US"><Text>VEF forces</Text></Row>
+		<Row Tag="LOC_EFV_ACTION_SEND_EXPEDITIONARY" Language="en_US"><Text>Send as Expeditionary Force</Text></Row>
+		<Row Tag="LOC_EFV_STATE_GRACE" Language="en_US"><Text>Grace, {1_Num : plural 1?1 turn; other?# turns;} left</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_DEPARTED_MESSAGE" Language="en_US"><Text>Departed</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_DEPARTED_SUMMARY" Language="en_US"><Text>Departed summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_MESSAGE" Language="en_US"><Text>Arrived</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_SUMMARY" Language="en_US"><Text>Arrived summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_SPAWN_BLOCKED_MESSAGE" Language="en_US"><Text>Spawn Blocked</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_SPAWN_BLOCKED_SUMMARY" Language="en_US"><Text>Spawn Blocked summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_MESSAGE" Language="en_US"><Text>Expiry Soon</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_SUMMARY" Language="en_US"><Text>Expiry Soon summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_GRACE_MESSAGE" Language="en_US"><Text>Grace</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_GRACE_SUMMARY" Language="en_US"><Text>Grace summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_MESSAGE" Language="en_US"><Text>Mutiny</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_SUMMARY" Language="en_US"><Text>Mutiny summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_DEATH_MESSAGE" Language="en_US"><Text>Mutiny Death</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_MUTINY_DEATH_SUMMARY" Language="en_US"><Text>Mutiny Death summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_MESSAGE" Language="en_US"><Text>Returning</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_SUMMARY" Language="en_US"><Text>Returning summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNED_MESSAGE" Language="en_US"><Text>Returned</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNED_SUMMARY" Language="en_US"><Text>Returned summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_REROUTED_MESSAGE" Language="en_US"><Text>Rerouted</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_REROUTED_SUMMARY" Language="en_US"><Text>Rerouted summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_VOLUNTEER_LAPSE_MESSAGE" Language="en_US"><Text>Volunteer Lapse</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_VOLUNTEER_LAPSE_SUMMARY" Language="en_US"><Text>Volunteer Lapse summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_ENTRUSTED_MESSAGE" Language="en_US"><Text>Entrusted</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_ENTRUSTED_SUMMARY" Language="en_US"><Text>Entrusted summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_ACCESS_LAPSE_MESSAGE" Language="en_US"><Text>Access Lapse</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_ACCESS_LAPSE_SUMMARY" Language="en_US"><Text>Access Lapse summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_UNIT_LOST_MESSAGE" Language="en_US"><Text>Unit Lost</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_UNIT_LOST_SUMMARY" Language="en_US"><Text>Unit Lost summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_MESSAGE" Language="en_US"><Text>Merged</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_MERGED_SUMMARY" Language="en_US"><Text>Merged summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_REVERTED_MESSAGE" Language="en_US"><Text>Reverted</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_REVERTED_SUMMARY" Language="en_US"><Text>Reverted summary</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_REQUEST_FAILED_MESSAGE" Language="en_US"><Text>Request Failed</Text></Row>
+		<Row Tag="LOC_EFV_NOTIF_REQUEST_FAILED_SUMMARY" Language="en_US"><Text>Request Failed summary</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NOT_HUMAN_MAJOR" Language="en_US"><Text>Reason: not human major</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NOT_OWNER" Language="en_US"><Text>Reason: not owner</Text></Row>
+		<Row Tag="LOC_EFV_REASON_CLASS_NEVER" Language="en_US"><Text>Reason: class never</Text></Row>
+		<Row Tag="LOC_EFV_REASON_FORMATION" Language="en_US"><Text>Reason: formation</Text></Row>
+		<Row Tag="LOC_EFV_REASON_DAMAGED" Language="en_US"><Text>Reason: damaged</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NOT_OWN_TERRITORY" Language="en_US"><Text>Reason: not own territory</Text></Row>
+		<Row Tag="LOC_EFV_REASON_EMBARKED" Language="en_US"><Text>Reason: embarked</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NO_MOVES" Language="en_US"><Text>Reason: no moves</Text></Row>
+		<Row Tag="LOC_EFV_REASON_ATTACKED" Language="en_US"><Text>Reason: attacked</Text></Row>
+		<Row Tag="LOC_EFV_REASON_ALREADY_TRACKED" Language="en_US"><Text>Reason: already tracked</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NOT_PARTNER" Language="en_US"><Text>Reason: not partner</Text></Row>
+		<Row Tag="LOC_EFV_REASON_VOL_NEEDS_ACCESS" Language="en_US"><Text>Reason: vol needs access</Text></Row>
+		<Row Tag="LOC_EFV_REASON_CS_NOT_MET" Language="en_US"><Text>Reason: cs not met</Text></Row>
+		<Row Tag="LOC_EFV_REASON_AT_WAR_WITH_RECIPIENT" Language="en_US"><Text>Reason: at war with recipient</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NO_COMMON_WAR" Language="en_US"><Text>Reason: no common war</Text></Row>
+		<Row Tag="LOC_EFV_REASON_CITY_NOT_OWNED" Language="en_US"><Text>Reason: city not owned</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NOT_REVEALED" Language="en_US"><Text>Reason: not revealed</Text></Row>
+		<Row Tag="LOC_EFV_REASON_GOLD" Language="en_US"><Text>Reason: gold</Text></Row>
+		<Row Tag="LOC_EFV_REASON_NAVAL_NO_SPAWN" Language="en_US"><Text>Reason: naval no spawn</Text></Row>
+		<Row Tag="LOC_EFV_REASON_FEE_CHANGED" Language="en_US"><Text>Reason: fee changed</Text></Row>
+		<Row Tag="LOC_EFV_REASON_REQ_STALE" Language="en_US"><Text>Reason: req stale</Text></Row>
+		<Row Tag="LOC_EFV_REASON_RECALL_MIN_TURNS" Language="en_US"><Text>Reason: recall min turns</Text></Row>
+		<Row Tag="LOC_EFV_REASON_RECALL_TERRITORY" Language="en_US"><Text>Reason: recall territory</Text></Row>
+		<Row Tag="LOC_EFV_REASON_RECALL_NOT_VOLUNTEER" Language="en_US"><Text>Reason: recall not volunteer</Text></Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_NO_PARTNER" Language="en_US"><Text>Reason: entrust no partner</Text></Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_STALE" Language="en_US"><Text>Reason: entrust stale</Text></Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_RECIPIENT_INVALID" Language="en_US"><Text>Reason: entrust recipient invalid</Text></Row>
+		<Row Tag="LOC_EFV_REASON_ENTRUST_FAILED" Language="en_US"><Text>Reason: entrust failed</Text></Row>
+	</LocalizedText>
+</GameData>

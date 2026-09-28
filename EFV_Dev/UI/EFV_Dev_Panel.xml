@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- EFV_Dev_Panel: developer panel for EFV acceptance tests (UI context, AddUserInterfaces InGame).
+     Toggle: Ctrl+Shift+D or the "DEV" launch bar button. InGame.lua loads this context HIDDEN;
+     the Lua un-hides ContextPtr in Initialize and toggles only the Main container. -->
+<Context Name="EFV_Dev_Panel">
+
+	<Container ID="Main" Anchor="L,T" Offset="12,64" Size="600,700" Hidden="1" ConsumeMouse="1">
+		<Box Anchor="L,T" Size="parent,parent" Color="12,20,16,235"/>
+		<Box Anchor="L,T" Size="parent,2" Color="120,200,140,255"/>
+		<Box Anchor="L,B" Size="parent,2" Color="120,200,140,255"/>
+		<Stack ID="MainStack" Anchor="L,T" Offset="10,8" StackGrowth="Bottom" StackPadding="4">
+			<Container Size="580,28">
+				<Label ID="TitleLabel" Anchor="L,C" Style="FontNormal18" Color="190,240,200,255" String="VEF Dev  (Ctrl+Shift+D)"/>
+				<GridButton ID="RefreshButton" Anchor="R,C" Offset="76,0" Size="70,26" SliceCorner="12,12" SliceSize="1,1" SliceTextureSize="24,24" Texture="Controls_ButtonControl_Brown" StateOffsetIncrement="0,24" Style="FontNormal14" TextColor="230,220,200,255" String="Refresh"/>
+				<GridButton ID="CloseButton" Anchor="R,C" Size="70,26" SliceCorner="12,12" SliceSize="1,1" SliceTextureSize="24,24" Texture="Controls_ButtonControl_Brown" StateOffsetIncrement="0,24" Style="FontNormal14" TextColor="230,220,200,255" String="Close"/>
+			</Container>
+			<Label ID="InfoLabel" Anchor="L,T" Style="FontNormal14" Color="210,210,210,255" WrapWidth="580" String="-"/>
+			<Label ID="RecordLabel" Anchor="L,T" Style="FontNormal12" Color="190,240,200,255" WrapWidth="580" String="-"/>
+			<Stack Anchor="L,T" StackGrowth="Right" StackPadding="6">
+				<Label Anchor="L,C" Style="FontNormal14" Color="190,240,200,255" String="Target:"/>
+				<GridButton ID="TargetPrev" Anchor="L,C" Size="32,26" SliceCorner="12,12" SliceSize="1,1" SliceTextureSize="24,24" Texture="Controls_ButtonControl_Brown" StateOffsetIncrement="0,24" Style="FontNormal14" TextColor="230,220,200,255" String="&lt;"/>
+				<GridButton ID="TargetNext" Anchor="L,C" Size="32,26" SliceCorner="12,12" SliceSize="1,1" SliceTextureSize="24,24" Texture="Controls_ButtonControl_Brown" StateOffsetIncrement="0,24" Style="FontNormal14" TextColor="230,220,200,255" String="&gt;"/>
+				<Label ID="TargetLabel" Anchor="L,C" Style="FontNormal14" Color="255,255,255,255" String="-"/>
+			</Stack>
+			<Stack Anchor="L,T" StackGrowth="Right" StackPadding="6">
+				<Label Anchor="L,C" Style="FontNormal14" Color="190,240,200,255" String="Type:"/>
+				<Grid Style="EditTextButton" Anchor="L,C" Size="250,26">
+					<EditBox ID="TypeEdit" Style="EditTextArea" Anchor="L,C" Offset="6,0" Size="parent-12,22" MaxLength="60"/>
+				</Grid>
+				<Label Anchor="L,C" Style="FontNormal14" Color="190,240,200,255" String="Amount:"/>
+				<Grid Style="EditTextButton" Anchor="L,C" Size="90,26">
+					<EditBox ID="AmountEdit" Style="EditTextArea" Anchor="L,C" Offset="6,0" Size="parent-12,22" MaxLength="10"/>
+				</Grid>
+			</Stack>
+			<Stack Anchor="L,T" StackGrowth="Right" StackPadding="6">
+				<Label Anchor="L,C" Style="FontNormal14" Color="190,240,200,255" String="Extra (k=v;k=v):"/>
+				<Grid Style="EditTextButton" Anchor="L,C" Size="440,26">
+					<EditBox ID="ExtraEdit" Style="EditTextArea" Anchor="L,C" Offset="6,0" Size="parent-12,22" MaxLength="200"/>
+				</Grid>
+			</Stack>
+			<ScrollPanel ID="ButtonScroll" Anchor="L,T" Size="580,500" Vertical="1" AutoScrollBar="1">
+				<Stack ID="ButtonStack" Anchor="L,T" StackGrowth="Right" WrapWidth="560" StackPadding="4"/>
+				<ScrollBar Style="ScrollVerticalBarAlt" Anchor="R,C" AnchorSide="O,I"/>
+			</ScrollPanel>
+		</Stack>
+	</Container>
+
+	<Instance Name="DevButtonInstance">
+		<GridButton ID="Button" Size="136,26" SliceCorner="12,12" SliceSize="1,1" SliceTextureSize="24,24" Texture="Controls_ButtonControl_Brown" StateOffsetIncrement="0,24" Style="FontNormal12" TextColor="230,220,200,255" String=""/>
+	</Instance>
+
+	<Instance Name="DevHeaderInstance">
+		<Container ID="Header" Size="560,22">
+			<Label ID="HeaderLabel" Anchor="L,B" Style="FontNormal14" Color="190,240,200,255" String=""/>
+		</Container>
+	</Instance>
+
+	<Instance Name="DevLaunchBarItem">
+		<Button ID="LaunchItemButton" Anchor="L,C" Size="49,49" Texture="LaunchBar_Hook_GreatPeopleButton" Style="ButtonNormalText" TextureOffset="0,-1" StateOffsetIncrement="0,49" ToolTip="VEF Dev panel (Ctrl+Shift+D)">
+			<Label Anchor="C,C" Offset="0,1" Style="FontNormal14" Color="190,240,200,255" String="DEV"/>
+		</Button>
+	</Instance>
+	<Instance Name="DevLaunchBarPinInstance">
+		<Image ID="Pin" Anchor="L,C" Offset="0,-2" Size="7,7" Texture="LaunchBar_TrackPip" Color="255,255,255,200"/>
+	</Instance>
+
+</Context>

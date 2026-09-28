@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Context Name="EFV_Tracker">
+	<Container ID="Main" Anchor="L,T" Size="300,200" Hidden="1">
+		<Label ID="Title" Anchor="L,T" String="LOC_EFV_TRACKER_TITLE"/>
+		<Stack ID="RowStack" Anchor="L,T" Offset="0,24" StackGrowth="Bottom"/>
+		<GridButton ID="SendButton" Anchor="L,B" Size="160,24" String="LOC_EFV_ACTION_SEND_EXPEDITIONARY"/>
+	</Container>
+	<Instance Name="RowInstance">
+		<Label ID="RowLabel" Anchor="L,T" String=""/>
+	</Instance>
+</Context>

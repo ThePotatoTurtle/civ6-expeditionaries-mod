@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ======================================================================
+     EFV_UnitActions (AddUserInterfaces, Context InGame) - PLAN 3.2, UI-S1.
+     Companion context. EFV_ActionStack is re-parented into
+     /InGame/UnitPanel/<EFV_Config.FLAG_UNIT_ACTIONS_STACK> by Attach().
+     EFV_ActionInstance is a copy of UnitPanel.xml:492-496 (UnitActionInstance)
+     and is used for the Send (EXP/VOL/CS), Recall and Status/merge-warning
+     buttons. Owner: WP1.5 (VOL/Recall WP3.3, status button WP5.4).
+     The stack starts Hidden="1"; Refresh() shows it only while it holds
+     at least one button, so an empty stack never takes stack padding.
+     ====================================================================== -->
+<Context Name="EFV_UnitActions">
+	<Stack ID="EFV_ActionStack" Anchor="C,B" StackGrowth="Right" Padding="2" ConsumeMouse="1" Hidden="1"/>
+
+	<Instance Name="EFV_ActionInstance">
+		<Button ID="UnitActionButton" Anchor="L,T" Size="44,53" Texture="UnitPanel_ActionButton">
+			<Image ID="UnitActionIcon" Anchor="C,C" Offset="0,-2" Size="38,38" Texture="UnitActions"/>
+		</Button>
+	</Instance>
+</Context>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mod id="94ec021d-9956-4a30-b9c1-5ccf136679bf" version="1">
+  <Properties>
+    <Name>VEF Dev Tools (testing only) v0.6.0-dev.1</Name>
+    <Teaser>Test helpers for Volunteer &amp; Expeditionary Forces (VEF). Not for normal play.</Teaser>
+    <Description>Developer panel for the VEF in-game tests. One-click scenarios for the final test session, plus tools to spawn units, set damage, XP and promotions, change gold and resources, set alliances, friendships and wars, move VEF timers and list VEF records. Open it with Ctrl+Shift+D. Writes to Lua.log. Requires Volunteer &amp; Expeditionary Forces (VEF) 0.6.0-dev. Never enable it in a real game. Version 0.6.0-dev.1.</Description>
+    <Authors>VEF project</Authors>
+    <AffectsSavedGames>1</AffectsSavedGames>
+    <CompatibleVersions>2.0</CompatibleVersions>
+  </Properties>
+
+  <Dependencies>
+    <Mod id="4873eb62-8ccc-4574-b784-dda455e74e68" title="Expansion: Gathering Storm" />
+    <Mod id="fcc83bd7-1abf-4d9a-bddb-01633574bf40" title="Volunteer &amp; Expeditionary Forces" />
+  </Dependencies>
+
+  <ActionCriteria>
+    <Criteria id="EFV_DEV_XP2">
+      <GameCoreInUse>Expansion2</GameCoreInUse>
+    </Criteria>
+  </ActionCriteria>
+
+  <InGameActions>
+    <AddGameplayScripts id="EFV_DEV_Gameplay" criteria="EFV_DEV_XP2">
+      <Properties>
+        <LoadOrder>14000</LoadOrder>
+      </Properties>
+      <File>Scripts/EFV_Dev_Gameplay.lua</File>
+    </AddGameplayScripts>
+    <AddUserInterfaces id="EFV_DEV_UI" criteria="EFV_DEV_XP2">
+      <Properties>
+        <Context>InGame</Context>
+        <LoadOrder>14000</LoadOrder>
+      </Properties>
+      <File>UI/EFV_Dev_Panel.xml</File>
+    </AddUserInterfaces>
+  </InGameActions>
+
+  <Files>
+    <File>Scripts/EFV_Dev_Gameplay.lua</File>
+    <File>UI/EFV_Dev_Panel.lua</File>
+    <File>UI/EFV_Dev_Panel.xml</File>
+  </Files>
+</Mod>

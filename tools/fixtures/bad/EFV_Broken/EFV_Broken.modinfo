@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Intentionally broken fixture for tools/test_tools.py. Every problem below must be reported. -->
+<Mod id="5a1d2c3b-0000-4bad-8bad-000000000bad" version="1">
+  <Properties>
+    <Name>LOC_EFV_MOD_TITLE</Name>
+    <Description>Broken fixture</Description>
+    <!-- AffectsSavedGames must be 1 -->
+    <AffectsSavedGames>0</AffectsSavedGames>
+  </Properties>
+  <!-- no Gathering Storm dependency -->
+  <Dependencies>
+    <Mod id="1b28771a-c749-434b-9053-d1380c553de9" title="Expansion: Rise and Fall" />
+  </Dependencies>
+  <ActionCriteria>
+    <Criteria id="EFV_XP2">
+      <GameCoreInUse>Expansion2</GameCoreInUse>
+    </Criteria>
+  </ActionCriteria>
+  <InGameActions>
+    <UpdateDatabase id="EFV_Data" criteria="EFV_XP2">
+      <File>Data/EFV_Bad.sql</File>
+      <!-- does not exist and is not in Files -->
+      <File>Data/EFV_Missing.sql</File>
+    </UpdateDatabase>
+    <UpdateIcons id="EFV_Icons" criteria="EFV_XP2">
+      <File>Data/EFV_Icons.sql</File>
+    </UpdateIcons>
+    <!-- no criteria -->
+    <UpdateText id="EFV_Text">
+      <File>Data/EFV_Text.xml</File>
+    </UpdateText>
+    <ImportFiles id="EFV_Imports" criteria="EFV_NOPE">
+      <File>Scripts/EFV_Util.lua</File>
+    </ImportFiles>
+    <AddGameplayScripts id="EFV_Gameplay" criteria="EFV_XP2">
+      <File>Scripts/EFV_Gameplay.lua</File>
+      <File>Scripts/EFV_Syntax.lua</File>
+      <File>Scripts/EFV_Havok.lua</File>
+    </AddGameplayScripts>
+    <!-- duplicate id, no Context -->
+    <AddUserInterfaces id="EFV_Gameplay" criteria="EFV_XP2">
+      <File>UI/EFV_Panel.xml</File>
+    </AddUserInterfaces>
+    <!-- no LuaReplace -->
+    <ReplaceUIScript id="EFV_UnitFlags" criteria="EFV_XP2">
+      <Properties>
+        <LuaContext>UnitFlagManager</LuaContext>
+      </Properties>
+    </ReplaceUIScript>
+  </InGameActions>
+  <Files>
+    <File>Data/EFV_Bad.sql</File>
+    <File>Data/EFV_Icons.sql</File>
+    <File>Data/EFV_Text.xml</File>
+    <File>Scripts/EFV_Util.lua</File>
+    <File>Scripts/EFV_Gameplay.lua</File>
+    <File>Scripts/EFV_Syntax.lua</File>
+    <File>Scripts/efv_havok.lua</File>
+    <File>UI/EFV_Panel.xml</File>
+    <File>UI/EFV_Panel.lua</File>
+    <File>UI/EFV_Malformed.xml</File>
+    <!-- listed but not on disk -->
+    <File>UI/EFV_Gone.lua</File>
+  </Files>
+</Mod>

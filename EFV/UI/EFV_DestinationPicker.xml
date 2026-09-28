@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ======================================================================
+     EFV_DestinationPicker (AddUserInterfaces, Context InGame) - PLAN 3.3,
+     R4 2.2. Modal popup (QueuePopup PopupPriority.Medium), opened by
+     LuaEvents.EFV_OpenDestinationPicker(playerID, unitID, forceType).
+     Columns (spec 14.2): Recipient, City, Distance, Transit, Fee, Duration.
+     Rows: instance EFV_DestRowInstance in RowStack. Owner: WP1.5.
+     Text keys (PLAN 4.2): LOC_EFV_PICKER_TITLE, LOC_EFV_COL_*.
+     PickerRoot starts Hidden="1" so a Lua load failure can never leave a
+     full-screen mouse-consuming box on screen; Open() must also call
+     Controls.PickerRoot:SetHide(false) and Close() SetHide(true).
+     ====================================================================== -->
+<Context Name="EFV_DestinationPicker">
+	<Box ID="PickerRoot" Size="parent,parent" Color="0,0,0,150" ConsumeMouse="1" Hidden="1">
+		<Grid Anchor="C,C" Size="760,520" Style="DropShadow2" AutoSizePadding="25,25" ConsumeMouse="1">
+			<Grid ID="PickerWindow" Anchor="C,C" Size="740,500" Style="WindowFrameTitle">
+				<Label ID="PickerTitle" Style="WindowHeader" Anchor="C,T" Offset="0,12" String="{LOC_EFV_PICKER_TITLE:upper}"/>
+				<Button ID="CloseButton" Anchor="R,T" Style="CloseButtonLarge" Offset="-8,-5"/>
+				<Stack ID="HeaderRow" Anchor="L,T" Offset="20,50" StackGrowth="Right">
+					<Label ID="HeaderRecipient" Size="160,24" Style="BodyTextDark16" String="LOC_EFV_COL_RECIPIENT"/>
+					<Label ID="HeaderCity"      Size="160,24" Style="BodyTextDark16" String="LOC_EFV_COL_CITY"/>
+					<Label ID="HeaderDistance"  Size="80,24"  Style="BodyTextDark16" String="LOC_EFV_COL_DISTANCE"/>
+					<Label ID="HeaderTransit"   Size="80,24"  Style="BodyTextDark16" String="LOC_EFV_COL_TRANSIT"/>
+					<Label ID="HeaderFee"       Size="80,24"  Style="BodyTextDark16" String="LOC_EFV_COL_FEE"/>
+					<Label ID="HeaderDuration"  Size="100,24" Style="BodyTextDark16" String="LOC_EFV_COL_DURATION"/>
+				</Stack>
+				<ScrollPanel ID="RowScroll" Anchor="L,T" Offset="16,80" Size="705,400" Vertical="1" AutoScrollBar="1">
+					<Stack ID="RowStack" StackGrowth="Bottom" Padding="2"/>
+					<ScrollBar Anchor="R,T" Style="Slider_Light" Size="11,parent"/>
+				</ScrollPanel>
+				<Label ID="EmptyLabel" Anchor="C,C" Style="BodyTextDark16" Hidden="1"/>
+			</Grid>
+		</Grid>
+	</Box>
+
+	<Instance Name="EFV_DestRowInstance">
+		<GridButton ID="RowButton" Size="690,32" Style="ButtonControl">
+			<Stack StackGrowth="Right" Anchor="L,C" Offset="6,0">
+				<Label ID="RecipientLabel" Size="160,24" Style="FontNormal14"/>
+				<Label ID="CityLabel"      Size="160,24" Style="FontNormal14"/>
+				<Label ID="DistanceLabel"  Size="80,24"  Style="FontNormal14"/>
+				<Label ID="TransitLabel"   Size="80,24"  Style="FontNormal14"/>
+				<Label ID="FeeLabel"       Size="80,24"  Style="FontNormal14"/>
+				<Label ID="DurationLabel"  Size="100,24" Style="FontNormal14"/>
+			</Stack>
+		</GridButton>
+	</Instance>
+</Context>

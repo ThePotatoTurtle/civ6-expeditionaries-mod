@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ======================================================================
+     EFV_Tracker (AddUserInterfaces, Context InGame) - PLAN 3.6, spec 14.5, D9.
+     * LaunchBarItem / LaunchBarPinInstance: built into
+       /InGame/LaunchBar/ButtonStack on LoadGameViewStateDone (mirrors
+       LaunchBar.xml:106-116 and the spike panel's launch button, which works
+       in game; the "VEF" text label (the displayed abbreviation, designer ruling
+       0.5.2) replaces the base icon image).
+     * TrackerPanel: list of the local player's records, sent and received
+       (header row TrackerHeader, rows = EFV_TrackerRowInstance in
+       TrackerStack, summary line TrackerSummary). GRACE / MUTINY rows are
+       red with a red AlertHighlight box (D9).
+     * AlertBanner: top-centre D9 banner shown while any record of the local
+       player is in GRACE or MUTINY; click cycles camera focus.
+     Everything starts hidden. Owner: WP2.2 (alerts), WP7.2 (full panel).
+     Column widths: Unit 170, Partner 150, Force 170, State 120, Turns 50,
+     Destination 150 (+ 6 left padding) = 816 = row width; the header
+     stack sits at the rows' text offset (16 + 6).
+     ====================================================================== -->
+<Context Name="EFV_Tracker">
+	<!-- D9 alert banner -->
+	<Container ID="AlertBanner" Anchor="C,T" Offset="0,90" Size="520,40" Hidden="1">
+		<GridButton ID="BannerButton" Anchor="C,C" Size="520,40" Style="ButtonControl">
+			<Label ID="BannerLabel" Anchor="C,C" Style="FontNormal14" Color="255,90,90,255"/>
+		</GridButton>
+	</Container>
+
+	<!-- Tracker panel -->
+	<Container ID="TrackerPanel" Anchor="C,C" Size="860,500" Hidden="1" ConsumeMouse="1">
+		<Grid ID="TrackerWindow" Anchor="C,C" Size="860,500" Style="WindowFrameTitle">
+			<Label ID="TrackerTitle" Style="WindowHeader" Anchor="C,T" Offset="0,12" String="{LOC_EFV_TRACKER_TITLE:upper}"/>
+			<Button ID="TrackerCloseButton" Anchor="R,T" Style="CloseButtonLarge" Offset="-8,-5"/>
+			<Stack ID="TrackerHeader" Anchor="L,T" Offset="22,50" StackGrowth="Right">
+				<Container Size="170,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_UNIT"/></Container>
+				<Container Size="150,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_PARTNER"/></Container>
+				<Container Size="170,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_FORCE"/></Container>
+				<Container Size="120,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_STATE"/></Container>
+				<Container Size="50,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_TURNS"/></Container>
+				<Container Size="150,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_DEST"/></Container>
+			</Stack>
+			<ScrollPanel ID="TrackerScroll" Anchor="L,T" Offset="16,76" Size="830,380" Vertical="1" AutoScrollBar="1">
+				<Stack ID="TrackerStack" StackGrowth="Bottom" Padding="2"/>
+				<ScrollBar Anchor="R,T" Style="Slider_Light" Size="11,parent"/>
+			</ScrollPanel>
+			<Label ID="TrackerEmptyLabel" Anchor="C,C" Style="BodyTextDark16" String="LOC_EFV_TRACKER_EMPTY" Hidden="1"/>
+			<Label ID="TrackerSummary" Anchor="L,B" Offset="22,14" Style="FontNormal14" Color="200,200,200,255"/>
+		</Grid>
+	</Container>
+
+	<Instance Name="EFV_TrackerRowInstance">
+		<GridButton ID="RowButton" Size="816,30" Style="ButtonControl">
+			<Box ID="AlertHighlight" Size="parent,parent" Color="170,30,30,90" Hidden="1"/>
+			<Stack StackGrowth="Right" Anchor="L,C" Offset="6,0">
+				<Container Size="170,24"><Label ID="UnitLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="164"/></Container>
+				<Container Size="150,24"><Label ID="PartnerLabel" Anchor="L,C" Style="FontNormal14" TruncateWidth="144"/></Container>
+				<Container Size="170,24"><Label ID="ForceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="164"/></Container>
+				<Container Size="120,24"><Label ID="StateLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="114"/></Container>
+				<Container Size="50,24"><Label ID="TurnsLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="44"/></Container>
+				<Container Size="150,24"><Label ID="PlaceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="144"/></Container>
+			</Stack>
+		</GridButton>
+	</Instance>
+
+	<!-- Launch bar button (built into /InGame/LaunchBar/ButtonStack) -->
+	<Instance Name="LaunchBarItem">
+		<Button ID="LaunchItemButton" Anchor="L,C" Size="49,49" Texture="LaunchBar_Hook_GreatPeopleButton" Style="ButtonNormalText" TextureOffset="0,-1" StateOffsetIncrement="0,49" ToolTip="LOC_EFV_TRACKER_TITLE">
+			<Label ID="LaunchItemLabel" Anchor="C,C" Offset="0,1" Style="FontNormal14" Color="255,230,160,255" String="VEF"/>
+			<Label ID="AlertIndicator" String="[ICON_New]" Anchor="R,T" AnchorSide="O,O" Offset="-18,-18" Hidden="1"/>
+		</Button>
+	</Instance>
+
+	<Instance Name="LaunchBarPinInstance">
+		<Image ID="Pin" Anchor="L,C" Offset="0,-2" Size="7,7" Texture="LaunchBar_TrackPip" Color="255,255,255,200"/>
+	</Instance>
+</Context>
