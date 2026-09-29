@@ -19,3 +19,7 @@ __pycache__/
 
 # Generated from the local game database (Firaxis data, not redistributed); run_tests.py rebuilds it
 tests/offline/data/gameinfo_data.lua
+
+# Steam Workshop drafts (local only)
+workshop/
+FIXPLAN_*.md
