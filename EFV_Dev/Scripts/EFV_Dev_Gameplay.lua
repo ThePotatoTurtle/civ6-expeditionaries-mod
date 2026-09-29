@@ -46,10 +46,11 @@ EFV_Dev = {}
 -- fixes (S4 holds the Volunteer, S10 removes the Barbarians after your
 -- fight, S12 checks the arrival turn): 0.7.2-dev.1; rebuilt for EFV
 -- 0.7.3-dev without changes: 0.7.3-dev.1; rebuilt for EFV 0.7.4-dev
--- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3); a
+-- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3; rebuilt for
+-- the EFV 1.0.0 release without changes: 1.0.0.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.7.4-dev.3"
-EFV_Dev.FOR_EFV = "0.7.4-dev"
+EFV_Dev.VERSION = "1.0.0.1"
+EFV_Dev.FOR_EFV = "1.0.0"
 
 -- ---------------------------------------------------------------------------
 -- Helpers

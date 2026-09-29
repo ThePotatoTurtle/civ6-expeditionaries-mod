@@ -23,3 +23,6 @@ tests/offline/data/gameinfo_data.lua
 # Steam Workshop drafts (local only)
 workshop/
 FIXPLAN_*.md
+
+# Release packages (built locally, attached to GitHub releases)
+dist/

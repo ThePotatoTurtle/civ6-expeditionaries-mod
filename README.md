@@ -2,7 +2,7 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 0.7.4-dev. This is a development build.
+Version 1.0.0.
 
 ## The four options
 
@@ -152,19 +152,20 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
-- 0.7.4-dev: Veterans with three or more promotions no longer lose their level when they come home. They get one promotion back per turn until all are back.
-- 0.7.3-dev: In the tracker, every column you can sort by shows a faded up and down mark next to its title. The sorted column keeps its single arrow.
-- 0.7.2-dev: The coloured emblem under a lent unit's flag was drawn almost black. It is now gold, green or light blue as intended. A veteran coming home gets its promotions back in the turn it arrives, not one turn later. The tracker's sort marks are now proper arrows. VEF warnings (grace, mutiny, lapse, service ending, blocked arrival, rerouted unit) stay until the problem is over, and losses stay until you dismiss them. Only plain news (departed, arrived, returned) still clears at the end of the turn. VEF never touches notifications from the game or other mods.
-- 0.7.1-dev: The tracker columns can be sorted by clicking their titles. The scroll bar is now dark blue and easier to see.
-- 0.7.0-dev: A unit can also be sent from the territory of the partner or city-state it goes to, but then only to that partner. City-State units no longer go into grace or mutiny; after 10 turns they come home from wherever they are. Your veterans keep their level when they come home or serve as Volunteers. The flag tag now shows the lending civ's emblem, coloured by type of force. The destination list shows one clear line per city. New icon for Send to City-State, and a wider, easier to read tracker.
-- 0.6.1-dev: A unit can only be sent with full movement points. A unit that has moved or attacked this turn has to wait until next turn.
-- 0.6.0-dev: Entrust is in. The capture screen can give a city you just captured to a partner that was at war with its former owner. New warning when a lent unit won't heal because its owner has none of its strategic resource.
-- 0.5.2-dev: New fees (Expeditionary and City-State free for a 1-turn trip, then 10, 20 or 30%; Volunteers 20 to 50%). Safer tracking: a unit killed in combat is never sent home, and a unit that gets a new identity through a levy or an upgrade is followed only when it is certainly the same unit, unique units included. Combat damage a mutinying unit takes just before the end-of-turn heal is kept. A restored unit's experience stops just below its next promotion. When a host's last city falls, its lent units start home at once. The short name in the game is now "VEF".
-- 0.5.1-dev: Volunteers never come home by themselves. A lapsed Volunteer on your land or the host's is paused until you recall it. New "Volunteer Lapse Paused" notification, and "(paused)" in the tracker and on the flag.
-- 0.5.0-dev: The tracker on the launch bar. All texts and notification icons checked. Player README and Workshop description.
-- 0.4.0-dev: War between sender and host, eliminated players, killed or disbanded units, lost destinations. Corps and Army rules with warnings.
-- 0.3.0-dev: Volunteers (friends need open borders, lapses, recall). The mod got its current name.
-- 0.2.0-dev: City-State Expeditionary and suzerain levies.
+- 1.0.0: First public release, on the Steam Workshop and GitHub. Same rules as 0.7.4.
+- 0.7.4: Veterans with three or more promotions no longer lose their level when they come home. They get one promotion back per turn until all are back.
+- 0.7.3: In the tracker, every column you can sort by shows a faded up and down mark next to its title. The sorted column keeps its single arrow.
+- 0.7.2: The coloured emblem under a lent unit's flag was drawn almost black. It is now gold, green or light blue as intended. A veteran coming home gets its promotions back in the turn it arrives, not one turn later. The tracker's sort marks are now proper arrows. VEF warnings (grace, mutiny, lapse, service ending, blocked arrival, rerouted unit) stay until the problem is over, and losses stay until you dismiss them. Only plain news (departed, arrived, returned) still clears at the end of the turn. VEF never touches notifications from the game or other mods.
+- 0.7.1: The tracker columns can be sorted by clicking their titles. The scroll bar is now dark blue and easier to see.
+- 0.7.0: A unit can also be sent from the territory of the partner or city-state it goes to, but then only to that partner. City-State units no longer go into grace or mutiny; after 10 turns they come home from wherever they are. Your veterans keep their level when they come home or serve as Volunteers. The flag tag now shows the lending civ's emblem, coloured by type of force. The destination list shows one clear line per city. New icon for Send to City-State, and a wider, easier to read tracker.
+- 0.6.1: A unit can only be sent with full movement points. A unit that has moved or attacked this turn has to wait until next turn.
+- 0.6.0: Entrust is in. The capture screen can give a city you just captured to a partner that was at war with its former owner. New warning when a lent unit won't heal because its owner has none of its strategic resource.
+- 0.5.2: New fees (Expeditionary and City-State free for a 1-turn trip, then 10, 20 or 30%; Volunteers 20 to 50%). Safer tracking: a unit killed in combat is never sent home, and a unit that gets a new identity through a levy or an upgrade is followed only when it is certainly the same unit, unique units included. Combat damage a mutinying unit takes just before the end-of-turn heal is kept. A restored unit's experience stops just below its next promotion. When a host's last city falls, its lent units start home at once. The short name in the game is now "VEF".
+- 0.5.1: Volunteers never come home by themselves. A lapsed Volunteer on your land or the host's is paused until you recall it. New "Volunteer Lapse Paused" notification, and "(paused)" in the tracker and on the flag.
+- 0.5.0: The tracker on the launch bar. All texts and notification icons checked. Player README and Workshop description.
+- 0.4.0: War between sender and host, eliminated players, killed or disbanded units, lost destinations. Corps and Army rules with warnings.
+- 0.3.0: Volunteers (friends need open borders, lapses, recall). The mod got its current name.
+- 0.2.0: City-State Expeditionary and suzerain levies.
 - Earlier builds: sending, travel, arrival and return, grace and mutiny, flag badges.
 
 ## For modders
