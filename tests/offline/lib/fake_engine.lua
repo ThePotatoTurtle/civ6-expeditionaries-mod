@@ -89,6 +89,10 @@ FAKE = {
 	ghostsInPlot = true,     -- ghosts on a plot still listed by Units.GetUnitsInPlot (unmeasured: worst case)
 	combatDamageBeforeEvent = true, -- H.combat applies damage before GameEvents.OnCombatOccurred (T31 open)
 	damageWrites = {},       -- { id, owner, from, to, turn, ghost } for every Unit:SetDamage / ChangeDamage
+	revealUnavailable = false, -- PlayersVisibility:ChangeVisibilityCount missing (EFV_Dev S0 Scout fallback)
+	unitSight = false,       -- script-created units reveal radius 2 to their owner (only with a test's FAKE.unrevealed)
+	refuseScriptedDeals = false, -- DealManager.EnactWorkingDeal enacts nothing (EFV_Dev S0 alliance fallback)
+	visibility = {},         -- pid -> plot index -> ChangeVisibilityCount total
 }
 
 -- ---------------------------------------------------------------------------
@@ -265,6 +269,8 @@ UnitOperationTypes = { PARAM_FLAGS = "PARAM_FLAGS", PARAM_X = "PARAM_X", PARAM_Y
 YieldTypes = { FOOD = 0, PRODUCTION = 1, GOLD = 2, SCIENCE = 3, CULTURE = 4, FAITH = 5 }
 DealItemTypes = { AGREEMENTS = 1 }
 DealAgreementTypes = { OPEN_BORDERS = 1, MAKE_PEACE = 2 }
+DealDirection = { OUTGOING = 0, INCOMING = 1 }
+DefenseTypes = { DISTRICT_GARRISON = 0, DISTRICT_OUTER = 1 }
 
 -- ---------------------------------------------------------------------------
 -- Event registries: GameEvents.X.Add(fn) / .Remove(fn) / GameEvents.X(...)
@@ -978,6 +984,9 @@ function FAKE.ScriptCreate(pid, typeName, x, y)
 	end
 	local u = FAKE.NewUnit(pid, typeName, x, y)
 	u.scriptCreated = true
+	if FAKE.unitSight and FAKE.unrevealed[pid] ~= nil then
+		for _, p in ipairs(Map.GetNeighborPlots(x, y, 2)) do FAKE.unrevealed[pid][p.index] = nil end
+	end
 	u.level = 1   -- Session F T08: SetPromotion never raises a created unit's level
 	return u
 end
@@ -1251,6 +1260,11 @@ function FAKE.NewPlayer(id, opts)
 			end
 			return nil
 		end,
+		-- Cities:Create(x, y) (AustraliaScenario.lua:1163): a new city, nil on a city tile.
+		Create = function(_, x, y)
+			if CityManager.GetCityAt(x, y) ~= nil then return nil end
+			return FAKE.NewCity(id, x, y)
+		end,
 		-- UI-only in game (RazeCity); tests set FAKE.capturedCity[pid].
 		GetNextCapturedCity = function() return FAKE.capturedCity and FAKE.capturedCity[id] or nil end,
 	}
@@ -1402,6 +1416,12 @@ PlayersVisibility = setmetatable({}, {
 				return not (FAKE.unrevealed[pid] ~= nil and FAKE.unrevealed[pid][p.index] == true)
 			end,
 			IsVisible = function(_, x, y) return true end,
+			-- AlexanderScenario.lua:59 (gameplay): a positive change reveals the plot.
+			ChangeVisibilityCount = (not FAKE.revealUnavailable) and function(_, idx, n)
+				FAKE.visibility[pid] = FAKE.visibility[pid] or {}
+				FAKE.visibility[pid][idx] = (FAKE.visibility[pid][idx] or 0) + n
+				if n > 0 and FAKE.unrevealed[pid] ~= nil then FAKE.unrevealed[pid][idx] = nil end
+			end or nil,
 		}
 	end,
 })
@@ -1512,6 +1532,66 @@ DealManager = {
 		return deals
 	end,
 }
+
+-- Scripted deals (EFV_Dev S0; Debug/Diplomacy.ltp:115-127 pattern, Session F
+-- T27 PASS): an enacted OPEN_BORDERS agreement item from the grantor becomes
+-- an open-borders deal seen by GetPlayerDeals. Session C: without
+-- SetDuration nothing is enacted. FAKE.refuseScriptedDeals: nothing at all.
+FAKE.workingDeals = {}
+local WorkingItem = {}
+WorkingItem.__index = WorkingItem
+function WorkingItem:SetSubType(v) self.subType = v end
+function WorkingItem:SetDuration(v) self.duration = v end
+function WorkingItem:SetLocked(v) self.locked = v end
+local WorkingDeal = {}
+WorkingDeal.__index = WorkingDeal
+function WorkingDeal:AddItemOfType(itemType, fromPlayer)
+	local it = setmetatable({ type = itemType, from = fromPlayer }, WorkingItem)
+	self.items[#self.items + 1] = it
+	return it
+end
+function WorkingDeal:Validate() self.validated = true; return 1 end
+function DealManager.ClearWorkingDeal(dir, a, b) FAKE.workingDeals[a .. ":" .. b] = nil end
+function DealManager.GetWorkingDeal(dir, a, b)
+	local k = a .. ":" .. b
+	FAKE.workingDeals[k] = FAKE.workingDeals[k] or setmetatable({ a = a, b = b, items = {} }, WorkingDeal)
+	return FAKE.workingDeals[k]
+end
+function DealManager.EnactWorkingDeal(a, b)
+	local k = a .. ":" .. b
+	local d = FAKE.workingDeals[k]
+	FAKE.workingDeals[k] = nil
+	if d == nil or FAKE.refuseScriptedDeals then return end
+	for _, it in ipairs(d.items) do
+		if it.type == DealItemTypes.AGREEMENTS and it.subType == DealAgreementTypes.OPEN_BORDERS
+				and (tonumber(it.duration) or 0) > 0 then
+			local receiver = (it.from == a) and b or a
+			PairSet(FAKE.diplo.ob, receiver, it.from, true)
+			FAKE.obTerms[receiver] = FAKE.obTerms[receiver] or {}
+			FAKE.obTerms[receiver][it.from] = { enacted = FAKE.turn, duration = it.duration }
+		end
+	end
+end
+
+-- City-centre district (EFV_Dev S7 / S11): CityManager.GetDistrictAt
+-- (BlackDeathScenario.lua:437), Get/SetDamage and GetMaxDamage per
+-- DefenseTypes (PiratesScenario_StartScript.lua:1342-1369). Garrison 200 HP,
+-- walls c.walls (default 0: no walls).
+function CityManager.GetDistrictAt(x, y)
+	local c = CityManager.GetCityAt(x, y)
+	if c == nil then return nil end
+	c.defenseDamage = c.defenseDamage or {}
+	local function Max(t)
+		if t == DefenseTypes.DISTRICT_GARRISON then return 200 end
+		return c.walls or 0
+	end
+	return {
+		GetCity = function() return c end,
+		GetMaxDamage = function(_, t) return Max(t) end,
+		GetDamage = function(_, t) return c.defenseDamage[t] or 0 end,
+		SetDamage = function(_, t, v) c.defenseDamage[t] = math.max(0, math.min(Max(t), v)) end,
+	}
+end
 
 -- ---------------------------------------------------------------------------
 -- include(name): runs EFV/Scripts, EFV/UI, EFV_Dev/... or tests/offline/lib

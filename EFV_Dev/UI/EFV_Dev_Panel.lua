@@ -95,6 +95,24 @@ local function CurrentTarget()
 	return m_Targets[m_TargetIdx] or -1
 end
 
+-- The session roles S0 wrote to the Game property EFV_DEV_SCN (B = your
+-- partner, F = your friend, C = the common enemy, CS = the city-state), for
+-- the info line: the tester must know which civ is B without the log.
+local function CivName(id)
+	local name = "P" .. Str(id)
+	pcall(function() name = Locale.Lookup(PlayerConfigurations[id]:GetCivilizationShortDescription()) end)
+	return name
+end
+
+local function SessionText()
+	local ok, st = pcall(function() return Game:GetProperty("EFV_DEV_SCN") end)
+	if not ok or type(st) ~= "table" or st.ally == nil then
+		return "Final session: start a NEW game, then press S0"
+	end
+	return "Session: B=" .. CivName(st.ally) .. " F=" .. CivName(st.friend) .. " C=" .. CivName(st.enemy) ..
+		" CS=" .. CivName(st.cs)
+end
+
 local function RebuildTargets()
 	local prev = CurrentTarget()
 	m_Targets = {}
@@ -132,7 +150,7 @@ local function RecordText(unit)
 end
 
 local function RefreshInfo()
-	local s = "Local " .. PlayerName(LocalID()) .. " | turn " .. Str(Game.GetCurrentGameTurn())
+	local s = SessionText() .. " | Local " .. PlayerName(LocalID()) .. " | turn " .. Str(Game.GetCurrentGameTurn())
 	local unit = UI.GetHeadSelectedUnit()
 	if unit ~= nil then
 		local tn = "?"
@@ -149,6 +167,15 @@ local function RefreshInfo()
 	Controls.InfoLabel:SetText(s)
 	Controls.RecordLabel:SetText(RecordText(unit))
 	Controls.TargetLabel:SetText(PlayerName(CurrentTarget()))
+end
+
+-- Target cycle -> player pid (after S0: B, so the diplomacy buttons act on B).
+local function TargetTo(pid)
+	RebuildTargets()
+	for i, id in ipairs(m_Targets) do
+		if id == pid then m_TargetIdx = i end
+	end
+	RefreshInfo()
 end
 
 local function OnTargetPrev()
@@ -437,6 +464,7 @@ local function OnUpdate(dt)
 		local f = st and st.focus
 		if type(f) == "table" and f.stamp == m_FocusWait.stamp then
 			LookAt(f)
+			if m_FocusWait.cmd == "scn_setup" and st.ally ~= nil then TargetTo(st.ally) end
 			m_FocusWait = nil
 		elseif m_Clock > m_FocusWait.untilClock then
 			m_FocusWait = nil
@@ -455,7 +483,7 @@ end
 -- has written its position (same stamp).
 local function Scenario(cmd)
 	local p = BaseParams(cmd)
-	m_FocusWait = { stamp = p.stamp, nextAt = m_Clock + 0.3, untilClock = m_Clock + 4 }
+	m_FocusWait = { stamp = p.stamp, nextAt = m_Clock + 0.3, untilClock = m_Clock + 4, cmd = cmd }
 	Send(p)
 end
 
@@ -466,7 +494,7 @@ local UIFN = { ForgeSend = ForgeSend, ForgeRecall = ForgeRecall, ForgeEntrust = 
 	VetStart = VetStart, GoTo = GoTo }
 
 local BUTTONS = {
-	{ header = "Final session (EFV/TESTING_FINAL.md): one click sets up each step" },
+	{ header = "Final session (EFV/TESTING_FINAL.md): start a NEW game; one click sets up each step" },
 	{ label = "S0 Setup session",       scn = "scn_setup" },
 	{ label = "S1 Arrive next turn",    scn = "scn_arrive" },
 	{ label = "S2 Expire CS unit",      scn = "scn_expire_cs" },

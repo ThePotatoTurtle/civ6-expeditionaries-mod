@@ -31,14 +31,15 @@ include("EFV_Records")
 include("EFV_Units")
 -- EFV:GLOBALS EFV_Config EFV_Util EFV_Records EFV_Units EFV_SortedAlivePlayers EFV_HasOpenBordersFrom EFV_UnitMatches
 -- EFV:GLOBALS EFV_SortedKeys EFV_PlayerKind EFV_ValidReturnTerritory EFV_IsUpgradeOf EFV_UnitGoneReason EFV_UpgradeTargets
+-- EFV:GLOBALS EFV_PartnerBasis EFV_VolunteerBasis EFV_EvaluateSend
 
 EFV_Dev = {}
 
 -- Dev-tools version (EFV_Dev.modinfo Name) and the EFV version it was built
 -- for (EFV_Config.VERSION). EFV_Dev may be bumped on its own (final-session
--- scenarios: 0.6.0-dev.1); a mismatch of FOR_EFV with the loaded EFV build is
--- logged at load.
-EFV_Dev.VERSION = "0.6.1-dev"
+-- scenarios: 0.6.0-dev.1; the session from a brand-new game: 0.6.1-dev.1); a
+-- mismatch of FOR_EFV with the loaded EFV build is logged at load.
+EFV_Dev.VERSION = "0.6.1-dev.1"
 EFV_Dev.FOR_EFV = "0.6.1-dev"
 
 -- ---------------------------------------------------------------------------
@@ -550,7 +551,8 @@ CMD.state = function(me, p)
 end
 
 -- ===========================================================================
--- Final acceptance session (EFV_Dev 0.6.0-dev.1; EFV/TESTING_FINAL.md)
+-- Final acceptance session (EFV_Dev 0.6.0-dev.1, from a brand-new game since
+-- 0.6.1-dev.1; EFV/TESTING_FINAL.md)
 -- One-click scenarios (panel section "Final session", cmd "scn_*") that build
 -- each situation with the helpers above and EFV's public EFV_Records /
 -- EFV_Units API, and checks that print one line each:
@@ -609,10 +611,17 @@ end
 
 local function AtWar(a, b) return Diplo(a, "IsAtWarWith", b) end
 
+-- a declares formal war on b; if that does not take (e.g. a city-state as
+-- the declarer), b declares on a (the war state is the same both ways).
 local function DeclareWar(a, b)
 	if a == nil or b == nil or AtWar(a, b) then return end
 	local ok, err = pcall(function() Players[a]:GetDiplomacy():DeclareWarOn(b, WarTypes.FORMAL_WAR, true) end)
 	Log("scn", PlayerName(a) .. " declares war on " .. PlayerName(b) .. " ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))))
+	if not AtWar(a, b) then
+		local ok2, err2 = pcall(function() Players[b]:GetDiplomacy():DeclareWarOn(a, WarTypes.FORMAL_WAR, true) end)
+		Log("scn", PlayerName(b) .. " declares war on " .. PlayerName(a) .. " (fallback) ok=" .. tostring(ok2) ..
+			(ok2 and "" or (" err=" .. Str(err2))) .. " at war=" .. tostring(AtWar(a, b)))
+	end
 end
 
 local function MeetPair(a, b)
@@ -806,51 +815,264 @@ local function Session(id, me)
 		Check(id, "CHECK", "S0 was run by player " .. Str(st.me) .. ", not by " .. Str(me))
 		return nil
 	end
+	-- The AI may make peace with C after the 10-turn minimum war (Session F
+	-- T27): renew the common war S0 set up (no-op while it lasts).
+	if st.enemy ~= nil and Alive(st.enemy) then
+		for _, pid in ipairs({ me, st.ally, st.cs }) do
+			if pid ~= nil and Alive(pid) then DeclareWar(pid, st.enemy) end
+		end
+	end
 	return st
 end
 
 -- ---------------------------------------------------------------------------
--- S0 Setup: ally B, friend F, common enemy C (at war with you, B, F and one
--- city-state), 2000 gold, 10 Iron, three Swordsmen next to your capital.
--- B is the panel's default Target (the lowest-ID other major).
+-- Fresh-game helpers (EFV_Dev 0.6.1-dev.1). The final session starts from a
+-- BRAND-NEW game (a save locks its mod set: an old save brings back whatever
+-- mods it was made with), so S0 builds everything a new game lacks. All
+-- calls are pcall-guarded; evidence (gameplay scripts or the GameCore tuner):
+--   meet    Diplomacy:SetHasMet(p): AlexanderScenario.lua:13-15,
+--           ColdWarScenario_StartScript.lua:36 (MeetPair above)
+--   reveal  PlayersVisibility[p]:ChangeVisibilityCount(plotIndex, 1):
+--           AlexanderScenario.lua:59, AustraliaScenario.lua:1273 (gameplay),
+--           Debug/Map.ltp "Reveal All". Fallback when the city still is not
+--           revealed: a Scout of yours next to it (its sight reveals it).
+--   civic   Players[p]:GetCulture():SetCivic(idx, true):
+--           IndonesiaKhmerScenario.lua:19/31 (CIVIC_EARLY_EMPIRE),
+--           VikingScenario.lua:38. Open borders need Early Empire
+--           (DiplomaticActions.InitiatorPrereqCivic).
+--   deal    DealManager working deal, AGREEMENTS / OPEN_BORDERS with
+--           SetDuration (Debug/Diplomacy.ltp:115-127 pattern; Session C: no
+--           deal without SetDuration; Session F T27 PASS, F:L1080-L1082).
+--   tech    Players[p]:GetTechs():SetTech(idx, true) (S5): AustraliaScenario.lua:1368.
+--   city HP CityManager.GetDistrictAt(x, y) (BlackDeathScenario.lua:437),
+--           district:SetDamage(DefenseTypes.DISTRICT_GARRISON / DISTRICT_OUTER, v)
+--           and GetMaxDamage (PiratesScenario_StartScript.lua:1342-1369).
+--   city    Players[p]:GetCities():Create(x, y): AustraliaScenario.lua:1163, 1346.
+--   moves   UnitManager.RestoreMovementToFormation(u) (only if a created
+--           unit lacks moves): BlackDeathScenario_UnitCommands.lua:281.
+-- Partner basis: declared friendship (SetHasDeclaredFriendship works at once
+-- both ways, Session F T27) plus open borders granted by B (scripted deal)
+-- = EFV's FRIEND basis (Expeditionary, Entrust) and FRIEND_OB (Volunteers).
+-- No alliance: at turn 1 nobody has Civil Service, and SetHasAllied(false) is
+-- a no-op in game (T27), so S4 could never end one. SetHasAllied(true) is the
+-- last resort only, when friendship + open borders give no Volunteer basis.
+-- ---------------------------------------------------------------------------
+local REVEAL_RADIUS = 3
+local OB_TURNS = 30
+local CIVIC_OB = "CIVIC_EARLY_EMPIRE"
+
+local function HasCity(pid) return #Cities(pid) > 0 end
+
+-- true / false, or nil when IsRevealed cannot be read (EFV then skips its
+-- NOT_REVEALED check too, EFV_Rules IsRevealedTo).
+local function RevealedTo(pid, x, y)
+	local ok, v = pcall(function() return PlayersVisibility[pid]:IsRevealed(x, y) end)
+	if ok and v ~= nil then return v == true end
+	return nil
+end
+
+-- Reveals the plots within REVEAL_RADIUS of city to pid (the city tile
+-- included); a Scout of pid next to the city if that did not work.
+-- owners: plot owners a Scout may be created on (nil: no Scout).
+-- Returns revealed, scout.
+local function RevealCity(pid, city, owners)
+	local x, y = city:GetX(), city:GetY()
+	local n, err = 0, nil
+	for ring = 0, REVEAL_RADIUS do
+		for _, plot in ipairs(Ring(x, y, ring)) do
+			local ok, e = pcall(function() PlayersVisibility[pid]:ChangeVisibilityCount(plot:GetIndex(), 1) end)
+			if ok then n = n + 1 else err = e end
+		end
+	end
+	local r = RevealedTo(pid, x, y)
+	local scout = false
+	if r == false and owners ~= nil then
+		scout = NewUnit("reveal", pid, "UNIT_SCOUT", FindPlot(x, y, 2, OwnedByAny(owners), 1), "VEF-SCOUT") ~= nil
+		r = RevealedTo(pid, x, y)
+	end
+	Log("reveal", PlayerName(city:GetOwner()) .. " city at " .. x .. "," .. y .. ": " .. n .. " plots for " .. PlayerName(pid) ..
+		", revealed=" .. Str(r) .. (err and (" err=" .. Str(err)) or "") .. (scout and " (Scout placed)" or ""))
+	return r, scout
+end
+
+local function GrantCivic(pid, civicType)
+	local ok, err = pcall(function() Players[pid]:GetCulture():SetCivic(GameInfo.Civics[civicType].Index, true) end)
+	Log("civic", PlayerName(pid) .. " " .. civicType .. " ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))))
+	return ok
+end
+
+-- grantor gives receiver open borders (one-way scripted deal). Returns true
+-- when EFV's own gameplay reader (deal scan) sees it afterwards.
+local function GrantOpenBorders(grantor, receiver)
+	if EFV_HasOpenBordersFrom(receiver, grantor) then return true end
+	local ok, err = pcall(function()
+		DealManager.ClearWorkingDeal(DealDirection.OUTGOING, grantor, receiver)
+		local pDeal = DealManager.GetWorkingDeal(DealDirection.OUTGOING, grantor, receiver)
+		if pDeal == nil then error("GetWorkingDeal returned nil") end
+		local item = pDeal:AddItemOfType(DealItemTypes.AGREEMENTS, grantor)
+		if item == nil then error("AddItemOfType returned nil") end
+		item:SetSubType(DealAgreementTypes.OPEN_BORDERS)
+		item:SetDuration(OB_TURNS)
+		item:SetLocked(true)
+		pDeal:Validate()
+		DealManager.EnactWorkingDeal(grantor, receiver)
+	end)
+	local has = EFV_HasOpenBordersFrom(receiver, grantor)
+	Log("ob", PlayerName(grantor) .. " grants " .. PlayerName(receiver) .. " open borders (" .. OB_TURNS .. " turns): enact ok=" ..
+		tostring(ok) .. (ok and "" or (" err=" .. Str(err))) .. ", seen by VEF=" .. tostring(has))
+	return has
+end
+
+-- Friendship + open borders from B (see the header); alliance flag only as
+-- the last resort. Returns the Expeditionary and the Volunteer basis.
+local function EnsurePartner(cmd, me, B)
+	if EFV_PartnerBasis(me, B) == nil then SetDiploPair(cmd, me, B, "SetHasDeclaredFriendship", true) end
+	GrantCivic(B, CIVIC_OB)
+	GrantCivic(me, CIVIC_OB)
+	GrantOpenBorders(B, me)
+	if EFV_VolunteerBasis(me, B) == nil then
+		Log(cmd, "friendship + open borders give no Volunteer basis: trying the alliance flag")
+		SetDiploPair(cmd, me, B, "SetHasAllied", true)
+	end
+	return EFV_PartnerBasis(me, B), EFV_VolunteerBasis(me, B)
+end
+
+-- A unit created by script should have its full moves (Send needs them).
+local function FullMoves(u)
+	local function Full()
+		local ok, f = pcall(function() return u:GetMovesRemaining() >= u:GetMaxMoves() end)
+		return ok and f == true
+	end
+	if Full() then return true end
+	pcall(function() UnitManager.RestoreMovementToFormation(u) end)
+	return Full()
+end
+
+-- Walls down and the city centre at 1 HP: one attack takes the city.
+local function WeakenCity(city)
+	local ok, msg = pcall(function()
+		local d = CityManager.GetDistrictAt(city:GetX(), city:GetY())
+		if d == nil then error("no district at the city centre") end
+		local G, O = DefenseTypes.DISTRICT_GARRISON, DefenseTypes.DISTRICT_OUTER
+		local oMax = tonumber(d:GetMaxDamage(O)) or 0
+		if oMax > 0 then d:SetDamage(O, oMax) end
+		local gMax = tonumber(d:GetMaxDamage(G)) or 0
+		if gMax > 1 then d:SetDamage(G, gMax - 1) end
+		return "city HP " .. (gMax - (tonumber(d:GetDamage(G)) or 0)) .. "/" .. gMax .. ", walls " ..
+			(oMax - (tonumber(d:GetDamage(O)) or 0)) .. "/" .. oMax
+	end)
+	Log("weaken", "city at " .. city:GetX() .. "," .. city:GetY() .. ": " .. (ok and Str(msg) or ("failed: " .. Str(msg))))
+	return ok, ok and msg or "city not weakened"
+end
+
+local function FarFromCities(plot, minDist)
+	for i = 0, 63 do
+		if Alive(i) then
+			for _, c in ipairs(Cities(i)) do
+				if Dist(plot:GetX(), plot:GetY(), c:GetX(), c:GetY()) < minDist then return false end
+			end
+		end
+	end
+	return true
+end
+
+-- A new small city for pid on free neutral land 5-10 tiles from (x, y).
+local function FoundCityFor(pid, x, y)
+	local plot = FindPlot(x, y, 10, function(q) return Neutral(q) and FarFromCities(q, 4) end, 5)
+	if plot == nil then return nil, "no free neutral land 5-10 tiles from your capital for a new city" end
+	local ok, err = pcall(function() Players[pid]:GetCities():Create(plot:GetX(), plot:GetY()) end)
+	local c = CityManager.GetCityAt(plot:GetX(), plot:GetY())
+	if c == nil or c:GetOwner() ~= pid then
+		return nil, "founding a city failed (ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) .. ")"
+	end
+	return c, "new city founded for " .. PlayerName(pid)
+end
+
+-- ---------------------------------------------------------------------------
+-- S0 Setup, from a brand-new game (after your first End Turn, when every civ
+-- has a city). B, F, C = the three lowest-ID other majors with a city, CS =
+-- the lowest-ID city-state with a city. S0: you meet them (and they meet
+-- each other); the land around their cities is revealed to you; everyone
+-- (you, B, F, CS) declares war on C; B becomes your declared friend and
+-- grants you open borders (Early Empire granted to both for the deal); F
+-- becomes your friend; 2000 gold, 10 Iron and three Swordsmen with full
+-- moves next to your capital. The check line asks VEF's own send rule
+-- (EFV_EvaluateSend) what the destination picker will say for B's capital
+-- (Expeditionary, Volunteers) and the city-state (City-State unit).
 -- ---------------------------------------------------------------------------
 CMD.scn_setup = function(me, p)
-	local majors = SortedIDs(function(i) return i ~= me and IsMajorID(i) end)
-	if #majors < 3 then
-		Check("SETUP", "CHECK", "needs 3 other living majors, found " .. #majors)
+	local cap = Capital(me)
+	if cap == nil then
+		Check("SETUP", "CHECK", "you have no city yet: found your capital with the Settler, End Turn once, then press S0 again")
 		return
 	end
-	local B, F, C = majors[1], majors[2], majors[3]
-	local css = SortedIDs(IsCityStateID)
-	local cs = css[1]
+	local majors = SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)
+	local css = SortedIDs(function(i) return IsCityStateID(i) and HasCity(i) end)
+	if #majors < 3 or #css < 1 then
+		Check("SETUP", "CHECK", "needs 3 other civs and 1 city-state with a city, found " .. #majors .. " and " .. #css ..
+			": End Turn once more (the AI founds its capitals on its first turns), then press S0 again")
+		return
+	end
+	local B, F, C, cs = majors[1], majors[2], majors[3], css[1]
 	local st = ScnLoad()
 	st.me, st.ally, st.friend, st.enemy, st.cs = me, B, F, C, cs
-	for _, o in ipairs({ B, F, C, cs }) do MeetPair(me, o) end
+	-- 1. meet (every pair of the five: the war declarations need it too)
+	local group = { me, B, F, C, cs }
+	for i = 1, #group do
+		for j = i + 1, #group do MeetPair(group[i], group[j]) end
+	end
+	local met = Diplo(me, "HasMet", B) and Diplo(me, "HasMet", F) and Diplo(me, "HasMet", C) and Diplo(me, "HasMet", cs)
+	-- 2. wars on C, then the partners
 	local peaceIssue = AtWar(me, B) or AtWar(me, F)
-	SetDiploPair("scn_setup", me, B, "SetHasAllied", true)
-	SetDiploPair("scn_setup", me, F, "SetHasDeclaredFriendship", true)
-	DeclareWar(me, C); DeclareWar(B, C); DeclareWar(F, C)
-	if cs ~= nil then DeclareWar(cs, C) end
+	DeclareWar(me, C); DeclareWar(B, C); DeclareWar(F, C); DeclareWar(cs, C)
+	local partner, vol = EnsurePartner("scn_setup", me, B)
+	st.partner, st.basis = partner, vol
+	if EFV_PartnerBasis(me, F) == nil then SetDiploPair("scn_setup", me, F, "SetHasDeclaredFriendship", true) end
+	-- 3. reveal the cities of B, C and the city-state (destinations; a Scout
+	-- may stand on neutral, your, B's (open borders), the city-state's or C's
+	-- land) and F's (not a destination: no Scout, not part of the check)
+	local revealed, scouts = true, 0
+	for _, pid in ipairs({ B, F, C, cs }) do
+		for _, city in ipairs(Cities(pid)) do
+			local r, sc = RevealCity(me, city, (pid ~= F) and { -1, me, B, cs, C } or nil)
+			if r == false and pid ~= F then revealed = false end
+			if sc then scouts = scouts + 1 end
+		end
+	end
+	-- 4. gold, Iron, three Swordsmen with full moves
 	pcall(function() Players[me]:GetTreasury():ChangeGoldBalance(2000) end)
 	pcall(function() Players[me]:GetResources():ChangeResourceAmount(GameInfo.Resources["RESOURCE_IRON"].Index, 10) end)
-	local cap = Capital(me)
-	local n = 0
-	if cap ~= nil then
-		for _ = 1, 3 do
-			local plot = FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1) or FindPlot(cap:GetX(), cap:GetY(), 4)
-			if NewUnit("scn_setup", me, "UNIT_SWORDSMAN", plot) ~= nil then n = n + 1 end
+	local swords, full = {}, 0
+	for _ = 1, 3 do
+		local plot = FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1) or FindPlot(cap:GetX(), cap:GetY(), 4, OwnedByAny({ -1, me }), 1)
+		local u = NewUnit("scn_setup", me, "UNIT_SWORDSMAN", plot)
+		if u ~= nil then
+			swords[#swords + 1] = u
+			if FullMoves(u) then full = full + 1 end
 		end
-		Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
 	end
+	Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
 	ScnSave(st)
-	local allied = Diplo(me, "HasAllied", B)
-	local friends = Diplo(me, "HasDeclaredFriendship", F)
-	local wars = AtWar(me, C) and AtWar(B, C) and AtWar(F, C) and (cs == nil or AtWar(cs, C))
-	local ok = allied and friends and wars and n == 3 and cs ~= nil and not peaceIssue
-	Check("SETUP", ok and "PASS" or "CHECK", "ally B=" .. PlayerName(B) .. " (" .. tostring(allied) .. "), friend F=" ..
-		PlayerName(F) .. " (" .. tostring(friends) .. "), enemy C=" .. PlayerName(C) .. ", city-state=" .. Str(cs and PlayerName(cs)) ..
-		", everyone at war with C=" .. tostring(wars) .. ", Swordsmen=" .. n ..
-		(peaceIssue and ", YOU ARE AT WAR WITH B OR F: make peace in the diplomacy screen" or ""))
+	-- 5. what the destination picker will say (VEF's own rule)
+	local store = EFV_Records.Load()
+	local function Eval(r, ft)
+		local city = Capital(r)
+		if swords[1] == nil or city == nil then return "no unit or city" end
+		local okC, ok, reasons = pcall(EFV_EvaluateSend, me, swords[1], r, city, ft, store)
+		if not okC then return "error " .. Str(ok) end
+		if ok then return "ok" end
+		return table.concat(reasons or {}, "+")
+	end
+	local eExp, eVol, eCs = Eval(B, FT_EXP), Eval(B, FT_VOL), Eval(cs, FT_CS)
+	local wars = AtWar(me, C) and AtWar(B, C) and AtWar(F, C) and AtWar(cs, C)
+	local ok = met and revealed and wars and partner ~= nil and vol ~= nil and #swords == 3 and full == 3 and
+		eExp == "ok" and eVol == "ok" and eCs == "ok" and not peaceIssue
+	Check("SETUP", ok and "PASS" or "CHECK", "B=" .. PlayerName(B) .. " (basis " .. Str(partner) .. ", Volunteers " .. Str(vol) ..
+		"), F=" .. PlayerName(F) .. ", enemy C=" .. PlayerName(C) .. ", city-state=" .. PlayerName(cs) .. "; met=" .. tostring(met) ..
+		", cities revealed=" .. tostring(revealed) .. (scouts > 0 and (" (" .. scouts .. " Scout(s))") or "") ..
+		", everyone at war with C=" .. tostring(wars) .. ", Swordsmen=" .. #swords .. " (full moves " .. full .. ")" ..
+		"; picker: Expeditionary " .. eExp .. ", Volunteers " .. eVol .. ", City-State " .. eCs ..
+		(peaceIssue and "; YOU ARE AT WAR WITH B OR F: start a new game" or ""))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1106,9 +1328,13 @@ local function EvalS3(st, store, t)
 end
 
 -- ---------------------------------------------------------------------------
--- S4: ends (first press) or restores (second press) your alliance with B.
--- Your Volunteers with B lapse at the next turn start; standing in B's land
--- (moved there if needed) the lapse is paused.
+-- S4: ends (first press) or restores (second press) your Volunteer basis
+-- with B: the declared friendship (S0; SetHasDeclaredFriendship works both
+-- ways, Session F T27), plus the alliance flag if S0 had to use it (ending
+-- it is a no-op in game, T27: then the LAPSE line says CHECK). Your
+-- Volunteers with B lapse at the next turn start; standing in B's land
+-- (moved there if needed) the lapse is paused. Restoring renews the
+-- friendship and, if needed, B's open borders.
 -- ---------------------------------------------------------------------------
 CMD.scn_lapse = function(me, p)
 	local st = Session("LAPSE", me)
@@ -1118,9 +1344,10 @@ CMD.scn_lapse = function(me, p)
 	local rec = Newest(store, function(r)
 		return r.forceType == FT_VOL and r.senderID == me and r.recipientID == B and r.state ~= ST.OUT and r.state ~= ST.RET
 	end)
-	if Diplo(me, "HasAllied", B) then
-		SetDiploPair("scn_lapse", me, B, "SetHasAllied", false)
+	if EFV_VolunteerBasis(me, B) ~= nil then
 		SetDiploPair("scn_lapse", me, B, "SetHasDeclaredFriendship", false)
+		if Diplo(me, "HasAllied", B) then SetDiploPair("scn_lapse", me, B, "SetHasAllied", false) end
+		local still = EFV_VolunteerBasis(me, B)
 		local u = rec and RecUnit(rec)
 		if u ~= nil and not EFV_ValidReturnTerritory(rec, Map.GetPlot(u:GetX(), u:GetY())) then
 			local plot = FindPlot(rec.destX, rec.destY, 4, OwnedBy(B), 1)
@@ -1128,11 +1355,18 @@ CMD.scn_lapse = function(me, p)
 		end
 		st.s4 = { want = "LAPSE", turn = Turn(), id = rec and rec.id or -1 }
 		if u ~= nil then Focus(st, u:GetX(), u:GetY(), me, u:GetID(), p.stamp) end
-		Check("LAPSE", "INFO", "alliance with " .. PlayerName(B) .. " ended; Volunteer record " .. Str(rec and rec.id) .. " should lapse (paused)")
+		if still == nil then
+			Check("LAPSE", "INFO", "friendship with " .. PlayerName(B) .. " ended; Volunteer record " .. Str(rec and rec.id) .. " should lapse (paused)")
+		else
+			Check("LAPSE", "CHECK", "the Volunteer basis with " .. PlayerName(B) .. " could not be ended (still " .. still ..
+				"; a scripted alliance cannot be ended in game, Session F T27)")
+		end
 	else
-		SetDiploPair("scn_lapse", me, B, "SetHasAllied", true)
+		SetDiploPair("scn_lapse", me, B, "SetHasDeclaredFriendship", true)
+		GrantOpenBorders(B, me)
+		if EFV_VolunteerBasis(me, B) == nil and st.basis == "ALLIANCE" then SetDiploPair("scn_lapse", me, B, "SetHasAllied", true) end
 		st.s4 = { want = "CANCEL", turn = Turn(), id = rec and rec.id or -1 }
-		Check("LAPSE", "INFO", "alliance with " .. PlayerName(B) .. " restored")
+		Check("LAPSE", "INFO", "friendship with " .. PlayerName(B) .. " restored (Volunteer basis " .. Str(EFV_VolunteerBasis(me, B)) .. ")")
 	end
 	EFV_Records.Commit(store)
 	ScnSave(st)
@@ -1158,12 +1392,13 @@ local function EvalS4(st, store, t)
 		end
 	else
 		s.want = nil
-		local allied = Diplo(st.me, "HasAllied", st.ally)
+		local basis = EFV_VolunteerBasis(st.me, st.ally)
+		local restored = basis ~= nil
 		if rec == nil or rec.state == ST.RET then
-			Check("LAPSE_RESTORE", allied and "PASS" or "CHECK", "alliance restored=" .. tostring(allied) .. " (the Volunteer was recalled)")
+			Check("LAPSE_RESTORE", restored and "PASS" or "CHECK", "Volunteer basis restored=" .. Str(basis) .. " (the Volunteer was recalled)")
 		else
-			local ok = allied and rec.lapsed ~= 1
-			Check("LAPSE_RESTORE", ok and "PASS" or "CHECK", "alliance restored=" .. tostring(allied) .. ", Volunteer record " .. s.id ..
+			local ok = restored and rec.lapsed ~= 1
+			Check("LAPSE_RESTORE", ok and "PASS" or "CHECK", "Volunteer basis restored=" .. Str(basis) .. ", Volunteer record " .. s.id ..
 				" lapsed=" .. Str(rec.lapsed) .. " (expected the lapse cancelled)")
 		end
 	end
@@ -1172,8 +1407,9 @@ end
 -- ---------------------------------------------------------------------------
 -- S5: upgrade relink. A Volunteer of yours (deployed, standing in your land)
 -- whose upgrade for your civilization is a unique unit when one exists. The
--- tech, the target's strategic resource and gold are granted; you click
--- Upgrade (no gameplay upgrade call is proven).
+-- target's tech (SetTech) and civic (SetCivic), its strategic resource and
+-- gold are granted, so it also works in a new game; you click Upgrade (no
+-- gameplay upgrade call is proven).
 -- ---------------------------------------------------------------------------
 local function UpgradePair(me)
 	local traits = {}
@@ -1218,7 +1454,7 @@ CMD.scn_upgrade = function(me, p)
 		local ok = pcall(function() Players[me]:GetTechs():SetTech(GameInfo.Technologies[row.PrereqTech].Index, true) end)
 		notes[#notes + 1] = row.PrereqTech .. " granted=" .. tostring(ok)
 	end
-	if row.PrereqCivic ~= nil then notes[#notes + 1] = "needs civic " .. row.PrereqCivic .. " (not granted)" end
+	if row.PrereqCivic ~= nil then notes[#notes + 1] = row.PrereqCivic .. " granted=" .. tostring(GrantCivic(me, row.PrereqCivic)) end
 	if row.StrategicResource ~= nil and GameInfo.Resources[row.StrategicResource] ~= nil then
 		pcall(function() Players[me]:GetResources():ChangeResourceAmount(GameInfo.Resources[row.StrategicResource].Index, 20) end)
 		notes[#notes + 1] = row.StrategicResource .. " +20"
@@ -1230,7 +1466,7 @@ CMD.scn_upgrade = function(me, p)
 	local u = NewUnit("scn_upgrade", me, from, FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1), "VEF-UPGRADE")
 	if u == nil then Check("UPGRADE", "CHECK", "could not create " .. from .. " in your land"); return end
 	local store = EFV_Records.Load()
-	local rec = MakeRecord(store, u, { force = FT_VOL, sender = me, recipient = st.ally, basis = "ALLIANCE", origin = cap, dest = dest })
+	local rec = MakeRecord(store, u, { force = FT_VOL, sender = me, recipient = st.ally, basis = st.basis or "FRIEND_OB", origin = cap, dest = dest })
 	EFV_Records.Commit(store)
 	if rec == nil then Check("UPGRADE", "CHECK", "record creation failed"); return end
 	st.s5 = { id = rec.id, from = from, to = to, uid = u:GetID(), turn = Turn(), tries = 0 }
@@ -1436,6 +1672,8 @@ CMD.scn_kill = function(me, p)
 	EFV_Records.Commit(store)
 	pcall(function() def:SetDamage(60) end)
 	DeclareWar(me, cs)
+	RevealCity(me, city, { -1, cs, me })
+	local _, weak = WeakenCity(city)
 	local n = 0
 	for _ = 1, 3 do
 		if NewUnit("scn_kill", me, "UNIT_TANK", FindPlot(def:GetX(), def:GetY(), 4, OwnedByAny({ -1, cs, me, st.ally }), 1)) ~= nil then n = n + 1 end
@@ -1445,7 +1683,7 @@ CMD.scn_kill = function(me, p)
 	Focus(st, def:GetX(), def:GetY(), nil, nil, p.stamp)
 	ScnSave(st)
 	Check("KILLED", "INFO", "record " .. Str(rec and rec.id) .. ": kill 'VEF-KILL' next to " .. PlayerName(cs) ..
-		"'s city with the " .. n .. " Tanks, then take the city this turn")
+		"'s city with the " .. n .. " Tanks, then take the city this turn (" .. weak .. ")")
 end
 
 local function EvalS7(st, store, t, manual)
@@ -1549,7 +1787,7 @@ CMD.scn_place = function(me, p)
 	end
 	local u = NewUnit("scn_place", me, "UNIT_SWORDSMAN", FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1))
 	if u == nil then Check("CROWDED", "CHECK", "could not create the Swordsman"); return end
-	local rec = MakeRecord(store, u, { force = FT_EXP, state = ST.OUT, sender = me, recipient = B, basis = "ALLIANCE", origin = cap,
+	local rec = MakeRecord(store, u, { force = FT_EXP, state = ST.OUT, sender = me, recipient = B, basis = st.partner or "FRIEND", origin = cap,
 		dest = dest, duration = EFV_Config.EXPEDITIONARY_DURATION })
 	if rec == nil then Check("CROWDED", "CHECK", "record creation failed"); return end
 	rec.arrivalTurn = Turn() + 1
@@ -1621,7 +1859,7 @@ CMD.scn_t31 = function(me, p)
 	local b1 = NewUnit("scn_t31", barb, "UNIT_WARRIOR", next1)
 	local b2 = NewUnit("scn_t31", barb, "UNIT_WARRIOR", next2)
 	local store = EFV_Records.Load()
-	local rec = MakeRecord(store, u, { force = FT_EXP, sender = st.ally, recipient = me, basis = "ALLIANCE", origin = host, dest = cap,
+	local rec = MakeRecord(store, u, { force = FT_EXP, sender = st.ally, recipient = me, basis = st.partner or "FRIEND", origin = host, dest = cap,
 		duration = EFV_Config.EXPEDITIONARY_DURATION, deployedTurn = Turn() - EFV_Config.EXPEDITIONARY_DURATION })
 	if rec == nil then Check("T31", "CHECK", "record creation failed"); return end
 	rec.state = ST.MUT
@@ -1691,22 +1929,39 @@ local function EvalS10(st, store, t)
 end
 
 -- ---------------------------------------------------------------------------
--- S11: Entrust. Three Tanks of yours next to the nearest city of C (you, B
--- and F at war with C; B allied again). Take the city and press Entrust.
+-- S11: Entrust. A city of C that is not its last one (taking the last city
+-- would eliminate C): C's nearest non-capital city, else a new small city
+-- founded for C 5-10 tiles from your capital (Cities:Create), else C's only
+-- city (noted). Its walls are removed and its centre is left at 1 HP, it is
+-- revealed to you, and three Tanks of yours stand next to it (you and B at
+-- war with C; your partner basis with B renewed if S4 left it off). Take the
+-- city and press Entrust.
 -- ---------------------------------------------------------------------------
 CMD.scn_entrust = function(me, p)
 	local st = Session("ENTRUST", me)
 	if st == nil then return end
 	local C = st.enemy
 	local cap = Capital(me)
+	if cap == nil then Check("ENTRUST", "CHECK", "you have no capital"); return end
+	local capC = Capital(C)
 	local best, bestD = nil, nil
 	for _, c in ipairs(Cities(C)) do
-		local d = cap and Dist(cap:GetX(), cap:GetY(), c:GetX(), c:GetY()) or 0
-		if bestD == nil or d < bestD then best, bestD = c, d end
+		local d = Dist(cap:GetX(), cap:GetY(), c:GetX(), c:GetY())
+		if (capC == nil or c:GetID() ~= capC:GetID()) and (bestD == nil or d < bestD) then best, bestD = c, d end
+	end
+	local note = "C's nearest city that is not its capital"
+	if best == nil then
+		best, note = FoundCityFor(C, cap:GetX(), cap:GetY())
+		if best == nil then
+			best = capC
+			note = note .. "; using C's only city (taking it eliminates C)"
+		end
 	end
 	if best == nil then Check("ENTRUST", "CHECK", "the enemy has no city"); return end
-	if not Diplo(me, "HasAllied", st.ally) then SetDiploPair("scn_entrust", me, st.ally, "SetHasAllied", true) end
+	if EFV_PartnerBasis(me, st.ally) == nil then EnsurePartner("scn_entrust", me, st.ally) end
 	DeclareWar(me, C); DeclareWar(st.ally, C)
+	RevealCity(me, best, { -1, C, me, st.ally })
+	local _, weak = WeakenCity(best)
 	local n = 0
 	for _ = 1, 3 do
 		if NewUnit("scn_entrust", me, "UNIT_TANK", FindPlot(best:GetX(), best:GetY(), 4, OwnedByAny({ -1, C, me, st.ally }), 1)) ~= nil then n = n + 1 end
@@ -1715,7 +1970,7 @@ CMD.scn_entrust = function(me, p)
 	Focus(st, best:GetX(), best:GetY(), nil, nil, p.stamp)
 	ScnSave(st)
 	Check("ENTRUST", "INFO", n .. " Tanks next to " .. PlayerName(C) .. "'s city at " .. best:GetX() .. "," .. best:GetY() ..
-		": take it and choose Entrust -> " .. PlayerName(st.ally))
+		" (" .. note .. "; " .. weak .. "): take it and choose Entrust -> " .. PlayerName(st.ally))
 end
 
 local function EvalS12(st, store, t, manual)

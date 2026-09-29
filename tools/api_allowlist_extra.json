@@ -12,7 +12,8 @@
   "Phase 2 / Session C integration (2026-09-28): GameEvents.PlayerTurnStarted (G C, fires for every player, Session C T04), GameEvents.OnPlayerTurnEnded downgraded to L (registered but never fires in GS single player, Session C; api_audit warns on every use), GameInfo.UnitUpgrades (unit identity check: upgrade chain).",
   "Sessions D/E integration (2026-09-28): GameEvents.OnGameTurnEnded (G C, Session E T26: once per round, after the engine heal; EFV's mutiny-floor boundary), notes on GameEvents.PlayerTurnStarted / PlayerTurnStartComplete (every living player incl. the human), Events.PlayerDefeat / PlayerDestroyed (G C, after the units are gone), GameEvents.PlayerDefeat (L, never fired), deal items GetDuration / GetEnactedTurn (G C), FindItemByType / GetFromPlayerID confirmed by behaviour (Session D T09/T19), HasAllied / HasDeclaredFriendship G only (nil/err in UI, Session E), city GetGold nil in G (Session D T09). Not added for rules: Events.PlayerTurnDeactivated, Events.TurnEnd (fire in G but are asynchronous UI events).",
   "Session F integration (0.5.2, 2026-09-28): GameInfo.UnitReplaces / CivilizationTraits / LeaderTraits (upgrade into a civilization's unique unit, T30), PlayerConfigurations :GetCivilizationTypeName / :GetLeaderTypeName (owner of the unique unit), Events.UnitUpgraded (G, async: carries the NEW unit ID; not used for rules), UnitManager.PlaceUnit G confirmed (T29; EFV_Dev only).",
-  "EFV_Dev 0.6.0-dev.1 final-session scenarios (2026-09-28): :GetTechs / :SetTech (G, grant the upgrade target's tech, S5), GameInfo.Technologies, and the UI promotion command UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the S6 veteran route B. EFV_Dev only."
+  "EFV_Dev 0.6.0-dev.1 final-session scenarios (2026-09-28): :GetTechs / :SetTech (G, grant the upgrade target's tech, S5), GameInfo.Technologies, and the UI promotion command UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the S6 veteran route B. EFV_Dev only.",
+  "EFV_Dev 0.6.1-dev.1 (2026-09-28): the final session starts from a brand-new game, so S0 (and S5/S7/S11) build what a new game lacks: PlayersVisibility :ChangeVisibilityCount (reveal), :GetCulture / :SetCivic (Early Empire for open borders, S5 target civic), the scripted open-borders deal (DealManager working deal, DealDirection.OUTGOING, :AddItemOfType / :SetSubType / :SetDuration / :SetLocked / :Validate), CityManager.GetDistrictAt + DefenseTypes (city HP / walls for S7 / S11), UnitManager.RestoreMovementToFormation (created unit without moves), GameInfo.Civics. EFV_Dev only; evidence in refs."
  ],
  "globals": {
   "include": {
@@ -69,6 +70,30 @@
     "research/phase0_results/raw/sessionF_Lua.log:5507-5529, 8696-8789"
    ],
    "note": "CONFIRMED-INGAME (Session F T15 / T16). Used by EFV_Entrust (Phase 6)."
+  },
+  "DealDirection": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:117"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DefenseTypes": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1342 (gameplay)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
   }
  },
  "static": {
@@ -542,6 +567,120 @@
    "refs": [
     "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:71"
    ],
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DealManager.ClearWorkingDeal": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DealManager.GetWorkingDeal": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DealManager.EnactWorkingDeal": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DealDirection.OUTGOING": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "CityManager.GetDistrictAt": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/BlackDeathScenario/Scripts/BlackDeathScenario.lua:437 (CityManager.GetDistrictAt(x, y) in a gameplay script)",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1342-1343, 1368-1369 (district:GetDamage / GetMaxDamage / SetDamage(DefenseTypes.DISTRICT_OUTER / DISTRICT_GARRISON, v) in a gameplay script)",
+    "GAME/Debug/City.ltp:454-496 (tuner Outer / Garrison Damage)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DefenseTypes.DISTRICT_GARRISON": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/BlackDeathScenario/Scripts/BlackDeathScenario.lua:437 (CityManager.GetDistrictAt(x, y) in a gameplay script)",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1342-1343, 1368-1369 (district:GetDamage / GetMaxDamage / SetDamage(DefenseTypes.DISTRICT_OUTER / DISTRICT_GARRISON, v) in a gameplay script)",
+    "GAME/Debug/City.ltp:454-496 (tuner Outer / Garrison Damage)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DefenseTypes.DISTRICT_OUTER": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/BlackDeathScenario/Scripts/BlackDeathScenario.lua:437 (CityManager.GetDistrictAt(x, y) in a gameplay script)",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1342-1343, 1368-1369 (district:GetDamage / GetMaxDamage / SetDamage(DefenseTypes.DISTRICT_OUTER / DISTRICT_GARRISON, v) in a gameplay script)",
+    "GAME/Debug/City.ltp:454-496 (tuner Outer / Garrison Damage)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitManager.RestoreMovementToFormation": {
+   "ctx": {
+    "G": "L"
+   },
+   "refs": [
+    "GAME/DLC/BlackDeathScenario/Scripts/BlackDeathScenario_UnitCommands.lua:281 (after UnitManager.RestoreUnitAttacks; gameplay: same function spends faith with GetReligion():ChangeFaithBalance)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game; only when a created Swordsman lacks full moves",
    "only_paths": [
     "EFV_Dev/"
    ]
@@ -1860,6 +1999,122 @@
    "only_paths": [
     "EFV_Dev/"
    ]
+  },
+  "ChangeVisibilityCount": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/AlexanderScenario/Scripts/AlexanderScenario.lua:59 (PlayersVisibility[p]:ChangeVisibilityCount(plotIndex, 1), AddGameplayScripts)",
+    "GAME/DLC/AustraliaScenario/Scripts/AustraliaScenario.lua:1273, :688 (gameplay)",
+    "GAME/Debug/Map.ltp 'Reveal All' (ChangeVisibilityCount(i, 1))"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "GetCulture": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/Indonesia_KhmerScenario/Scripts/IndonesiaKhmerScenario.lua:19 (pPlayer:GetCulture(), AddGameplayScripts)",
+    "GAME/DLC/VikingsScenario/Scripts/VikingScenario.lua:38"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "SetCivic": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/Indonesia_KhmerScenario/Scripts/IndonesiaKhmerScenario.lua:31 (pCulture:SetCivic(GameInfo.Civics[\"CIVIC_EARLY_EMPIRE\"].Index, true))",
+    "GAME/DLC/VikingsScenario/Scripts/VikingScenario.lua:38, GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_StartScript.lua:328",
+    "GAME/Debug/Player.ltp:198 'Grant All Civics' (GameCore_Tuner)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "AddItemOfType": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "SetSubType": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "SetDuration": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "SetLocked": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "Validate": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:115-127 (GameCore_Tuner, gameplay state: ClearWorkingDeal / GetWorkingDeal / AddItemOfType(AGREEMENTS, from) / SetSubType / SetLocked / Validate / EnactWorkingDeal)",
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:442-448 (same item calls)",
+    "research/phase0_results/SESSION_F_REPORT.md T27 / raw/sessionF_Lua.log:1080-1082 (scripted one-way OPEN_BORDERS deal with SetDuration(30): PASS, found by EFV's deal scan in the right direction)",
+    "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
   }
  },
  "events": {
@@ -2036,6 +2291,18 @@
     "GAME/DLC/AlexanderScenario/Scripts/AlexanderScenario.lua:38 (GameInfo.Technologies[\"TECH_SAILING\"].Index in a gameplay script)"
    ],
    "note": "EFV_Dev S5: the upgrade target's PrereqTech",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "Civics": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/Indonesia_KhmerScenario/Scripts/IndonesiaKhmerScenario.lua:31 (GameInfo.Civics[\"CIVIC_EARLY_EMPIRE\"].Index in a gameplay script)"
+   ],
+   "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
    "only_paths": [
     "EFV_Dev/"
    ]

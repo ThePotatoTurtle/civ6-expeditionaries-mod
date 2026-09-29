@@ -241,16 +241,50 @@ test("dev: extra rec=<id> targets the record's (AI-owned) unit; place moves it (
 end)
 
 -- ---------------------------------------------------------------------------
--- Final session scenarios (EFV_Dev 0.6.0-dev.1, EFV/TESTING_FINAL.md): each
--- button builds its situation, the next turn start (or "Check now") prints
--- one "[EFV][CHECK] <ID> <verdict>" line.
+-- Final session scenarios (EFV/TESTING_FINAL.md): each button builds its
+-- situation, the next turn start (or "Check now") prints one
+-- "[EFV][CHECK] <ID> <verdict>" line. Since EFV_Dev 0.6.1-dev.1 the session
+-- starts from a BRAND-NEW game (an old save would bring back its own mod
+-- set), so every scenario test starts from FreshBoot + S0.
 -- ---------------------------------------------------------------------------
 local function CheckLine(id, verdict)
 	return H.hasLine("[EFV][CHECK] " .. id .. " " .. verdict)
 end
 
+local function SecondCityState(id, x, y)
+	FAKE.NewPlayer(id, { kind = "CITY_STATE", gold = 0 })
+	return H.city(id, x, y, { capital = true, name = "LOC_CITY_CS" .. id })
+end
+
+-- A new game after the first End Turn: the cities of H.baseScenario (every
+-- civ has founded its capital) plus city-states 5 and 6, but nobody has met
+-- anybody, there is no war, friendship, alliance or open borders, and
+-- player 0 has revealed only the land around its own cities.
+local function FreshBoot()
+	H.world({ turn = 2 })
+	local S = {}
+	S.c0 = H.city(0, 10, 10, { capital = true, name = "LOC_CITY_A" })
+	S.c0b = H.city(0, 14, 20, { name = "LOC_CITY_A2" })
+	S.c1 = H.city(1, 22, 10, { capital = true, name = "LOC_CITY_B" })
+	S.c1b = H.city(1, 18, 13, { name = "LOC_CITY_B2" })
+	S.c2 = H.city(2, 40, 30, { capital = true, name = "LOC_CITY_F" })
+	S.c3 = H.city(3, 70, 40, { capital = true, name = "LOC_CITY_C" })
+	S.c4 = H.city(4, 30, 20, { capital = true, name = "LOC_CITY_CS" })
+	S.c5 = SecondCityState(5, 40, 12)
+	S.c6 = SecondCityState(6, 60, 22)
+	FAKE.unrevealed[0] = {}
+	for i = 0, Map.GetPlotCount() - 1 do
+		local p = Map.GetPlotByIndex(i)
+		if H.dist(p, S.c0) > 3 and H.dist(p, S.c0b) > 3 then FAKE.unrevealed[0][i] = true end
+	end
+	H.loadEFV()
+	FAKE.dofile("EFV_Dev/Scripts/EFV_Dev_Gameplay.lua")
+	H.markBody()
+	return S
+end
+
 local function Setup()
-	local S = Boot()
+	local S = FreshBoot()
 	Dev("scn_setup", { stamp = 1 })
 	H.ok(CheckLine("SETUP", "PASS"), "S0 setup passes")
 	return S
@@ -268,16 +302,101 @@ local function Arrive()
 	H.endTurn()
 end
 
-test("final S0: setup (ally, friend, common enemy, gold, three Swordsmen) and the scenario state", function()
-	Setup()
-	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 3)
-	H.eq(H.gold(0), 3000)
+local function Revealed(pid, c) return PlayersVisibility[pid]:IsRevealed(c.x, c.y) end
+
+test("final S0: from a brand-new game (nobody met, nothing revealed) the three sends are possible", function()
+	local S = FreshBoot()
+	local d0 = Players[0]:GetDiplomacy()
+	H.ok(not d0:HasMet(1) and not d0:HasMet(4), "fresh game: nobody met")
+	H.ok(not Revealed(0, S.c1) and not Revealed(0, S.c4), "fresh game: B's and the city-state's cities not revealed")
+	local probe = H.unit(0, "UNIT_SWORDSMAN", 11, 10)
+	local ok, reasons = EFV_EvaluateSend(0, probe, 1, S.c1, "EXPEDITIONARY", EFV_Records.Load())
+	H.ok(not ok, "the picker refuses B before S0")
+	H.contains(reasons, "NOT_REVEALED"); H.contains(reasons, "NOT_PARTNER"); H.contains(reasons, "NO_COMMON_WAR")
+	H.killUnit(probe)
+	Dev("scn_setup", { stamp = 1 })
+	H.ok(CheckLine("SETUP", "PASS"), "S0 passes")
+	H.ok(H.hasLine("picker: Expeditionary ok, Volunteers ok, City-State ok"), "VEF's own send rule accepts all three")
+	for _, pid in ipairs({ 1, 2, 3, 4 }) do H.ok(d0:HasMet(pid), "met " .. pid) end
+	H.ok(Players[1]:GetDiplomacy():HasMet(3), "B met C (for its war declaration)")
+	for _, c in ipairs({ S.c1, S.c1b, S.c2, S.c3, S.c4 }) do H.ok(Revealed(0, c), "city revealed " .. c.name) end
+	H.ok(PlayersVisibility[0]:IsRevealed(S.c1.x + 3, S.c1.y), "tiles around the city revealed too")
+	H.ok(not Revealed(0, S.c5), "other city-states untouched")
+	for _, pid in ipairs({ 0, 1, 2, 4 }) do H.ok(Players[pid]:GetDiplomacy():IsAtWarWith(3), pid .. " at war with C") end
+	H.ok(d0:HasDeclaredFriendship(1) and Players[1]:GetDiplomacy():HasDeclaredFriendship(0), "B: declared friendship both ways")
+	H.ok(d0:HasDeclaredFriendship(2), "F: friend")
+	H.ok(not d0:HasAllied(1), "no alliance (none at turn 1; SetHasAllied(false) is a no-op in game)")
+	H.ok(EFV_HasOpenBordersFrom(0, 1), "B grants you open borders (scripted deal, seen by VEF's deal scan)")
+	H.ok(not EFV_HasOpenBordersFrom(1, 0), "one way only")
+	H.eq(EFV_PartnerBasis(0, 1), "FRIEND"); H.eq(EFV_VolunteerBasis(0, 1), "FRIEND_OB")
 	local st = H.prop("EFV_DEV_SCN")
 	H.eq(st.me, 0); H.eq(st.ally, 1); H.eq(st.friend, 2); H.eq(st.enemy, 3); H.eq(st.cs, 4)
+	H.eq(st.partner, "FRIEND"); H.eq(st.basis, "FRIEND_OB")
 	H.eq(st.focus.stamp, 1, "the panel matches its request by stamp")
+	local swords = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(swords, 3)
+	for _, u in ipairs(swords) do
+		H.eq(u:GetMovesRemaining(), u:GetMaxMoves(), "full moves")
+		H.ok(H.dist(u, S.c0) <= 4, "next to your capital")
+	end
+	H.eq(H.gold(0), 3000)
+	H.eq(H.res(0, "RESOURCE_IRON"), 10)
+	-- the real sends then work
+	H.send(0, swords[1], 1, S.c1, "EXPEDITIONARY", 999)
+	H.send(0, swords[2], 1, S.c1, "VOLUNTEER", 999)
+	H.send(0, swords[3], 4, S.c4, "CS_EXPEDITIONARY", 999)
+	H.len(H.records(), 3, "three sends accepted")
 	Dev("scn_arrive", { unitOwner = -1 })
 	H.ok(CheckLine("FAST_TRAVEL", "INFO"))
 	H.clean()
+end)
+
+test("final S0: no capital yet, or the AI has not founded its cities: CHECK with what to do, nothing changed", function()
+	H.world({ turn = 1 })
+	H.loadEFV()
+	FAKE.dofile("EFV_Dev/Scripts/EFV_Dev_Gameplay.lua")
+	H.markBody()
+	Dev("scn_setup")
+	H.ok(CheckLine("SETUP", "CHECK"))
+	H.ok(H.hasLine("found your capital with the Settler"))
+	H.city(0, 10, 10, { capital = true })
+	H.city(1, 22, 10, { capital = true })
+	Dev("scn_setup")
+	H.ok(H.hasLine("End Turn once more"))
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0, "nothing created")
+	H.ok(not Players[0]:GetDiplomacy():HasMet(1), "nobody met")
+	H.isnil(H.prop("EFV_DEV_SCN"), "no session stored")
+end)
+
+test("final S0: no reveal call -> a Scout next to each city reveals it", function()
+	FAKE.revealUnavailable = true
+	FAKE.unitSight = true
+	local S = FreshBoot()
+	Dev("scn_setup")
+	H.ok(CheckLine("SETUP", "PASS"))
+	H.ok(H.hasLine("Scout(s)"))
+	H.ok(Revealed(0, S.c1) and Revealed(0, S.c4))
+	local scouts = H.unitsOf(0, "UNIT_SCOUT")
+	H.ok(#scouts >= 3, "a Scout next to the cities that were not revealed")
+	for _, u in ipairs(scouts) do H.eq(u.vetName, "VEF-SCOUT") end
+end)
+
+test("final S0: the scripted open-borders deal fails -> alliance flag as the last resort", function()
+	FAKE.refuseScriptedDeals = true
+	FreshBoot()
+	Dev("scn_setup")
+	H.ok(CheckLine("SETUP", "PASS"))
+	H.ok(Players[0]:GetDiplomacy():HasAllied(1))
+	H.eq(H.prop("EFV_DEV_SCN").basis, "ALLIANCE")
+end)
+
+test("final S0: B makes peace with C later -> the next scenario button renews the common war", function()
+	Setup()
+	H.peace(1, 3)
+	H.ok(not Players[1]:GetDiplomacy():IsAtWarWith(3))
+	Dev("scn_arrive")
+	H.ok(Players[1]:GetDiplomacy():IsAtWarWith(3), "B at war with C again")
+	H.ok(EFV_HasCommonWar(0, 1))
 end)
 
 test("final S0: other buttons ask for S0 first", function()
@@ -333,12 +452,13 @@ test("final S3: the AI cannot walk the unit back before the pipeline (pending Fi
 	H.ok(CheckLine("GRACE", "PASS"))
 end)
 
-test("final S4: Volunteer lapse paused on valid land, countdown holds, recall seen, alliance restored", function()
+test("final S4: Volunteer lapse paused on valid land, countdown holds, recall seen, friendship restored", function()
 	local S = Setup()
 	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1, "VOLUNTEER", 999)
 	Arrive()
 	Dev("scn_lapse")
-	H.ok(not Players[0]:GetDiplomacy():HasAllied(1), "alliance ended")
+	H.ok(not Players[0]:GetDiplomacy():HasDeclaredFriendship(1), "friendship ended")
+	H.isnil(EFV_VolunteerBasis(0, 1), "no Volunteer basis")
 	H.endTurn()
 	H.ok(CheckLine("LAPSE", "PASS"), "paused lapse")
 	H.endTurn()
@@ -348,7 +468,8 @@ test("final S4: Volunteer lapse paused on valid land, countdown holds, recall se
 	Dev("scn_arrive")
 	H.ok(CheckLine("RECALL", "PASS"))
 	Dev("scn_lapse")
-	H.ok(Players[0]:GetDiplomacy():HasAllied(1), "alliance restored")
+	H.ok(Players[0]:GetDiplomacy():HasDeclaredFriendship(1), "friendship restored")
+	H.eq(EFV_VolunteerBasis(0, 1), "FRIEND_OB")
 	H.endTurn()
 	H.ok(CheckLine("LAPSE_RESTORE", "PASS"))
 	H.ok(CheckLine("HOME", "PASS"))
@@ -419,20 +540,17 @@ test("final S6: a unit without promotions gets XP to the threshold and a hint", 
 	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1, "no copies yet")
 end)
 
-local function SecondCityState(id, x, y)
-	FAKE.NewPlayer(id, { kind = "CITY_STATE", gold = 0 })
-	return H.city(id, x, y, { capital = true, name = "LOC_CITY_CS" .. id })
-end
-
 test("final S7: a City-State unit killed before its host's last city falls is not sent home", function()
-	Setup()
-	local c5 = SecondCityState(5, 40, 12)
+	local S = Setup()
+	local c5 = S.c5
 	Dev("scn_kill")
 	H.ok(CheckLine("KILLED", "INFO"))
 	H.ok(Players[0]:GetDiplomacy():IsAtWarWith(5), "you are at war with the city-state")
 	local w = Named(5, "VEF-KILL")
 	H.notnil(w, "the tracked Warrior")
 	H.eq(w.damage, 60)
+	H.eq(CityManager.GetDistrictAt(c5.x, c5.y):GetDamage(DefenseTypes.DISTRICT_GARRISON), 199, "the city is left at 1 HP")
+	H.ok(Revealed(0, c5), "the city-state's city is revealed")
 	local tank = H.unitsOf(0, "UNIT_TANK")[1]
 	H.len(H.unitsOf(0, "UNIT_TANK"), 3)
 	H.combat(tank, w, 100)
@@ -447,7 +565,6 @@ end)
 
 test("final S8: relink guard: two identical city-state Warriors are not adopted", function()
 	Setup()
-	SecondCityState(5, 40, 12)
 	Dev("scn_guard")
 	H.ok(CheckLine("GUARD", "INFO"))
 	H.endTurn()
@@ -493,15 +610,39 @@ test("final S10: damage applied after the combat event -> T31_EVENT CHECK", func
 	H.ok(CheckLine("T31_EVENT", "CHECK"))
 end)
 
-test("final S11: Entrust setup (tanks next to the enemy city) and the owner check", function()
+test("final S11: C has only its capital -> a new small city is founded for C, weakened, Tanks next to it", function()
 	local S = Setup()
+	Dev("scn_lapse")                     -- S4 left the friendship off: S11 renews it
 	Dev("scn_entrust")
 	H.ok(CheckLine("ENTRUST", "INFO"))
+	H.ok(H.hasLine("new city founded for"))
+	local s12 = H.prop("EFV_DEV_SCN").s12
+	local city = CityManager.GetCityAt(s12.cx, s12.cy)
+	H.notnil(city)
+	H.eq(city:GetOwner(), 3); H.ne(city.id, S.c3.id, "not C's capital (taking it would eliminate C)")
+	local d = H.dist(city, S.c0)
+	H.ok(d >= 5 and d <= 10, "5-10 tiles from your capital")
+	H.eq(CityManager.GetDistrictAt(city.x, city.y):GetDamage(DefenseTypes.DISTRICT_GARRISON), 199, "1 HP left")
+	H.ok(Revealed(0, city))
 	H.len(H.unitsOf(0, "UNIT_TANK"), 3)
-	CityManager.TransferCity(S.c3, 1, CityTransferTypes.BY_GIFT)
+	for _, t in ipairs(H.unitsOf(0, "UNIT_TANK")) do H.ok(H.dist(t, city) <= 4) end
+	H.eq(EFV_PartnerBasis(0, 1), "FRIEND", "partner basis renewed")
+	local rec = EFV_EntrustCandidates(0, 3)
+	H.contains(rec, 1, "B qualifies as Entrust recipient")
+	CityManager.TransferCity(city, 1, CityTransferTypes.BY_GIFT)
 	Dev("scn_check")
 	H.ok(CheckLine("ENTRUST", "PASS"))
 	H.clean()
+end)
+
+test("final S11: C already has a second city -> that one (nearest non-capital), no new city", function()
+	Setup()
+	local c3b = H.city(3, 30, 40, { name = "LOC_CITY_C2" })
+	Dev("scn_entrust")
+	local s12 = H.prop("EFV_DEV_SCN").s12
+	H.eq(s12.cx, c3b.x); H.eq(s12.cy, c3b.y)
+	H.ok(not H.hasLine("new city founded"))
+	H.len(FAKE.CitiesOf(3), 2)
 end)
 
 test("final panel: scenario buttons send stamped requests; Go to scenario looks at the focus", function()
@@ -516,11 +657,17 @@ test("final panel: scenario buttons send stamped requests; Go to scenario looks 
 		"Go to scenario", "Check now" }) do
 		H.notnil(FAKE_UI.FindButton(label), label)
 	end
-	Game:SetProperty("EFV_DEV_SCN", { focus = { x = S.c1.x, y = S.c1.y, o = -1, u = -1, stamp = p.stamp } })
+	H.ok(string.find(Controls.InfoLabel:GetText(), "start a NEW game, then press S0", 1, true) ~= nil, "no session yet")
+	H.eq(p.target, 1)
+	Game:SetProperty("EFV_DEV_SCN", { me = 0, ally = 2, friend = 1, enemy = 3, cs = 4,
+		focus = { x = S.c1.x, y = S.c1.y, o = -1, u = -1, stamp = p.stamp } })
 	local looked = nil
 	UI.LookAtPlot = function(x, y) looked = { x, y } end
 	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
 	H.deq(looked, { S.c1.x, S.c1.y }, "camera moved after the scenario answered")
+	H.ok(string.find(Controls.InfoLabel:GetText(), "Session: B=", 1, true) ~= nil, "the info line names B, F, C and CS")
+	FAKE_UI.FindButton("Check now"):Click()
+	H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.target, 2, "after S0 the Target is B")
 	looked = nil
 	FAKE_UI.FindButton("Go to scenario"):Click()
 	H.deq(looked, { S.c1.x, S.c1.y })

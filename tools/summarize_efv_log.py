@@ -10,10 +10,10 @@ EFV/TESTING_FINAL.md:
 
     Step  3  PASS   Send Expeditionary: fee 36 (band 2, expected 36)
     Step  7  CHECK  Grace (S3): record 2 state=DEPLOYED grace=nil (expected GRACE with 5 turns)
-    Step 12  -      Recall and alliance restored: not run
+    Step 12  -      Recall and friendship restored: not run
 
 Sources: the "[EFV][CHECK] <ID> <PASS|CHECK|INFO> T<turn> <detail>" lines written by the
-EFV_Dev scenario buttons (EFV_Dev 0.6.0-dev.1) and a few of EFV's own log lines (version,
+EFV_Dev scenario buttons (EFV_Dev 0.6.1-dev.1) and a few of EFV's own log lines (version,
 [Send] ok, [Entrust] ok, loads). Lua.log is buffered while the game runs: quit to the
 desktop (or the main menu) before running this. -v also prints every CHECK line.
 Exit code 0 when every step that ran passed, 1 otherwise.
@@ -30,8 +30,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import efvlib as L  # noqa: E402
 
-EFV_VERSION = "0.6.0-dev"
-DEV_VERSION = "0.6.0-dev.1"
+EFV_VERSION = "0.6.1-dev"
+DEV_VERSION = "0.6.1-dev.1"
 
 CHECK_RE = re.compile(r"\[EFV\]\[CHECK\] (\S+) (PASS|CHECK|INFO) T(-?\d+) (.*)$")
 EFV_RE = re.compile(r"\[EFV\]\[T(-?\d+)\]\[([A-Za-z]+)\] (.*)$")
@@ -226,7 +226,7 @@ def vet_step(log, ctx):
 
 STEPS = [
     (1, "Install and version check", version_step),
-    (2, "Setup (S0)", ids_step("SETUP")),
+    (2, "New game and setup (S0)", ids_step("SETUP")),
     (3, "Send Expeditionary", send_step("EXPEDITIONARY")),
     (4, "Send Volunteers and City-State unit", send_step("VOLUNTEER", "CS_EXPEDITIONARY")),
     (5, "Arrival next to the host city (S1)", None),
@@ -236,14 +236,14 @@ STEPS = [
     (9, "Mutiny, 20 damage (S3)", ids_step("MUTINY")),
     (10, "Back on valid land, home with damage (S3, S1)", ids_step("MUTINY_RETURN", "HOME", contains={"HOME": "(MUTINY_RETURN)"})),
     (11, "Volunteer lapse paused (S4)", ids_step("LAPSE", "LAPSE_PAUSE")),
-    (12, "Recall and alliance restored (S4, S1)", ids_step("RECALL", "LAPSE_RESTORE", "HOME", contains={"HOME": "(RECALL)"})),
-    (13, "Entrust a captured city (S11)", entrust_step),
-    (14, "Upgrade keeps the unit tracked (S5)", ids_step("UPGRADE")),
-    (15, "Veteran level on restore (S6)", vet_step),
-    (16, "Killed unit is not sent home (S7)", ids_step("KILLED")),
-    (17, "No relink to a stranger (S8)", ids_step("GUARD")),
-    (18, "Arrival next to a crowded city (S9)", ids_step("CROWDED")),
-    (19, "Combat during mutiny, T31 (S10)", ids_step("T31_EVENT", "T31")),
+    (12, "Recall and friendship restored (S4, S1)", ids_step("RECALL", "LAPSE_RESTORE", "HOME", contains={"HOME": "(RECALL)"})),
+    (13, "Upgrade keeps the unit tracked (S5)", ids_step("UPGRADE")),
+    (14, "Veteran level on restore (S6)", vet_step),
+    (15, "Killed unit is not sent home (S7)", ids_step("KILLED")),
+    (16, "No relink to a stranger (S8)", ids_step("GUARD")),
+    (17, "Arrival next to a crowded city (S9)", ids_step("CROWDED")),
+    (18, "Combat during mutiny, T31 (S10)", ids_step("T31_EVENT", "T31")),
+    (19, "Entrust a captured city (S11)", entrust_step),
 ]
 
 

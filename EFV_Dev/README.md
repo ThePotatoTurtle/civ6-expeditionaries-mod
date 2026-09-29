@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteer & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 0.6.1-dev, made for VEF 0.6.1-dev. Never enable it in a real game.
+Version 0.6.1-dev.1, made for VEF 0.6.1-dev. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -26,20 +26,22 @@ The gameplay script changes VEF state only through VEF's own record API (`EFV_Re
 
 These are at the top of the panel. Each one sets up a whole test situation in one click. `EFV/TESTING_FINAL.md` walks through them in order, and `tools/summarize_efv_log.py` reads the results from `Lua.log` afterwards.
 
+**Start the session from a brand-new game** (any map, Standard speed, at least 5 civs and 3 city-states; found your capital, End Turn once, press S0). Never from an old save: a Civ VI save locks the mod set it was made with, so the old `EFV_BASE` save (made with the spike harness) turns the EFV Spike Test mod back on and VEF and VEF Dev Tools off. If the old spike panel shows up, or there is no DEV button, that is what happened. After S0 the panel's first line names B, F, C and CS, and the Target is set to B.
+
 | Button | cmd | What it sets up | Check line at your next turn |
 |---|---|---|---|
-| S0 Setup session | `scn_setup` | B (first other major) your ally, F (second) your friend, C (third) at war with you, B, F and the first city-state; 2000 gold, 10 Iron, 3 Swordsmen next to your capital | `SETUP` (right away) |
+| S0 Setup session | `scn_setup` | from a new game: B, F, C = the three lowest-ID other majors with a city, CS = the lowest-ID city-state with a city. You meet them (and they meet each other), the land within 3 tiles of their cities is revealed to you, you, B, F and CS declare war on C, B becomes your declared friend and grants you open borders (VEF basis FRIEND for Expeditionary / Entrust, FRIEND_OB for Volunteers), F your friend; 2000 gold, 10 Iron, 3 Swordsmen with full moves next to your capital. The check asks VEF's own send rule (`EFV_EvaluateSend`) about B's capital and the city-state. Without a capital, or with fewer than 3 civs and 1 city-state with a city, it changes nothing and says what to do | `SETUP` (right away) |
 | S1 Arrive next turn | `scn_arrive` | every unit you sent, or that is coming home, arrives at the next turn start | `ARRIVE` (placement of every arrival), `HOME`, `RECALL` |
 | S2 Expire CS unit | `scn_expire_cs` | your newest deployed City-State unit ends its service next turn, standing in the city-state's land | `EXPIRE` |
 | S3 Grace/mutiny step | `scn_grace` | your newest Expeditionary unit, one phase per press: onto neutral land with its service ending, then 1 grace turn left, then back onto the host's land | `GRACE`, `MUTINY`, `MUTINY_RETURN` |
-| S4 Lapse on/off | `scn_lapse` | ends your alliance with B (your Volunteers lapse, paused on valid land), or restores it | `LAPSE`, `LAPSE_PAUSE`, `LAPSE_RESTORE` |
-| S5 Upgrade test | `scn_upgrade` | a Volunteer "VEF-UPGRADE" in your land whose upgrade is your civ's unique unit when there is one; tech, resource and gold granted. You click Upgrade | `UPGRADE` |
+| S4 Lapse on/off | `scn_lapse` | ends your friendship with B (your Volunteers lapse, paused on valid land), or restores it (and B's open borders if needed) | `LAPSE`, `LAPSE_PAUSE`, `LAPSE_RESTORE` |
+| S5 Upgrade test | `scn_upgrade` | a Volunteer "VEF-UPGRADE" in your land whose upgrade is your civ's unique unit when there is one; the target's tech and civic, its resource and gold granted (works in a new game). You click Upgrade | `UPGRADE` |
 | S6 Veteran copies | `scn_vet` (+ `scn_vetb`, `scn_vetdone`) | three copies of the selected veteran: VEF-A (XP to the threshold, then SetPromotion), VEF-B (XP, then the game's PROMOTE command, sent by the panel), VEF-C (SetPromotion only, like the current restore) | `VET_A/B/C` (next-level XP), `VET_LEVEL_A/B/C` (UI level) |
-| S7 Killed unit | `scn_kill` | a damaged Warrior "VEF-KILL" of a one-city city-state, tracked as your City-State unit; you at war with that city-state; 3 Tanks next to it | `KILLED` |
+| S7 Killed unit | `scn_kill` | a damaged Warrior "VEF-KILL" of a one-city city-state (not CS), tracked as your City-State unit; you meet and are at war with that city-state; its city revealed, walls down and 1 HP left; 3 Tanks next to it | `KILLED` |
 | S8 Relink guard | `scn_guard` | a tracked City-State Warrior removed without combat, with two identical Warriors of that city-state next to its tile | `GUARD` |
 | S9 Crowded arrival | `scn_place` | rings 1 and 2 around B's capital full of B's Warriors, and your Swordsman arriving there next turn | `CROWDED` |
 | S10 Mutiny combat | `scn_t31` | "VEF-T31", B's Expeditionary unit hosted by you, in mutiny on neutral land next to 2 Barbarian Warriors | `T31_EVENT` (at the fight), `T31` |
-| S11 Entrust city | `scn_entrust` | 3 Tanks next to C's city nearest to you, B allied again | `ENTRUST` |
+| S11 Entrust city | `scn_entrust` | a city of C that is not its last one: C's nearest non-capital city, else a small new city founded for C 5-10 tiles from your capital (so taking it does not eliminate C), else C's capital. Revealed, walls down, 1 HP left, 3 Tanks next to it; your partner basis with B renewed if it is off | `ENTRUST` |
 | Go to scenario | (UI) | moves the camera back to the current test and selects your test unit | |
 | Check now | `scn_check` | runs the checks that don't need a new turn (S7, S11) | |
 
@@ -49,7 +51,22 @@ Notes:
 - Units the AI would otherwise move are held in place: FinishMoves now, plus a pending entry in VEF's own list (`EFV_Records.AddPending`), so VEF repeats FinishMoves at that player's next turn start.
 - After a scenario button the panel moves the camera to the test once gameplay has answered (matched by a request stamp).
 - No gameplay call to upgrade a unit is known, so S5 needs your click. The PROMOTE command exists only in the UI, so route B of S6 runs from the panel.
-- The older test scripts built an `EFV_BASE` save by hand with the diplomacy buttons below. S0 does the same in one click.
+- The older test scripts built an `EFV_BASE` save by hand. That save is retired (it locks the spike harness mod set); S0 builds everything from a new game.
+
+Why friendship and not an alliance: alliances need Civil Service (nobody has it at turn 1), and Session F T27 showed that `SetHasAllied(false)` is a no-op in game, so S4 could never end one. S0 uses the alliance flag only as the last resort, when friendship plus open borders give no Volunteer basis (the SETUP line then shows basis ALLIANCE, and S4's LAPSE line says CHECK if it cannot end it).
+
+Game calls S0, S5, S7 and S11 add for a new game (all pcall-guarded, EFV_Dev only; evidence in `tools/api_allowlist_extra.json`):
+
+| What | Call | Evidence |
+|---|---|---|
+| meet | `GetDiplomacy():SetHasMet(p)` both ways | AlexanderScenario.lua:13-15, ColdWarScenario_StartScript.lua:36 |
+| reveal | `PlayersVisibility[p]:ChangeVisibilityCount(plotIndex, 1)` for every plot within 3 tiles of a city. If the city still is not revealed, a Scout "VEF-SCOUT" of yours is placed within 2 tiles of it | AlexanderScenario.lua:59, AustraliaScenario.lua:1273 (gameplay), Debug/Map.ltp "Reveal All" |
+| open borders | Early Empire for you and B (`GetCulture():SetCivic`), then a one-way scripted deal: working deal, `AddItemOfType(AGREEMENTS, B)`, `SetSubType(OPEN_BORDERS)`, `SetDuration(30)`, `SetLocked`, `Validate`, `EnactWorkingDeal` | IndonesiaKhmerScenario.lua:31; Debug/Diplomacy.ltp:115-127; Session F T27 PASS (F:L1080-L1082) |
+| friendship, war | `SetHasDeclaredFriendship`, `DeclareWarOn(FORMAL_WAR)` | Session F T27 PASS |
+| tech, civic (S5) | `GetTechs():SetTech(idx, true)`, `GetCulture():SetCivic(idx, true)` | AustraliaScenario.lua:1368, VikingScenario.lua:38 |
+| city HP (S7, S11) | `CityManager.GetDistrictAt(x, y)`, `SetDamage(DefenseTypes.DISTRICT_OUTER, max)`, `SetDamage(DefenseTypes.DISTRICT_GARRISON, max - 1)` | BlackDeathScenario.lua:437, PiratesScenario_StartScript.lua:1342-1369 |
+| new city (S11) | `GetCities():Create(x, y)` | AustraliaScenario.lua:1163, 1346 |
+| full moves | `UnitManager.RestoreMovementToFormation(u)`, only if a created Swordsman lacks moves | BlackDeathScenario_UnitCommands.lua:281 (LIKELY) |
 
 ## Panel fields
 
@@ -115,4 +132,4 @@ Forged requests go straight to VEF and skip its UI checks, to test the gameplay 
 
 ## Offline tests
 
-`tests/offline/test_dev_mod.lua` runs this mod in the offline fake engine: every command, every final-session scenario and its check line, and the panel (hidden start, hotkey, flat parameters, forged requests, scenario buttons, camera focus). Run it with `python tests/offline/run_tests.py -k dev`.
+`tests/offline/test_dev_mod.lua` runs this mod in the offline fake engine: every command, every final-session scenario and its check line, and the panel (hidden start, hotkey, flat parameters, forged requests, scenario buttons, camera focus, session line, Target set to B). The final-session tests start from a fake brand-new game (nobody met, nothing revealed, no diplomacy) and run S0 first; S0 is also tested without a capital, without the reveal call (Scout fallback) and with a refused open-borders deal (alliance fallback). Run it with `python tests/offline/run_tests.py -k dev`.

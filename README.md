@@ -24,5 +24,3 @@ pip install lupa
 python tools\check_all.py
 python tests\offline\run_tests.py
 ```
-
-License: TBD
