@@ -2,7 +2,8 @@
 -- EFV_Tracker.lua
 -- Context:  UI, context of EFV_Tracker.xml (AddUserInterfaces InGame).
 --           Controls: AlertBanner (BannerButton, BannerLabel), TrackerPanel
---           (TrackerWindow, TrackerTitle, TrackerCloseButton, TrackerHeader,
+--           (TrackerWindow, TrackerTitle, TrackerCloseButton, TrackerHeader
+--           > SortUnit/Partner/Force/State/Turns/DestButton + ..Label,
 --           TrackerScroll, TrackerStack, TrackerEmptyLabel, TrackerSummary);
 --           instances EFV_TrackerRowInstance (RowButton, AlertHighlight,
 --           UnitLabel, PartnerLabel, ForceLabel, StateLabel, TurnsLabel,
@@ -21,7 +22,13 @@
 --     Lapse: .. / Returning / Blocked), turns remaining, destination or
 --     return city for units in transit; GRACE / MUTINY rows first, red text
 --     on a red highlight (D9); row tooltip = status tooltip + click hint;
---     summary line (sent / received / must return). Row click: own unit on
+--     summary line (sent / received / must return). Column sort (0.7.1):
+--     a click on a header label sorts by that column, A-Z / ascending, then
+--     Z-A / descending, then back to the default order (one column at a
+--     time; EFV_UI_TrackerSortClick / _SortRows); while sorted, every row
+--     is sorted (alerts are no longer pinned, their highlight stays). Each
+--     label shows a sort mark (EFV_UI_TrackerSortMark). The state is the
+--     Lua variable m_Sort only (per session, never saved). Row click: own unit on
 --     the map -> UI.SelectUnit + UI.LookAtPlot; partner-owned unit -> camera
 --     only, and only when the tile is visible; in transit -> camera on the
 --     destination / return city when revealed. The panel closes when the
@@ -67,6 +74,17 @@ local m_LastTurn = -1           -- turn of the last list rebuild
 local m_AlertCycleIndex = 0     -- banner camera-cycling position
 local m_PanelOpen = false       -- TrackerPanel open flag (never ContextPtr:IsHidden, note 19)
 local m_LastSoundTurn = -1      -- alert sound at most once per turn
+local m_Sort = { col = nil, dir = 0 }  -- column sort (0.7.1); UI only, never saved
+
+-- Header columns in order (EFV_UI_TRACKER_SORT_COLS): control prefix, name key.
+local SORT_HEADERS = {
+	{ "SortUnit",    "LOC_EFV_TRACKER_COL_UNIT" },
+	{ "SortPartner", "LOC_EFV_TRACKER_COL_PARTNER" },
+	{ "SortForce",   "LOC_EFV_TRACKER_COL_FORCE" },
+	{ "SortState",   "LOC_EFV_TRACKER_COL_STATE" },
+	{ "SortTurns",   "LOC_EFV_TRACKER_COL_TURNS" },
+	{ "SortDest",    "LOC_EFV_TRACKER_COL_DEST" },
+}
 local m_PollElapsed = 0         -- seconds since the last poll
 -- false until Events.LoadGameViewStateDone: on load the engine replays
 -- NotificationAdded for every persisted notification BEFORE that event
@@ -295,8 +313,9 @@ end
 -- ---------------------------------------------------------------------------
 -- RefreshPanel(force)
 -- If the panel is open and (force or (EFV_Rev, turn) changed): rebuild rows
--- from EFV_UI_TrackerRows(local) (sorted: MUTINY, GRACE, DEPLOYED, OUTBOUND,
--- RETURNING); GRACE / MUTINY rows red with AlertHighlight shown (D9); row
+-- from EFV_UI_TrackerRows(local) (default order: MUTINY, GRACE, DEPLOYED,
+-- OUTBOUND, RETURNING), re-ordered by the column sort m_Sort
+-- (EFV_UI_TrackerSortRows; default = unchanged); GRACE / MUTINY rows red with AlertHighlight shown (D9); row
 -- click -> FocusRecord. Empty -> TrackerEmptyLabel. Summary line
 -- LOC_EFV_TRACKER_SUMMARY {sent, received, must return}.
 -- Params:  force boolean (true = ignore the EFV_Rev check).
@@ -314,7 +333,7 @@ local function RefreshPanel(force)
 	end
 	m_LastRev, m_LastTurn = store.rev, turn
 	local localID = LocalPlayer()
-	local rows = EFV_UI_TrackerRows(localID, turn)
+	local rows = EFV_UI_TrackerSortRows(EFV_UI_TrackerRows(localID, turn), m_Sort)
 	m_RowIM:ResetInstances()
 	for _, row in ipairs(rows) do
 		local inst = m_RowIM:GetInstance()
@@ -341,6 +360,31 @@ local function RefreshPanel(force)
 	Controls.TrackerStack:CalculateSize()
 	Controls.TrackerScroll:CalculateSize()
 	EFV_Log(3, LOG_TAG, "list rows=%d rev=%s turn=%s", #rows, tostring(store.rev), tostring(turn))
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- RefreshSortHeader() / OnSortClicked(col)   (0.7.1)
+-- Header label i = column name + " " + sort mark (EFV_UI_TrackerSortMark).
+-- A click: m_Sort = EFV_UI_TrackerSortClick(m_Sort, col), labels updated,
+-- rows rebuilt (RefreshPanel(true)).
+-- Params:  col 1..6 (SORT_HEADERS order).
+-- Returns: nil.
+-- APIs: U07, U17, U18.
+-- ---------------------------------------------------------------------------
+local function RefreshSortHeader()
+	for i, h in ipairs(SORT_HEADERS) do
+		Controls[h[1] .. "Label"]:SetText(L(h[2]) .. " " .. L(EFV_UI_TrackerSortMark(m_Sort, i)))
+	end
+	return nil
+end
+
+local function OnSortClicked(col)
+	m_Sort = EFV_UI_TrackerSortClick(m_Sort, col)
+	RefreshSortHeader()
+	pcall(function() UI.PlaySound("Play_UI_Click") end)
+	EFV_Log(3, LOG_TAG, "sort col=%s dir=%s", tostring(m_Sort.col), tostring(m_Sort.dir))
+	RefreshPanel(true)
 	return nil
 end
 
@@ -631,6 +675,11 @@ local function Initialize()
 	Controls.BannerButton:RegisterCallback(Mouse.eLClick, OnBannerClicked)
 	Controls.BannerButton:RegisterCallback(Mouse.eRClick, function() TogglePanel() end)
 	Controls.TrackerCloseButton:RegisterCallback(Mouse.eLClick, function() ClosePanel() end)
+	for i, h in ipairs(SORT_HEADERS) do
+		local col = i
+		Controls[h[1] .. "Button"]:RegisterCallback(Mouse.eLClick, function() OnSortClicked(col) end)
+	end
+	RefreshSortHeader()
 	Events.LoadGameViewStateDone.Add(OnLoadGameViewStateDone)
 	Events.PlayerTurnActivated.Add(OnPlayerTurnActivated)
 	Events.UnitAddedToMap.Add(OnRefreshTrigger)

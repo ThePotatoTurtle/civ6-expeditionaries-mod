@@ -41,10 +41,11 @@ EFV_Dev = {}
 -- Dev-tools version (EFV_Dev.modinfo Name) and the EFV version it was built
 -- for (EFV_Config.VERSION). EFV_Dev may be bumped on its own (final-session
 -- scenarios: 0.6.0-dev.1; the session from a brand-new game: 0.6.1-dev.1;
--- the 0.7 re-test S12 / S13 and the Workshop Shot buttons: 0.7.0-dev.1); a
+-- the 0.7 re-test S12 / S13 and the Workshop Shot buttons: 0.7.0-dev.1;
+-- rebuilt for EFV 0.7.1-dev without changes: 0.7.1-dev.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.7.0-dev.1"
-EFV_Dev.FOR_EFV = "0.7.0-dev"
+EFV_Dev.VERSION = "0.7.1-dev.1"
+EFV_Dev.FOR_EFV = "0.7.1-dev"
 
 -- ---------------------------------------------------------------------------
 -- Helpers

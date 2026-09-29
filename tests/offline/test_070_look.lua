@@ -7,7 +7,7 @@
 --     against the row label's TruncateWidth in EFV_Tracker.xml);
 --   * item 5: header and row columns have the same widths; header labels and
 --     TrackerSummary use BodyTextDark14 (dark on the light panel body), the
---     summary sits 30 px above the bottom edge;
+--     summary sits 33 px above the bottom edge (0.7.1: 3 px higher);
 --   * item 13: LuaEvents.EFV_TrackerOpen opens the tracker (never toggles);
 --     LuaEvents.EFV_EntrustExpand expands the Entrust picker once (no-op when
 --     expanded, disabled or with no capture popup).
@@ -43,7 +43,8 @@ local function Columns()
 	local header = string.match(xml, '<Stack ID="TrackerHeader".-</Stack>')
 	local row = string.match(xml, '<Instance Name="EFV_TrackerRowInstance">.-</Instance>')
 	local hcols, rcols = {}, {}
-	for w, style, key in string.gmatch(header, '<Container Size="(%d+),%d+"><Label [^>]-Style="([%w_]+)"[^>]-String="LOC_EFV_TRACKER_COL_(%u+)"') do
+	-- 0.7.1: each header column is a click target (Button) holding its label.
+	for w, style, key in string.gmatch(header, '<Button ID="Sort%w+Button" Size="(%d+),%d+"[^>]*><Label [^>]-Style="([%w_]+)"[^>]-String="LOC_EFV_TRACKER_COL_(%u+)"') do
 		hcols[#hcols + 1] = { key = key, width = tonumber(w), style = style }
 	end
 	for w, id, tw in string.gmatch(row, '<Container Size="(%d+),%d+"><Label ID="(%w+)"[^>]-TruncateWidth="(%d+)"') do
@@ -135,7 +136,7 @@ end)
 -- ===========================================================================
 -- Item 5: header / footer look, matching columns
 -- ===========================================================================
-test("look: header columns match the row columns; dark header and summary, summary 30 px up", function()
+test("look: header columns match the row columns; dark header and summary, summary 33 px up", function()
 	BootUI(false)
 	local xml, hcols, rcols = Columns()
 	H.len(hcols, 6, "six header columns")
@@ -157,14 +158,14 @@ test("look: header columns match the row columns; dark header and summary, summa
 	local summary = string.match(xml, '<Label ID="TrackerSummary"[^>]*/>')
 	H.notnil(summary)
 	H.ok(string.find(summary, 'Style="BodyTextDark14"', 1, true) ~= nil, summary)
-	H.ok(string.find(summary, 'Offset="22,30"', 1, true) ~= nil, summary)
+	H.ok(string.find(summary, 'Offset="22,33"', 1, true) ~= nil, summary)
 	H.ok(string.find(summary, "Color=", 1, true) == nil, "no light colour override: " .. summary)
 	for _ in string.gmatch(string.match(xml, '<Stack ID="TrackerHeader".-</Stack>'), 'Color=') do
 		H.ok(false, "header label with a Color override")
 	end
 	-- The scroll area ends above the summary line (window 500 high).
 	local sy, sh = string.match(xml, '<ScrollPanel ID="TrackerScroll"[^>]-Offset="%d+,(%d+)" Size="%d+,(%d+)"')
-	H.ok(tonumber(sy) + tonumber(sh) <= 500 - 30 - 24, "scroll bottom " .. (tonumber(sy) + tonumber(sh)))
+	H.ok(tonumber(sy) + tonumber(sh) <= 500 - 33 - 24, "scroll bottom " .. (tonumber(sy) + tonumber(sh)))
 	H.clean()
 end)
 

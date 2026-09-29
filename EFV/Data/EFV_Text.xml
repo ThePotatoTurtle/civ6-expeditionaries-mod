@@ -443,6 +443,22 @@
 		<Row Tag="LOC_EFV_TRACKER_COL_DEST" Language="en_US">
 			<Text>Destination</Text>
 		</Row>
+		<!-- Column sort (0.7.1): mark after each header label (NONE = can be
+		     sorted, not sorted now; ASC / DESC = the sorted column). The marks
+		     are U+02C6 / U+02C7, which the game font (MyriadPro Semibold MOD)
+		     has; it has no arrow or triangle glyphs. -->
+		<Row Tag="LOC_EFV_TRACKER_SORT_NONE" Language="en_US">
+			<Text>ˆˇ</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_SORT_ASC" Language="en_US">
+			<Text>ˆ</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_SORT_DESC" Language="en_US">
+			<Text>ˇ</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_SORT_TT" Language="en_US">
+			<Text>Click to sort by this column: A to Z or lowest first, click again for Z to A or highest first, a third time for the usual order.</Text>
+		</Row>
 		<Row Tag="LOC_EFV_TRACKER_EMPTY" Language="en_US">
 			<Text>No units sent or received.</Text>
 		</Row>

@@ -22,6 +22,8 @@
 -- WP7.2 (tracker panel): EFV_UI_TrackerRows, EFV_UI_TrackerState,
 -- EFV_UI_TrackerTurns, EFV_UI_TrackerPlace, EFV_UI_TrackerCounts (pure
 -- functions over the UI store; the panel only renders their rows).
+-- 0.7.1 (tracker column sort): EFV_UI_TRACKER_SORT_COLS,
+-- EFV_UI_TrackerSortClick, EFV_UI_TrackerSortRows, EFV_UI_TrackerSortMark.
 -- 0.5.2 (fee ruling, band 1 free): EFV_UI_FeeText.
 -- 0.7 (INTERFACES note 33): EFV_UI_PickerRowText, EFV_UI_PickerHeaderText
 -- (one formatted line per picker row; EFV_UI_FeeCell removed);
@@ -839,6 +841,107 @@ function EFV_UI_TrackerRows(localID, turn)
 	end
 	table.sort(rows, RowLess)
 	return rows
+end
+
+-- ---------------------------------------------------------------------------
+-- Tracker column sorting (added 0.7.1). The panel's six header labels are
+-- click targets; the sort state is { col = 1..6 or nil, dir = 1 (A-Z /
+-- ascending), -1 (Z-A / descending) or 0 (default order) }. It lives in a
+-- Lua variable of the tracker context only (never saved to the game).
+-- EFV_UI_TRACKER_SORT_COLS: column i -> row field and kind, in header order
+--   (Unit, Partner, Force, State, Turns, Destination). Text columns compare
+--   the displayed text case-insensitively; the Turns column compares
+--   row.turns, where nil (a Volunteer's unlimited service, shown "-") counts
+--   as larger than any number.
+-- ---------------------------------------------------------------------------
+EFV_UI_TRACKER_SORT_COLS = {
+	{ field = "unit",    numeric = false },
+	{ field = "partner", numeric = false },
+	{ field = "force",   numeric = false },
+	{ field = "state",   numeric = false },
+	{ field = "turns",   numeric = true },
+	{ field = "place",   numeric = false },
+}
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TrackerSortClick(sort, col) -> new sort state   (added 0.7.1)
+-- A click on header column col: a different (or no) sorted column -> col
+-- ascending; the sorted column cycles ascending -> descending -> default
+-- (col nil, dir 0). Only one column is sorted at a time. Pure.
+-- Params:  sort current state ({ col, dir } or nil); col 1..6.
+-- Returns: a new table { col = n or nil, dir = 1 / -1 / 0 }.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TrackerSortClick(sort, col)
+	sort = sort or {}
+	if EFV_UI_TRACKER_SORT_COLS[col] == nil then
+		return { col = sort.col, dir = sort.dir or 0 }
+	end
+	if sort.col ~= col or (sort.dir or 0) == 0 then
+		return { col = col, dir = 1 }
+	elseif sort.dir == 1 then
+		return { col = col, dir = -1 }
+	end
+	return { col = nil, dir = 0 }
+end
+
+-- -1 / 0 / 1 comparison of two cell values of one column.
+local function SortCellCompare(a, b, numeric)
+	if numeric then
+		local na = (type(a) == "number") and a or math.huge
+		local nb = (type(b) == "number") and b or math.huge
+		if na < nb then return -1 elseif na > nb then return 1 end
+		return 0
+	end
+	local la, lb = string.lower(tostring(a or "")), string.lower(tostring(b or ""))
+	if la < lb then return -1 elseif la > lb then return 1 end
+	return 0
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TrackerSortRows(rows, sort) -> rows   (added 0.7.1)
+-- The rows of EFV_UI_TrackerRows in the order of the sort state: default
+-- (no column or dir 0) -> the same array, untouched (GRACE / MUTINY pinned
+-- on top); otherwise a new array of ALL rows (alerts not pinned) ordered by
+-- the column, ascending (dir 1) or descending (dir -1); equal cells keep
+-- ascending record id in both directions (a total order, deterministic).
+-- Params:  rows array; sort { col, dir } or nil.
+-- Returns: array.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TrackerSortRows(rows, sort)
+	local spec = sort and EFV_UI_TRACKER_SORT_COLS[sort.col or 0] or nil
+	local dir = sort and sort.dir or 0
+	if spec == nil or (dir ~= 1 and dir ~= -1) or type(rows) ~= "table" then
+		return rows
+	end
+	local out = {}
+	for i, row in ipairs(rows) do
+		out[i] = row
+	end
+	table.sort(out, function(a, b)
+		local c = SortCellCompare(a[spec.field], b[spec.field], spec.numeric) * dir
+		if c ~= 0 then
+			return c < 0
+		end
+		return (a.id or 0) < (b.id or 0)
+	end)
+	return out
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TrackerSortMark(sort, col) -> text key   (added 0.7.1)
+-- The indicator next to header column col: LOC_EFV_TRACKER_SORT_ASC /
+-- _DESC for the sorted column, LOC_EFV_TRACKER_SORT_NONE (sortable, not
+-- sorted) for every other column.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TrackerSortMark(sort, col)
+	if sort ~= nil and sort.col == col then
+		if sort.dir == 1 then
+			return "LOC_EFV_TRACKER_SORT_ASC"
+		elseif sort.dir == -1 then
+			return "LOC_EFV_TRACKER_SORT_DESC"
+		end
+	end
+	return "LOC_EFV_TRACKER_SORT_NONE"
 end
 
 -- ---------------------------------------------------------------------------

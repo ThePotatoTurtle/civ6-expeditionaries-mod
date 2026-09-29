@@ -2,7 +2,7 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 0.7.0-dev. This is a development build.
+Version 0.7.1-dev. This is a development build.
 
 ## The four options
 
@@ -44,7 +44,7 @@ The VEF button on the launch bar (top left) opens a list of every unit you sent 
 - Turns: until arrival, until the service ends, of grace left, or until a mutinying unit dies. Volunteers have no limit and show "-".
 - Destination, for units on the way.
 
-Units in grace or mutiny are listed first, in red. Hover a row for details. Click a row to go to the unit: your own unit gets selected, a unit you lent out is shown if you can see it, and for a unit on the way the map shows its destination. Esc closes the list.
+Units in grace or mutiny are listed first, in red. Click a column title to sort by it: once for A to Z (or lowest first), twice for Z to A, a third time for the usual order. The small mark next to each title shows which column is sorted. While a column is sorted, units in grace or mutiny stay red but are no longer kept on top. Hover a row for details. Click a row to go to the unit: your own unit gets selected, a unit you lent out is shown if you can see it, and for a unit on the way the map shows its destination. Esc closes the list.
 
 While one of your units is in grace or mutiny, a red banner shows at the top of the screen and the VEF button gets an alert mark. Click the banner to jump through those units. Right-click it to open the tracker.
 
@@ -151,6 +151,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
+- 0.7.1-dev: The tracker columns can be sorted by clicking their titles. The scroll bar is now dark blue and easier to see.
 - 0.7.0-dev: A unit can also be sent from the territory of the partner or city-state it goes to, but then only to that partner. City-State units no longer go into grace or mutiny; after 10 turns they come home from wherever they are. Your veterans keep their level when they come home or serve as Volunteers. The flag tag now shows the lending civ's emblem, coloured by type of force. The destination list shows one clear line per city. New icon for Send to City-State, and a wider, easier to read tracker.
 - 0.6.1-dev: A unit can only be sent with full movement points. A unit that has moved or attacked this turn has to wait until next turn.
 - 0.6.0-dev: Entrust is in. The capture screen can give a city you just captured to a partner that was at war with its former owner. New warning when a lent unit won't heal because its owner has none of its strategic resource.

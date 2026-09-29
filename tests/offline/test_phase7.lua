@@ -6,6 +6,9 @@
 --     column, destination / return city for units in transit, sorting
 --     (MUTINY, GRACE by id = the D9 banner order; then DEPLOYED, OUTBOUND,
 --     RETURNING, fewest turns first, unlimited last);
+--   * 0.7.1 column sort: click cycle (asc, desc, default) per column, text
+--     and numeric columns, record-id tie-break, header marks, the panel's
+--     header buttons (UI-only state, nothing saved);
 --   * the panel: launch-bar button (attach once, backing resize, toggle,
 --     alert indicator, count tooltip), row highlight, row click (own unit:
 --     select + look; partner unit: camera only; in transit: the city),
@@ -184,6 +187,142 @@ test("tracker rows: sort MUTINY, GRACE (by id), DEPLOYED, OUTBOUND, RETURNING; f
 	H.deq(Ids(EFV_UI_TrackerRows(0, T)), { m1, m2, g2, g1, dep2, dep15, vol, out1, out2, ret },
 		"alerts by id (banner order), then groups by turns")
 	H.deq(Ids(EFV_UI_TrackerRows(0, T)), Ids(EFV_UI_TrackerRows(0, T)), "deterministic")
+	H.clean()
+end)
+
+-- ===========================================================================
+-- 0.7.1 column sort (EFV_UI_TrackerSortClick / _SortRows / _SortMark)
+-- ===========================================================================
+test("tracker sort: click cycle per column asc -> desc -> default; another column restarts at asc; marks", function()
+	BootUI({ tracker = false })
+	H.len(EFV_UI_TRACKER_SORT_COLS, 6, "six sortable columns")
+	for col = 1, 6 do
+		local s = EFV_UI_TrackerSortClick(nil, col)
+		H.deq(s, { col = col, dir = 1 }, "first click: A-Z / ascending")
+		H.eq(EFV_UI_TrackerSortMark(s, col), "LOC_EFV_TRACKER_SORT_ASC")
+		s = EFV_UI_TrackerSortClick(s, col)
+		H.deq(s, { col = col, dir = -1 }, "second click: Z-A / descending")
+		H.eq(EFV_UI_TrackerSortMark(s, col), "LOC_EFV_TRACKER_SORT_DESC")
+		s = EFV_UI_TrackerSortClick(s, col)
+		H.deq(s, { col = nil, dir = 0 }, "third click: default order")
+		H.eq(EFV_UI_TrackerSortMark(s, col), "LOC_EFV_TRACKER_SORT_NONE")
+		H.deq(EFV_UI_TrackerSortClick(s, col), { col = col, dir = 1 }, "fourth click starts over")
+	end
+	-- only one column at a time: another column always starts ascending
+	local s = EFV_UI_TrackerSortClick(EFV_UI_TrackerSortClick(nil, 2), 2)   -- Partner Z-A
+	s = EFV_UI_TrackerSortClick(s, 5)
+	H.deq(s, { col = 5, dir = 1 }, "Turns ascending replaces Partner")
+	for col = 1, 6 do
+		H.eq(EFV_UI_TrackerSortMark(s, col), col == 5 and "LOC_EFV_TRACKER_SORT_ASC" or "LOC_EFV_TRACKER_SORT_NONE")
+	end
+	H.deq(EFV_UI_TrackerSortClick(s, 9), s, "unknown column: unchanged")
+	for _, key in ipairs({ "LOC_EFV_TRACKER_SORT_NONE", "LOC_EFV_TRACKER_SORT_ASC", "LOC_EFV_TRACKER_SORT_DESC", "LOC_EFV_TRACKER_SORT_TT" }) do
+		H.ne(Locale.Lookup(key), key, key .. " has a text")
+	end
+	H.clean()
+end)
+
+test("tracker sort: text columns A-Z / Z-A ignore case, ties by record id in both directions; alerts not pinned", function()
+	BootUI({ tracker = false })
+	local function Row(id, unit, alert) return { id = id, unit = unit, partner = "", force = "", state = "", place = "", alert = alert } end
+	-- default order as EFV_UI_TrackerRows builds it: alerts pinned on top
+	local rows = { Row(7, "Warrior", "MUTINY"), Row(3, "archer", "GRACE"), Row(9, "Spearman"), Row(2, "Warrior"), Row(5, "Archer") }
+	H.eq(EFV_UI_TrackerSortRows(rows, nil), rows, "no sort: the same array")
+	H.eq(EFV_UI_TrackerSortRows(rows, { col = nil, dir = 0 }), rows, "default: the same array")
+	H.eq(EFV_UI_TrackerSortRows(rows, { col = 1, dir = 0 }), rows, "dir 0: the same array")
+	H.deq(Ids(EFV_UI_TrackerSortRows(rows, { col = 1, dir = 1 })), { 3, 5, 9, 2, 7 },
+		"A-Z; 'archer' = 'Archer' and 'Warrior' x2 ordered by id; the MUTINY row is not pinned")
+	H.deq(Ids(EFV_UI_TrackerSortRows(rows, { col = 1, dir = -1 })), { 2, 7, 9, 3, 5 }, "Z-A; ties still by ascending id")
+	H.deq(Ids(rows), { 7, 3, 9, 2, 5 }, "input array untouched")
+	-- every text column reads its own field
+	local fields = { "unit", "partner", "force", "state", nil, "place" }
+	for col, field in pairs(fields) do
+		local a, b = Row(1, ""), Row(2, "")
+		a[field], b[field] = "Zulu", "Alpha"
+		H.deq(Ids(EFV_UI_TrackerSortRows({ a, b }, { col = col, dir = 1 })), { 2, 1 }, field .. " A-Z")
+		H.deq(Ids(EFV_UI_TrackerSortRows({ b, a }, { col = col, dir = -1 })), { 1, 2 }, field .. " Z-A")
+	end
+	-- empty text (no destination) sorts before any name A-Z
+	local p1, p2 = Row(1, ""), Row(2, "")
+	p2.place = "Rome"
+	H.deq(Ids(EFV_UI_TrackerSortRows({ p2, p1 }, { col = 6, dir = 1 })), { 1, 2 })
+	H.clean()
+end)
+
+test("tracker sort: Turns column by number (not text); unlimited '-' after every number; ties by id; deterministic", function()
+	local S = BootUI({ tracker = false })
+	local T = FAKE.turn
+	local m = MakeRec(S, { state = "MUTINY", lastDamage = 20 })                  -- 4 turns
+	local vol = MakeRec(S, { forceType = "VOLUNTEER", recipientID = 2 })         -- unlimited (nil)
+	local d15a = MakeRec(S, { deployedTurn = T - 5 })                            -- 15
+	local out = MakeRec(S, { state = "OUTBOUND", arrivalTurn = T + 1 })          -- 1
+	local g = MakeRec(S, { state = "GRACE", graceTurnsLeft = 5 })                -- 5
+	local d15b = MakeRec(S, { deployedTurn = T - 5 })                            -- 15 (tie)
+	local d2 = MakeRec(S, { deployedTurn = T - 18 })                             -- 2 ("2" > "15" as text)
+	local rows = EFV_UI_TrackerRows(0, T)
+	H.deq(Ids(rows), { m, g, d2, d15a, d15b, vol, out }, "default: alerts on top")
+	H.deq(Ids(EFV_UI_TrackerSortRows(rows, { col = 5, dir = 1 })), { out, d2, m, g, d15a, d15b, vol },
+		"ascending: 1, 2, 4, 5, 15, 15 (by id), unlimited")
+	H.deq(Ids(EFV_UI_TrackerSortRows(rows, { col = 5, dir = -1 })), { vol, d15a, d15b, g, m, d2, out },
+		"descending: unlimited, 15, 15 (still by id), 5, 4, 2, 1")
+	H.deq(Ids(EFV_UI_TrackerSortRows(rows, { col = 5, dir = 1 })), Ids(EFV_UI_TrackerSortRows(EFV_UI_TrackerRows(0, T), { col = 5, dir = 1 })),
+		"deterministic")
+	H.deq(Ids(EFV_UI_TrackerSortRows(rows, EFV_UI_TrackerSortClick(EFV_UI_TrackerSortClick(EFV_UI_TrackerSortClick(nil, 5), 5), 5))),
+		Ids(rows), "third click: default order again")
+	H.clean()
+end)
+
+test("tracker panel: header click sorts the rows, marks follow, alerts stay red, third click restores; nothing saved", function()
+	local S, tr = BootUI()
+	local T = FAKE.turn
+	local d15 = MakeRec(S, { deployedTurn = T - 5 })                             -- 15
+	local m = MakeRec(S, { state = "MUTINY", lastDamage = 20 })                  -- 4
+	local out = MakeRec(S, { state = "OUTBOUND", arrivalTurn = T + 1 })          -- 1
+	local vol = MakeRec(S, { forceType = "VOLUNTEER", recipientID = 2 })         -- -
+	Events.LoadGameViewStateDone()
+	local C = tr.Controls
+	local function Mark(key) return Locale.Lookup(key) end
+	local function TurnsHeader() return C.SortTurnsLabel:GetText() end
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"), "sortable mark at load")
+	H.eq(C.SortUnitLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_UNIT") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"))
+	C.BannerButton:RClick()
+	local function Col()
+		local cells = {}
+		for _, inst in ipairs(RowIM().list) do
+			local t = string.gsub(string.gsub(inst.TurnsLabel:GetText(), "%[COLOR:[^%]]*%]", ""), "%[ENDCOLOR%]", "")
+			cells[#cells + 1] = t .. (inst.AlertHighlight:IsHidden() and "" or "!")
+		end
+		return cells
+	end
+	H.deq(Col(), { "4!", "15", "-", "1" }, "default: the mutiny row pinned on top")
+	C.SortTurnsButton:Click()
+	H.deq(Col(), { "1", "4!", "15", "-" }, "ascending; the mutiny row keeps its highlight")
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_ASC"))
+	C.SortTurnsButton:Click()
+	H.deq(Col(), { "-", "15", "4!", "1" }, "descending")
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_DESC"))
+	C.SortTurnsButton:Click()
+	H.deq(Col(), { "4!", "15", "-", "1" }, "third click: default order")
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"))
+	-- another column: Partner A-Z ("To <civ 1>" x3 by id, "To <civ 2>"), Turns mark back to neutral
+	C.SortTurnsButton:Click()
+	C.SortPartnerButton:Click()
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"), "one column at a time")
+	H.eq(C.SortPartnerLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_PARTNER") .. " " .. Mark("LOC_EFV_TRACKER_SORT_ASC"))
+	local p1, p2 = Locale.Lookup("LOC_EFV_TRACKER_TO", EFV_UI_PlayerName(1)), Locale.Lookup("LOC_EFV_TRACKER_TO", EFV_UI_PlayerName(2))
+	local want = (string.lower(p1) < string.lower(p2)) and { "15", "4!", "1", "-" } or { "-", "15", "4!", "1" }
+	H.deq(Col(), want, "partner A-Z, same partner by record id")
+	-- the sort survives a rebuild (new record while open) and is never written to the game
+	MakeRec(S, { state = "OUTBOUND", arrivalTurn = T + 3 })
+	local rev = EFV_UI_ReadStore().rev
+	FAKE_UI.Update(tr, 1)
+	H.len(RowIM().list, 5)
+	H.eq(C.SortPartnerLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_PARTNER") .. " " .. Mark("LOC_EFV_TRACKER_SORT_ASC"), "kept")
+	C.SortPartnerButton:Click()
+	H.eq(EFV_UI_ReadStore().rev, rev, "sorting writes nothing to the store")
+	H.len(FAKE_UI.requests, 0, "no player operation")
+	H.ok(H.hasLine("sort col=2 dir=-1"))
+	H.ok(d15 < m and m < out and out < vol, "record ids in creation order")
 	H.clean()
 end)
 

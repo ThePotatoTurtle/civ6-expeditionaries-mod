@@ -7,7 +7,7 @@
        in game; the "VEF" text label (the displayed abbreviation, designer ruling
        0.5.2) replaces the base icon image).
      * TrackerPanel: list of the local player's records, sent and received
-       (header row TrackerHeader, rows = EFV_TrackerRowInstance in
+       (header row TrackerHeader, sortable columns, rows = EFV_TrackerRowInstance in
        TrackerStack, summary line TrackerSummary). GRACE / MUTINY rows are
        red with a red AlertHighlight box (D9).
      * AlertBanner: top-centre D9 banner shown while any record of the local
@@ -21,8 +21,14 @@
      (fits the 1280 px minimum resolution). The header stack sits at the
      rows' text offset (16 + 6). Header labels and TrackerSummary use
      BodyTextDark14 (dark on the light WindowFrameTitle body); the summary
-     sits 30 px above the bottom edge, clear of the frame border
-     (TrackerScroll ends at 76 + 360 = 436).
+     sits 33 px above the bottom edge (0.7.1: 3 px higher), clear of the
+     frame border (TrackerScroll ends at 76 + 360 = 436).
+     0.7.1: each header column is a plain Button (SortXButton, same width as
+     the row column) holding its label (SortXLabel); a click sorts by that
+     column (A-Z, Z-A, default), and the label carries the sort mark (Lua).
+     The scroll bar uses the base ScrollVerticalBacking / ScrollThumbAlt
+     pattern (UnitPanel.xml, TradeRouteChooser.xml) in the header's dark
+     blue (BodyTextBlue 6,53,92; lighter track, solid thumb).
      ====================================================================== -->
 <Context Name="EFV_Tracker">
 	<!-- D9 alert banner -->
@@ -38,19 +44,21 @@
 			<Label ID="TrackerTitle" Style="WindowHeader" Anchor="C,T" Offset="0,12" String="{LOC_EFV_TRACKER_TITLE:upper}"/>
 			<Button ID="TrackerCloseButton" Anchor="R,T" Style="CloseButtonLarge" Offset="-8,-5"/>
 			<Stack ID="TrackerHeader" Anchor="L,T" Offset="22,50" StackGrowth="Right">
-				<Container Size="170,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_UNIT"/></Container>
-				<Container Size="140,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_PARTNER"/></Container>
-				<Container Size="200,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_FORCE"/></Container>
-				<Container Size="200,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/></Container>
-				<Container Size="50,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/></Container>
-				<Container Size="150,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_DEST"/></Container>
+				<Button ID="SortUnitButton" Size="170,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortUnitLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_UNIT"/></Button>
+				<Button ID="SortPartnerButton" Size="140,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortPartnerLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_PARTNER"/></Button>
+				<Button ID="SortForceButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortForceLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_FORCE"/></Button>
+				<Button ID="SortStateButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortStateLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/></Button>
+				<Button ID="SortTurnsButton" Size="50,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortTurnsLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/></Button>
+				<Button ID="SortDestButton" Size="150,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortDestLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_DEST"/></Button>
 			</Stack>
 			<ScrollPanel ID="TrackerScroll" Anchor="L,T" Offset="16,76" Size="930,360" Vertical="1" AutoScrollBar="1">
 				<Stack ID="TrackerStack" StackGrowth="Bottom" Padding="2"/>
-				<ScrollBar Anchor="R,T" Style="Slider_Light" Size="11,parent"/>
+				<ScrollBar Anchor="R,T" Style="ScrollVerticalBacking" Size="11,parent" Color="6,53,92,150">
+					<Thumb Style="ScrollThumbAlt" Color="6,53,92,255"/>
+				</ScrollBar>
 			</ScrollPanel>
 			<Label ID="TrackerEmptyLabel" Anchor="C,C" Style="BodyTextDark16" String="LOC_EFV_TRACKER_EMPTY" Hidden="1"/>
-			<Label ID="TrackerSummary" Anchor="L,B" Offset="22,30" Style="BodyTextDark14"/>
+			<Label ID="TrackerSummary" Anchor="L,B" Offset="22,33" Style="BodyTextDark14"/>
 		</Grid>
 	</Container>
 

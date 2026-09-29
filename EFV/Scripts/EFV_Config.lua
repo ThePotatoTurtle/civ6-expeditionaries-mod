@@ -30,7 +30,7 @@ EFV_Config = {}
 -- Mod version (keep equal to the version in EFV.modinfo LOC_EFV_MOD_TITLE /
 -- LOC_EFV_MOD_DESCRIPTION and EFV_Dev.modinfo; logged at load by
 -- EFV_Gameplay and EFV_Dev so a Lua.log names the installed build).
-EFV_Config.VERSION = "0.7.0-dev"
+EFV_Config.VERSION = "0.7.1-dev"
 
 -- ---------------------------------------------------------------------------
 -- Spec section 3 constants (verbatim)
