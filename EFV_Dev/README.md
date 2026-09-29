@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteers & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 0.7.4-dev.1, made for VEF 0.7.4-dev. Never enable it in a real game.
+Version 0.7.4-dev.3, made for VEF 0.7.4-dev. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -38,7 +38,7 @@ Each Shot writes one `[EFV][CHECK] SHOTn PASS|CHECK` line with what it built. Fo
 
 ## Test session buttons
 
-These sit under "Test sessions", below the Screenshot buttons. Each one sets up a whole test situation in one click. `EFV/TESTING_RETEST_0.7.md` (the short 0.7 re-test) and `EFV/TESTING_FINAL.md` (the full session) walk through them in order, and `tools/summarize_efv_log.py` (with `--retest` for the short one) reads the results from `Lua.log` afterwards.
+These sit under "Test sessions", below the Screenshot buttons. Each one sets up a whole test situation in one click. `EFV/TESTING_RETEST_0.7.md` (the short 0.7 re-test) and `EFV/TESTING_FINAL.md` (the full session, written for 0.6.1, so its City-State and veteran steps predate the 0.7 rules) walk through them in order, and `tools/summarize_efv_log.py` (with `--retest` for the short one) reads the results from `Lua.log` afterwards.
 
 **Start the session from a brand-new game** (any map, Standard speed, at least 5 civs and 3 city-states; found your capital, End Turn once, press S0). Never from an old save: a Civ VI save locks the mod set it was made with, so the old `EFV_BASE` save (made with the spike harness) turns the EFV Spike Test mod back on and VEF and VEF Dev Tools off. If the old spike panel shows up, or there is no DEV button, that is what happened. After S0 the panel's first line names B, F, C and CS, and the Target is set to B.
 
@@ -50,7 +50,7 @@ These sit under "Test sessions", below the Screenshot buttons. Each one sets up 
 | S3 Grace/mutiny step | `scn_grace` | your newest Expeditionary unit, one phase per press: onto neutral land with its service ending, then 1 grace turn left, then back onto the host's land | `GRACE`, `MUTINY`, `MUTINY_RETURN` |
 | S4 Lapse on/off | `scn_lapse` | ends your friendship with B (your Volunteers lapse, paused on valid land), or restores it (and B's open borders if needed). It does not touch B's open-borders deal. At the next turn start the lapsed Volunteer is held in place for that turn (no moves), because the pause only holds on B's land or yours; if it still ends up elsewhere, `LAPSE_PAUSE` says "not verified" | `LAPSE`, `LAPSE_PAUSE`, `LAPSE_RESTORE` |
 | S5 Upgrade test | `scn_upgrade` | a Volunteer "VEF-UPGRADE" in your land whose upgrade is your civ's unique unit when there is one; the target's tech and civic, its resource and gold granted (works in a new game). You click Upgrade | `UPGRADE` |
-| S6 Veteran copies | `scn_vet` (+ `scn_vetb`, `scn_vetdone`) | three copies of the selected veteran: VEF-A (XP to the threshold, then SetPromotion), VEF-B (XP, then the game's PROMOTE command, sent by the panel), VEF-C (SetPromotion only, like the current restore) | `VET_A/B/C` (next-level XP), `VET_LEVEL_A/B/C` (UI level) |
+| S6 Veteran copies | `scn_vet` (+ `scn_vetb`, `scn_vetdone`) | three copies of the selected veteran: VEF-A (XP to the threshold, then SetPromotion), VEF-B (XP, then the game's PROMOTE command, sent by the panel), VEF-C (SetPromotion only, like the restore VEF still uses for AI owners) | `VET_A/B/C` (next-level XP), `VET_LEVEL_A/B/C` (UI level) |
 | S7 Killed unit | `scn_kill` | a damaged Warrior "VEF-KILL" of a one-city city-state (not CS), tracked as your City-State unit; you meet and are at war with that city-state; its city revealed, walls down and 1 HP left; 3 Tanks next to it | `KILLED` |
 | S8 Relink guard | `scn_guard` | a tracked City-State Warrior removed without combat, with two identical Warriors of that city-state next to its tile | `GUARD` |
 | S9 Crowded arrival | `scn_place` | one of B's Warriors on every free land tile of rings 1 and 2 around B's capital (water, impassable and occupied tiles are skipped), and your Swordsman arriving there next turn. The INFO line says which ring VEF's spawn search expects. PASS when the unit stands on the nearest ring that had a valid free tile (ring 2 is fine if one tile there was left), never on a city centre or closed or war land, alone on its tile | `CROWDED` |
@@ -59,6 +59,7 @@ These sit under "Test sessions", below the Screenshot buttons. Each one sets up 
 | S12 Veteran return | `scn_vetret` | a Volunteer record of yours coming home from B next turn: "VEF-VET", a Warrior at level 3 with two level-1 promotions, 50/90 XP and 30 damage. VEF recreates it and your UI takes the promotions back with the game's PROMOTE command. The panel then checks the UI level (it must be back in the arrival turn) and presses Check now. If it comes back later, the damage may be 15 lower per extra turn: that is the normal heal in your land | `VET_RESTORE`, `VET_RESTORE_LEVEL` (UI) |
 | S13 Unit in B's land | `scn_inland` | a Spearman of yours with full moves on a free tile of B within 3 tiles of B's capital, selected. The first check asks VEF's own picker rule right away (B's rows open, every other row `WRONG_TERRITORY`); send it to B the same turn | `FROM_LAND_RULES` (right away), `FROM_LAND` |
 | S14 Mutiny death | `scn_mutdeath` | two Swordsmen of yours, lent to F as Volunteers, in mutiny with 80 damage on neutral land next to F's land, each next to two Barbarian Warriors, plus an enemy Warrior of C nearby. Leave copy 1 (no moves) for the Barbarians and attack with copy 2 (selected). Every unit ID is logged. At the next turn start each copy must be closed and gone, with no unit of yours and no VEF record on its tile. `EFV/TESTING_S14.md` walks through it (`--s14`) | `MUT_DEATH` |
+| S15 Receive forces | `scn_receive` | B sends to you, both already deployed next to your capital: an Expeditionary Swordsman you now control (20 turns) and a Volunteer Swordsman B keeps in your land. Gives B open borders from you first if B has no Volunteer basis. Runs S0 if needed, removes the previous Shot or S15 scene and opens the VEF tracker | `RECEIVE` |
 | Go to scenario | (UI) | moves the camera back to the current test and selects your test unit | |
 | Check now | `scn_check` | runs the checks that don't need a new turn (S7, S11, S12, S13) | |
 

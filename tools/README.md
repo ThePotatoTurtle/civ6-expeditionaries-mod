@@ -12,7 +12,7 @@ python tools\check_all.py EFV --strict    # warnings fail too
 
 `check_all.py` runs `check_lua.py`, `validate_data.py` and `api_audit.py` and exits non-zero on any error. Findings look like `path:line: LEVEL [code] message`. At the end it prints a per-tool summary and a list of engine calls that still wait for an in-game test. `--info` shows INFO lines, `--basic` skips the Lua runtime, `--db PATH` picks another gameplay database.
 
-The tools test themselves with `python tools\test_tools.py` (14 tests on `tools\fixtures`).
+The tools test themselves with `python tools\test_tools.py` (26 tests on `tools\fixtures`).
 
 ## check_lua.py: Lua syntax and globals
 
