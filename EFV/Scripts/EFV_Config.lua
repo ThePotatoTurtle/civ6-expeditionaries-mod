@@ -30,7 +30,7 @@ EFV_Config = {}
 -- Mod version (keep equal to the version in EFV.modinfo LOC_EFV_MOD_TITLE /
 -- LOC_EFV_MOD_DESCRIPTION and EFV_Dev.modinfo; logged at load by
 -- EFV_Gameplay and EFV_Dev so a Lua.log names the installed build).
-EFV_Config.VERSION = "0.7.3-dev"
+EFV_Config.VERSION = "0.7.4-dev"
 
 -- ---------------------------------------------------------------------------
 -- Spec section 3 constants (verbatim)
@@ -179,7 +179,6 @@ EFV_Config.FLAG_DEFEAT_HINT                  = true                   -- DV13; P
 EFV_Config.FLAG_SPAWN_EXCLUDE_NATURAL_WONDER = true                   -- design choice (SPIKES 3 row 11)
 EFV_Config.FLAG_UPGRADE_RELINK               = true                   -- ON since 0.5.2 (Session F T30: an upgrade creates a new unit ID on the same plot; relink only a provable match, unique units included)
 EFV_Config.FLAG_VET_ROUTE_B                  = true                   -- 0.7 (designer ruling "Veteran level restore", final session S6; note 33): a unit restored to a human owner gets its promotions through the owner's own PROMOTE command (keeps the level); false -> FLAG_XP_CLAMP path for everyone
-EFV_Config.VET_JOB_TURNS                     = 2                      -- 0.7 (note 33): a route B job still open at turn >= created + this falls back to SetPromotion + the XP clamp
 EFV_Config.LOG_LEVEL                         = 2                     -- 0 off, 1 errors, 2 events, 3 verbose (stubs log at 3)
 
 -- Phase gates (PLAN 5.1-5.4): which features are released. The single switch

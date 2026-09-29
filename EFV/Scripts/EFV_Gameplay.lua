@@ -31,7 +31,7 @@
 --   4c. 0.7 (INTERFACES note 33): veteran route B. EFV_Veteran.OnBoundary
 --      runs after the boundary pass at PlayerTurnStarted,
 --      PlayerTurnStartComplete and OnGameTurnEnded; pipeline step 0e syncs
---      the jobs with the deadline; GameEvents.EFV_VetStep ->
+--      the jobs (no deadline since 0.7.4); GameEvents.EFV_VetStep ->
 --      EFV_Veteran.OnRequestStep;
 --   5. thin hook wrappers: pcall + log + delegate to the module function.
 --      Module functions with engine-shaped signatures (no store parameter)
@@ -95,8 +95,8 @@ end
 --   0d  EFV_Lifecycle.TurnBoundaryPass (safety net after OnGameTurnEnded,
 --       which normally already floored the round heal: S9 snapshot, S8
 --       floor, merge check; war check is 0b's)
---   0e  EFV_Veteran.ProcessJobs(store, turn, "OnGameTurnStarted", true)
---       (0.7, note 33: veteran route B sync + the VET_JOB_TURNS deadline)
+--   0e  EFV_Veteran.ProcessJobs(store, turn, "OnGameTurnStarted")
+--       (0.7, note 33: veteran route B sync; no deadline since 0.7.4)
 --   1   EFV_Transit.ChargeTransitMaintenance
 --   2   EFV_Transit.ProcessArrivals
 --   3   EFV_Lifecycle.ProcessTimers (also cancels reversible Volunteer lapses)
@@ -126,7 +126,7 @@ function EFV_Gameplay.RunTurnStart(turn)
 	RunStep("0b", EFV_Lifecycle.ReconcilePlayers, store, turn)
 	RunStep("0c", EFV_Lifecycle.RefreshTrackedUnits, store, turn)
 	RunStep("0d", EFV_Lifecycle.TurnBoundaryPass, store, turn, "OnGameTurnStarted", -1, { skipWar = true })
-	RunStep("0e", EFV_Veteran.ProcessJobs, store, turn, "OnGameTurnStarted", true)
+	RunStep("0e", EFV_Veteran.ProcessJobs, store, turn, "OnGameTurnStarted")
 	RunStep("1", EFV_Transit.ChargeTransitMaintenance, store, turn)
 	RunStep("2", EFV_Transit.ProcessArrivals, store, turn)
 	RunStep("3", EFV_Lifecycle.ProcessTimers, store, turn)

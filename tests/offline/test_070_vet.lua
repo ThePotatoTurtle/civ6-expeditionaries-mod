@@ -4,8 +4,8 @@
 --   owner's own PROMOTE command (EFV_VetRestore UI context), so it keeps its
 --   level; gameplay (EFV_Veteran) owns the job, raises XP step by step,
 --   undoes the promotion heal and falls back to SetPromotion + the XP clamp
---   at the deadline, before a removal snapshot, or when the owner is no
---   longer human. AI owners keep the clamp path.
+--   before a removal snapshot or when the owner is no longer human (no time
+--   limit since 0.7.4). AI owners keep the clamp path.
 -- Route B is enabled explicitly (H.loadEFV{ routeB = true }): the harness
 -- default is off for the legacy suites.
 -- Fake engine: a script-created unit is level 1 (T08); thresholds 15 / 45 /
@@ -70,10 +70,10 @@ local function Promotes()
 end
 
 -- ---------------------------------------------------------------------------
-test("shipped default: FLAG_VET_ROUTE_B = true, VET_JOB_TURNS = 2; the harness turns it off unless opts.routeB", function()
+test("shipped default: FLAG_VET_ROUTE_B = true, no VET_JOB_TURNS (0.7.4); the harness turns it off unless opts.routeB", function()
 	local src = __py_read("EFV/Scripts/EFV_Config.lua")
 	H.ok(string.find(src, "EFV_Config.FLAG_VET_ROUTE_B%s*=%s*true") ~= nil, "shipped default on")
-	H.ok(string.find(src, "EFV_Config.VET_JOB_TURNS%s*=%s*2") ~= nil)
+	H.ok(string.find(src, "VET_JOB_TURNS", 1, true) == nil, "the job deadline is gone (0.7.4)")
 	H.world{}
 	H.loadEFV()
 	H.eq(EFV_Config.FLAG_VET_ROUTE_B, false, "harness default for legacy suites")
@@ -284,21 +284,83 @@ test("a snapshot without known promotions uses the classic path (nothing to prom
 	H.eq(Xp(u), 14)
 end, { allowErrors = true })
 
-test("deadline: a job still open at turn t + 2 falls back at step 0e (promotions set, XP clamped, damage kept)", function()
+-- 0.7.4 (designer decision): no time limit. In game the engine allows one
+-- promotion per turn and taking it uses the unit's remaining moves, so a
+-- veteran with N promotions needs about N turns; the 0.7.0 deadline
+-- (t + 2 -> SetPromotion + clamp) reset every 3+ promotion veteran.
+test("0.7.4: a job nobody advances stays open for many turns (no fallback), XP kept at the next threshold", function()
 	H.baseScenario()
 	H.loadEFV{ routeB = true }
 	local t0 = FAKE.turn
 	local u = Restore(0, nil, t0)
+	H.turns(8)
+	H.eq(FAKE.turn, t0 + 8)
+	H.len(Jobs(), 1, "still open")
+	H.len(H.promotionTypes(u), 0, "no SetPromotion")
+	H.eq(Xp(u), 15, "one promotion available: the player may pick it by hand")
+	H.ok(not H.hasLine("[Vet] fallback"))
+	H.ok(not H.hasLine("TIMEOUT"))
+	H.clean()
+end)
+
+test("0.7.4: a 4-promotion veteran gets one promotion back per turn over 4 turns and keeps its level (no fallback)", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local promos = { BATTLECRY, COMMANDO, "PROMOTION_ZWEIHANDER", "PROMOTION_ELITE_GUARD" }
+	local t0 = FAKE.turn
+	local u = Restore(0, VetRec({ promotions = promos, experience = 160, xpNext = 225, level = 5 }), t0)
+	H.len(Jobs()[1].want, 4)
+	-- The engine rule seen in game: taking a promotion uses the unit's
+	-- remaining moves, so PROMOTE is offered again only next turn.
+	local env = BootUI()
+	local apply = FAKE_UI.ApplyUnitCommands
+	FAKE_UI.ApplyUnitCommands = function()
+		local before = #H.promotionTypes(u)
+		apply()
+		if #H.promotionTypes(u) > before then u.moves = 0 end
+	end
+	Pump(env, 8)
+	H.len(H.promotionTypes(u), 0, "arrival turn: 0 moves, nothing offered")
+	local nextXP = { 45, 90, 150 }
+	for k = 1, 4 do
+		H.endTurn()
+		H.eq(FAKE.turn, t0 + k)
+		H.len(Jobs(), 1, "open at the start of turn t + " .. k)
+		Pump(env, 8)
+		H.len(H.promotionTypes(u), k, "one promotion in turn t + " .. k)
+		if k < 4 then
+			H.len(Jobs(), 1)
+			H.eq(Xp(u), nextXP[k], "next promotion available")
+		end
+	end
+	H.len(Jobs(), 0, "done at t + 4")
+	H.len(Promotes(), 4, "one PROMOTE per turn")
+	H.deq(H.promotionTypes(u), { BATTLECRY, COMMANDO, "PROMOTION_ELITE_GUARD", "PROMOTION_ZWEIHANDER" }, "all four (DB order)")
+	H.eq(u:GetExperience():GetLevel(), 5, "level kept")
+	H.eq(Xp(u), 160); H.eq(Next(u), 225)
+	H.eq(u:GetDamage(), 30, "promotion heals undone")
+	H.ok(H.hasLine("[Vet] done id=7"))
+	H.ok(not H.hasLine("[Vet] fallback"))
+	H.clean()
+end)
+
+test("0.7.4: after turns of progress, the owner turning AI still falls back (NOT_HUMAN) at the next boundary", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0, VetRec({ promotions = { BATTLECRY, COMMANDO, "PROMOTION_ZWEIHANDER" }, experience = 100,
+		xpNext = 150, level = 4 }))
+	H.turns(3)
+	u.promotions[GameInfo.UnitPromotions[BATTLECRY].Index] = true; u.level = 2
+	H.request(0, { OnStart = "EFV_VetStep", unitID = u.id, have = 1 })
+	H.len(Jobs(), 1)
+	H.turns(2)
+	H.len(Jobs(), 1, "still open, no deadline")
+	Players[0].human = false
 	H.endTurn()
-	H.len(Jobs(), 1, "still open at t + 1")
-	H.eq(Xp(u), 15, "boundaries keep one promotion available")
-	H.endTurn()
-	H.eq(FAKE.turn, t0 + 2)
-	H.len(Jobs(), 0, "fallback at t + 2")
-	H.deq(H.promotionTypes(u), { BATTLECRY, COMMANDO })
-	H.eq(Xp(u), 14, "XP target then the clamp")
-	H.eq(u:GetDamage(), 30)
-	H.ok(H.hasLine("why=TIMEOUT"))
+	H.len(Jobs(), 0)
+	H.ok(H.hasLine("why=NOT_HUMAN"))
+	H.deq(H.promotionTypes(u), { BATTLECRY, COMMANDO, "PROMOTION_ZWEIHANDER" }, "the rest set")
+	H.eq(Xp(u), 44, "XP target then the clamp (level 2 threshold 45 - 1)")
 	H.clean()
 end)
 

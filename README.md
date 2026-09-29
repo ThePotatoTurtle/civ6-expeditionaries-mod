@@ -2,7 +2,7 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 0.7.2-dev. This is a development build.
+Version 0.7.4-dev. This is a development build.
 
 ## The four options
 
@@ -138,7 +138,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 ## Known issues
 - The AI never sends units or entrusts cities, but it uses the units it receives.
 - Veterans controlled by the AI (for example an Expeditionary unit while an AI ally commands it) restart at level 1. They keep their promotions, and your own units keep their level when they come home. Experience above the next promotion is dropped, so there is no free promotion on arrival.
-- When a veteran comes home to you, VEF gives its promotions back through the game's own promote command on your turn. If that has not worked after 2 turns, the unit gets its promotions the old way and restarts at level 1.
+- When a veteran comes home to you, VEF gives its promotions back through the game's own promote command. The game allows one promotion per turn, so a unit with four promotions needs about four turns to get them all back. There is no time limit. Only if the unit changes hands to the AI, or you send it off again before it is done, does it get the rest of its promotions the old way and restart at level 1. If one of them can't be taken back, the unit is left with a promotion ready for you to pick yourself.
 - Entrust gives the new owner no grievance penalty. The capturer takes the normal penalty, but the game offers mods no way to add grievances.
 - Entrust keeps the city for you first (that ends the capture decision) and then hands it over. If the handover is refused, for example because the partner was eliminated or went to war with you in the meantime, the city stays yours and a notification says why.
 - A unit whose owner has none of its strategic resource does not heal. That is a Gathering Storm rule and it also applies to lent units: a host without Iron can't heal a lent Swordsman. The destination list warns before you send such a unit, and the tracker and the flag tag warn while it happens.
@@ -150,6 +150,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
+- 0.7.4-dev: Veterans with three or more promotions no longer lose their level when they come home. They get one promotion back per turn until all are back.
 - 0.7.2-dev: The coloured emblem under a lent unit's flag was drawn almost black. It is now gold, green or light blue as intended. A veteran coming home gets its promotions back in the turn it arrives, not one turn later. The tracker's sort marks are now proper arrows. VEF warnings (grace, mutiny, lapse, service ending, blocked arrival, rerouted unit) stay until the problem is over, and losses stay until you dismiss them. Only plain news (departed, arrived, returned) still clears at the end of the turn. VEF never touches notifications from the game or other mods.
 - 0.7.1-dev: The tracker columns can be sorted by clicking their titles. The scroll bar is now dark blue and easier to see.
 - 0.7.0-dev: A unit can also be sent from the territory of the partner or city-state it goes to, but then only to that partner. City-State units no longer go into grace or mutiny; after 10 turns they come home from wherever they are. Your veterans keep their level when they come home or serve as Volunteers. The flag tag now shows the lending civ's emblem, coloured by type of force. The destination list shows one clear line per city. New icon for Send to City-State, and a wider, easier to read tracker.

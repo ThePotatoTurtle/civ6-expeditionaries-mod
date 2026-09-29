@@ -19,7 +19,8 @@
 --     (tResults[UnitCommandResults.PROMOTIONS]; handles prerequisites
 --     whatever the snapshot order) -> PROMOTE once per (unit, got), one
 --     resend after RESEND_S; nothing offered -> logged once, wait (the
---     gameplay deadline decides).
+--     job has no time limit since 0.7.4; the engine offers the next
+--     promotion on a later turn).
 -- Triggers: ContextPtr:SetUpdate poll every POLL_S (EFV_UI_ReadStore is
 -- cached by EFV_Rev and turn), plus Events.UnitPromoted,
 -- Events.UnitAddedToMap and Events.PlayerTurnActivated (poll at once).

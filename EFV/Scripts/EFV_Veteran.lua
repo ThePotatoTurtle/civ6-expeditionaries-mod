@@ -44,8 +44,16 @@
 --      strike them from want (a promotion picked by hand replaces one, never
 --      adds one), raise XP to the next threshold; want empty -> XP target,
 --      job removed.
---   4. Deadline (step 0e, turn >= t + VET_JOB_TURNS) -> Fallback("TIMEOUT"):
---      SetPromotion for the rest, XP target with the clamp, damage floor.
+--   4. No time limit (designer ruling, 0.7.4): the engine allows one
+--      promotion per turn, so a veteran with N promotions needs about N
+--      turns, and the 0.7.0 deadline (turn >= t + 2 -> Fallback("TIMEOUT"))
+--      cost 3+ promotion veterans their level. A job stays open until it
+--      is done. Fallback (SetPromotion for the rest, XP target with the
+--      clamp, damage floor) only on concrete causes: the owner is no longer
+--      human (Sync, "NOT_HUMAN") or the unit is about to leave the map
+--      (step 5, "SNAPSHOT"). A job that cannot progress leaves the unit
+--      with a pending promotion the player can pick by hand (accepted);
+--      such a pick replaces a wanted one (step 3).
 --   5. Settle before any removal snapshot (EFV_Transit / EFV_Lifecycle):
 --      Sync, then Fallback("SNAPSHOT") when still open.
 -- A job whose unit is gone (killed, upgraded to a new ID, ...) is dropped.
@@ -265,7 +273,7 @@ end
 -- SetPromotion for the rest of want, XP target then the clamp
 -- (EFV_Units.RestoreXPClamped), damage floor, job removed. pUnit nil -> the
 -- job is only removed. Logs "[Vet] fallback id= why=".
--- why: "TIMEOUT" | "NOT_HUMAN" | "SNAPSHOT" | ...
+-- why: "NOT_HUMAN" | "SNAPSHOT" (no "TIMEOUT" since 0.7.4)
 -- ---------------------------------------------------------------------------
 function EFV_Veteran.Fallback(store, job, pUnit, why)
 	if type(store) ~= "table" or job == nil then
@@ -405,13 +413,12 @@ local function DropGone(store, job, why)
 end
 
 -- ---------------------------------------------------------------------------
--- EFV_Veteran.ProcessJobs(store, turn, hook, withDeadline)
--- Syncs every job in array order (dropping jobs whose unit is gone);
--- withDeadline applies the VET_JOB_TURNS deadline (pipeline step 0e): a job
--- still open at turn >= t + VET_JOB_TURNS gets Fallback("TIMEOUT"). One
--- pcall per job.
+-- EFV_Veteran.ProcessJobs(store, turn, hook)
+-- Syncs every job in array order (dropping jobs whose unit is gone), one
+-- pcall per job. No deadline (0.7.4): an open job stays open. turn is only
+-- logged.
 -- ---------------------------------------------------------------------------
-function EFV_Veteran.ProcessJobs(store, turn, hook, withDeadline)
+function EFV_Veteran.ProcessJobs(store, turn, hook)
 	if type(store) ~= "table" or type(store.vet) ~= "table" or #store.vet == 0 then
 		return nil
 	end
@@ -419,7 +426,6 @@ function EFV_Veteran.ProcessJobs(store, turn, hook, withDeadline)
 	for i, job in ipairs(store.vet) do
 		jobs[i] = job
 	end
-	local limit = tonumber(EFV_Config.VET_JOB_TURNS) or 2
 	for _, job in ipairs(jobs) do
 		local ok, err = pcall(function()
 			local pUnit, why = JobUnit(job)
@@ -427,14 +433,11 @@ function EFV_Veteran.ProcessJobs(store, turn, hook, withDeadline)
 				DropGone(store, job, why)
 				return
 			end
-			local result = EFV_Veteran.Sync(store, job, pUnit, hook)
-			if result == "OPEN" and withDeadline and type(turn) == "number" and turn >= (tonumber(job.t) or 0) + limit then
-				EFV_Veteran.Fallback(store, job, pUnit, "TIMEOUT")
-			end
+			EFV_Veteran.Sync(store, job, pUnit, hook)
 		end)
 		if not ok then
-			EFV_Log(1, TAG, "job owner=%s uid=%s hook=%s failed err=%s", tostring(job.p), tostring(job.u),
-				tostring(hook), ErrText(err))
+			EFV_Log(1, TAG, "job owner=%s uid=%s hook=%s turn=%s failed err=%s", tostring(job.p), tostring(job.u),
+				tostring(hook), tostring(turn), ErrText(err))
 		end
 	end
 	return nil
@@ -495,7 +498,7 @@ end
 -- EFV_Veteran.OnBoundary(hook, pid)
 -- Turn-boundary entry (PlayerTurnStarted, PlayerTurnStartComplete,
 -- OnGameTurnEnded), called by EFV_Gameplay after the existing boundary
--- pass; own load and commit; no deadline (step 0e owns it). Nothing to do
+-- pass; own load and commit (same sync as step 0e). Nothing to do
 -- (no commit) while there is no job.
 -- ---------------------------------------------------------------------------
 function EFV_Veteran.OnBoundary(hook, pid)
@@ -506,7 +509,7 @@ function EFV_Veteran.OnBoundary(hook, pid)
 			store = nil
 			return
 		end
-		EFV_Veteran.ProcessJobs(store, CurrentTurn(), hook, false)
+		EFV_Veteran.ProcessJobs(store, CurrentTurn(), hook)
 	end)
 	if not ok then
 		EFV_Log(1, TAG, "boundary %s(%s) failed: %s", tostring(hook), tostring(pid), ErrText(err))
