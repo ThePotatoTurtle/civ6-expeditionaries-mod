@@ -1062,35 +1062,45 @@ local function Recs(pred)
 	return out
 end
 
-test("shot1: from a fresh game (S0 inside): 'Legio VEF' next to your capital, B and F get a second city, D greyed, focus PICKER", function()
+test("shot1: from a fresh game (S0 inside): Legion 'Legio VEF' next to your capital, Volunteer picker: B open, F and D greyed", function()
 	local S = FreshBoot()
 	FAKE.NewPlayer(7, { gold = 0 })
 	local c7 = H.city(7, 60, 10, { capital = true, name = "LOC_CITY_D" })
 	Dev("shot1", { stamp = 21 })
 	H.ok(CheckLine("SETUP", "PASS"), "S0 ran inside the Shot")
 	H.ok(CheckLine("SHOT1", "PASS"))
-	local swords = H.unitsOf(0, "UNIT_SWORDSMAN")
-	H.len(swords, 1, "S0's three Swordsmen were removed; only Legio VEF")
-	local u = swords[1]
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0, "S0's three Swordsmen were removed")
+	local legions = H.unitsOf(0, "UNIT_ROMAN_LEGION")
+	H.len(legions, 1, "only Legio VEF")
+	local u = legions[1]
 	H.eq(u.vetName, "Legio VEF")
 	H.ok(H.dist(u, S.c0) <= 2); H.eq(Map.GetPlot(u.x, u.y):GetOwner(), 0)
 	H.eq(u:GetMovesRemaining(), u:GetMaxMoves())
 	H.ok(#FAKE.CitiesOf(2) >= 2, "F got a second city (B already has two)")
 	H.len(FAKE.CitiesOf(1), 2)
-	H.ok(Players[0]:GetDiplomacy():HasDeclaredFriendship(7), "D is your friend")
 	H.ok(PlayersVisibility[0]:IsRevealed(c7.x, c7.y), "D's capital revealed")
-	local rows = EFV_DestinationRows(0, u, "EXPEDITIONARY", EFV_Records.Load())
-	local dRow = nil
-	for _, r in ipairs(rows) do if r.recipientID == 7 then dRow = r end end
-	H.notnil(dRow, "a row for D")
-	H.ok(not dRow.ok); H.contains(dRow.reasons, "NO_COMMON_WAR", "greyed: no common enemy")
+	H.ok(Players[0]:GetDiplomacy():HasMet(7), "D met")
+	H.ok(Players[7]:GetDiplomacy():IsAtWarWith(3), "D at war with C")
+	H.notnil(EFV_VolunteerBasis(0, 1), "B is the Volunteer partner")
+	H.isnil(EFV_VolunteerBasis(0, 2)); H.isnil(EFV_VolunteerBasis(0, 7))
+	local rows = EFV_DestinationRows(0, u, "VOLUNTEER", EFV_Records.Load())
+	local by = {}
+	for _, r in ipairs(rows) do by[r.recipientID] = by[r.recipientID] or {}; table.insert(by[r.recipientID], r) end
+	H.len(by[1], 2, "B's two cities")
+	for _, r in ipairs(by[1]) do H.ok(r.ok, "B's rows open") end
+	for _, pid in ipairs({ 2, 7 }) do
+		H.notnil(by[pid], "a row for " .. pid)
+		for _, r in ipairs(by[pid]) do
+			H.ok(not r.ok); H.deq(r.reasons, { "VOL_NEEDS_ACCESS" }, "greyed only for the missing open borders")
+		end
+	end
 	local st = H.prop("EFV_DEV_SCN")
-	H.eq(st.focus.open, "PICKER"); H.eq(st.focus.ft, "EXPEDITIONARY"); H.eq(st.focus.u, u.id); H.eq(st.focus.o, 0)
+	H.eq(st.focus.open, "PICKER"); H.eq(st.focus.ft, "VOLUNTEER"); H.eq(st.focus.u, u.id); H.eq(st.focus.o, 0)
 	H.eq(st.focus.stamp, 21); H.eq(st.focus.zoom, 0.5)
 	H.ok(H.gold(0) >= 2000)
 	-- again: the old Legio VEF is replaced, no second city founded twice
 	Dev("shot1", { stamp = 22 })
-	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1)
+	H.len(H.unitsOf(0, "UNIT_ROMAN_LEGION"), 1)
 	H.ok(not H.unitAlive(u), "previous shot's unit removed")
 	H.len(H.lines("[EFV][CHECK] SETUP"), 1, "S0 only once")
 	H.clean()
@@ -1109,6 +1119,7 @@ test("shot2: Expeditionary (B's colours) and Volunteers (yours) next to B's capi
 	local e = FAKE.units[exp[1].onMapUnitID]
 	local v = FAKE.units[vol[1].onMapUnitID]
 	H.eq(Map.GetPlot(e.x, e.y):GetOwner(), 1); H.eq(Map.GetPlot(v.x, v.y):GetOwner(), 1)
+	H.eq(exp[1].unitType, "UNIT_ROMAN_LEGION"); H.eq(vol[1].unitType, "UNIT_ROMAN_LEGION")
 	H.ok(H.dist(e, S.c1) <= 2 and H.dist(e, v) <= 3)
 	H.len(H.notifs(0, EFV_Config.NOTIF.ARRIVED), 2)
 	local st = H.prop("EFV_DEV_SCN")
@@ -1130,14 +1141,16 @@ test("shot3: six records (Grace, Deployed x3, Returning, Outbound), one Grace no
 	for _, r in ipairs(rs) do by[r.state] = (by[r.state] or 0) + 1 end
 	H.eq(by.GRACE, 1); H.eq(by.DEPLOYED, 3); H.eq(by.RETURNING, 1); H.eq(by.OUTBOUND, 1)
 	local grace = Recs(function(r) return r.state == "GRACE" end)[1]
-	H.eq(grace.graceTurnsLeft, 3); H.eq(grace.recipientID, 1)
+	H.eq(grace.graceTurnsLeft, 3); H.eq(grace.recipientID, 1); H.eq(grace.unitType, "UNIT_ROMAN_LEGION")
 	local gu = FAKE.units[grace.onMapUnitID]
 	H.ok(IsNeutral(gu), "grace unit on neutral land")
 	local ret = Recs(function(r) return r.state == "RETURNING" end)[1]
 	H.eq(ret.forceType, "CS_EXPEDITIONARY"); H.eq(ret.arrivalTurn, FAKE.turn + 2); H.isnil(ret.onMapUnitID)
 	local out = Recs(function(r) return r.state == "OUTBOUND" end)[1]
 	H.eq(out.arrivalTurn, FAKE.turn + 3); H.eq(out.unitType, "UNIT_HORSEMAN")
-	H.len(Recs(function(r) return r.senderID == 1 and r.recipientID == 0 end), 1, "one received from B")
+	local recv = Recs(function(r) return r.senderID == 1 and r.recipientID == 0 end)
+	H.len(recv, 1, "one received from B")
+	H.eq(recv[1].unitType, "UNIT_SWORDSMAN", "B's own unit, not a Legion")
 	H.len(H.notifs(0, EFV_Config.NOTIF.GRACE), 1)
 	local st = H.prop("EFV_DEV_SCN")
 	H.eq(st.focus.open, "TRACKER"); H.eq(st.focus.x, gu.x); H.eq(st.focus.y, gu.y)
@@ -1163,7 +1176,7 @@ test("shot4: C's city weakened with 3 Tanks next to it, focus CAPTURE with the t
 	H.clean()
 end)
 
-test("shot5: B's Swordsman of yours in MUTINY with 40 damage on neutral land, Mutiny notification, close zoom", function()
+test("shot5: B's Legion of yours in MUTINY with 40 damage on neutral land, Mutiny notification, close zoom", function()
 	FreshBoot()
 	Dev("shot4")
 	Dev("shot5", { stamp = 61 })
@@ -1172,7 +1185,7 @@ test("shot5: B's Swordsman of yours in MUTINY with 40 damage on neutral land, Mu
 	local rs = H.records()
 	H.len(rs, 1)
 	local r = rs[1]
-	H.eq(r.state, "MUTINY"); H.eq(r.lastDamage, 40); H.eq(r.onMapPlayerID, 1)
+	H.eq(r.state, "MUTINY"); H.eq(r.lastDamage, 40); H.eq(r.onMapPlayerID, 1); H.eq(r.unitType, "UNIT_ROMAN_LEGION")
 	local u = FAKE.units[r.onMapUnitID]
 	H.eq(u.damage, 40); H.ok(IsNeutral(u))
 	H.len(H.notifs(0, EFV_Config.NOTIF.MUTINY), 1)

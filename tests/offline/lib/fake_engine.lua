@@ -89,6 +89,7 @@ FAKE = {
 	ghostsInPlot = true,     -- ghosts on a plot still listed by Units.GetUnitsInPlot (unmeasured: worst case)
 	combatDamageBeforeEvent = true, -- H.combat applies damage before GameEvents.OnCombatOccurred (T31 open)
 	damageWrites = {},       -- { id, owner, from, to, turn, ghost } for every Unit:SetDamage / ChangeDamage
+	permanentWars = true,    -- Free Cities <-> majors and barbarians <-> everyone always at war (Session E H_DIPLO)
 	revealUnavailable = false, -- PlayersVisibility:ChangeVisibilityCount missing (EFV_Dev S0 Scout fallback)
 	unitSight = false,       -- script-created units reveal radius 2 to their owner (only with a test's FAKE.unrevealed)
 	refuseScriptedDeals = false, -- DealManager.EnactWorkingDeal enacts nothing (EFV_Dev S0 alliance fallback)
@@ -1117,11 +1118,29 @@ local function PairSet(t, a, b, v)
 end
 FAKE.PairGet, FAKE.PairSet = PairGet, PairSet
 
+-- Permanent engine wars (FAKE.permanentWars, default on), measured in game
+-- (research/phase0_results/raw/sessionE_Lua.log L17468-L17483, H_DIPLO
+-- matrix at turn 117): the Free Cities player (62) and every alive major
+-- are at war both ways, city-states are NOT at war with the Free Cities;
+-- the barbarians (63) are at war with everyone. Neither needs a
+-- declaration, and H.peace cannot end it (1.0.1 common-war bug).
+local function PermanentWar(a, b)
+	if FAKE.permanentWars == false then return false end
+	local pa, pb = FAKE.players[a], FAKE.players[b]
+	if pa == nil or pb == nil then return false end
+	if pa.kind == "BARBARIAN" or pb.kind == "BARBARIAN" then return true end
+	if (pa.kind == "FREE_CITIES" and pb.kind == "MAJOR") or (pb.kind == "FREE_CITIES" and pa.kind == "MAJOR") then
+		return true
+	end
+	return false
+end
+FAKE.PermanentWar = PermanentWar
+
 local function NewDiplomacy(pid)
 	local d = {}
 	function d:IsAtWarWith(b)
 		if b == pid then return false end
-		return PairGet(FAKE.diplo.war, pid, b)
+		return PairGet(FAKE.diplo.war, pid, b) or PermanentWar(pid, b)
 	end
 	function d:HasAllied(b) return PairGet(FAKE.diplo.allied, pid, b) end
 	function d:HasDeclaredFriendship(b) return PairGet(FAKE.diplo.friend, pid, b) end

@@ -569,7 +569,8 @@ local function ShotStep()
 	if s.phase == "PICKER" then
 		local ok, err = pcall(function() LuaEvents.EFV_OpenDestinationPicker(LocalID(), s.f.u, s.f.ft) end)
 		UICheck(s.id, ok and "INFO" or "CHECK", "destination picker opened=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) ..
-			"; if it hides the unit panel, take frame 1b after Esc while hovering Send as Expeditionary")
+			"; if it hides the unit panel, take frame 1b after Esc while hovering Send as " ..
+			((s.f.ft == "VOLUNTEER") and "Volunteers" or "Expeditionary"))
 		s.phase = "DONE"
 	elseif s.phase == "TRACKER" then
 		local ok, err = pcall(function() LuaEvents.EFV_TrackerOpen() end)

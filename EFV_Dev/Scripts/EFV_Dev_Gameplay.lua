@@ -49,8 +49,8 @@ EFV_Dev = {}
 -- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3; rebuilt for
 -- the EFV 1.0.0 release without changes: 1.0.0.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.0.1"
-EFV_Dev.FOR_EFV = "1.0.0"
+EFV_Dev.VERSION = "1.0.1.1"
+EFV_Dev.FOR_EFV = "1.0.1"
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -2573,10 +2573,23 @@ local function ShotName(rec)
 	return Str(rec.unitType)
 end
 
+-- The designer plays Rome: the Shot units you send in place of a Swordsman
+-- are Roman Legions (any owner can get one by script). Units other civs send
+-- you stay non-unique (Shot 3's received row). Legion in GS: 10 Iron to
+-- build (S0 grants 10).
+local SHOT_UT = "UNIT_ROMAN_LEGION"
+
+-- Shot 1 grey rows: EFV_DestinationRows lists only civs with a partner basis
+-- (EFV_PartnerBasis), so a civ you only met never gets a row. true: F and D
+-- are declared friends WITHOUT open borders (greyed "needs open borders");
+-- false: F and D are met only (no friendship, so no row in the picker).
+local SHOT1_GREY_FRIENDS = true
+
 -- Shot 1 Send picker: "Legio VEF" selected next to your capital, the
--- Expeditionary picker opened by the panel. B and F get a second city when
--- they have one only; D (the next major) becomes your friend without a
--- common enemy, so its row is greyed.
+-- Volunteer picker opened by the panel. B (friend with open borders to you)
+-- is the one Volunteer partner; F and D (the next major) are met, at war
+-- with C, and give you no open borders, so their rows are greyed. B and F
+-- get a second city when they have one only.
 CMD.shot1 = function(me, p)
 	local st = ShotPrep("SHOT1", me, p)
 	if st == nil then return end
@@ -2594,33 +2607,53 @@ CMD.shot1 = function(me, p)
 	for _, i in ipairs(SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)) do
 		if D == nil and i ~= st.ally and i ~= st.friend and i ~= st.enemy then D = i end
 	end
-	if D ~= nil then
-		MeetPair(me, D)
-		if EFV_PartnerBasis(me, D) == nil then SetDiploPair("shot1", me, D, "SetHasDeclaredFriendship", true) end
-		local cD = Capital(D)
-		if cD ~= nil then RevealCity(me, cD, nil, 5) end
-		notes[#notes + 1] = "greyed row: " .. PlayerName(D) .. " (friend, no common enemy)"
+	if D == nil then notes[#notes + 1] = "NO 4th AI civ for D: start a game with at least 5 civs" end
+	for _, pid in ipairs({ st.friend, D or false }) do
+		if pid then
+			MeetPair(me, pid)
+			if st.enemy ~= nil then MeetPair(pid, st.enemy); DeclareWar(pid, st.enemy) end
+			local friend = Diplo(me, "HasDeclaredFriendship", pid)
+			if friend ~= SHOT1_GREY_FRIENDS then SetDiploPair("shot1", me, pid, "SetHasDeclaredFriendship", SHOT1_GREY_FRIENDS) end
+			local c0 = Capital(pid)
+			if c0 ~= nil then RevealCity(me, c0, nil, 5) end
+		end
 	end
-	local u = NewUnit("shot1", me, "UNIT_SWORDSMAN", FindPlot(cap:GetX(), cap:GetY(), 2, OwnedBy(me), 1), "Legio VEF")
+	local u = NewUnit("shot1", me, SHOT_UT, FindPlot(cap:GetX(), cap:GetY(), 2, OwnedBy(me), 1), "Legio VEF")
 	if u == nil then
 		ScnSave(st)
-		Check("SHOT1", "CHECK", "could not create the Swordsman next to your capital")
+		Check("SHOT1", "CHECK", "could not create the Legion next to your capital")
 		return
 	end
 	local full = FullMoves(u)
 	ShotUnit(st, u)
 	Focus(st, cap:GetX(), cap:GetY(), me, u:GetID(), p.stamp)
-	st.focus.open, st.focus.ft, st.focus.zoom = "PICKER", FT_EXP, ZOOM_MID
+	st.focus.open, st.focus.ft, st.focus.zoom = "PICKER", FT_VOL, ZOOM_MID
 	ScnSave(st)
-	local rows = EFV_DestinationRows(me, u, FT_EXP, EFV_Records.Load())
-	local open = 0
-	for _, r in ipairs(rows) do if r.ok then open = open + 1 end end
-	Check("SHOT1", (open > 0 and full) and "PASS" or "CHECK", "'Legio VEF' next to your capital (full moves " .. tostring(full) ..
-		"); picker rows " .. #rows .. ", open " .. open .. (#notes > 0 and ("; " .. table.concat(notes, "; ")) or ""))
+	local rows = EFV_DestinationRows(me, u, FT_VOL, EFV_Records.Load())
+	local okCivs, greySeen, extra = {}, {}, {}
+	local nOk, nGrey, greyText = 0, 0, {}
+	for _, r in ipairs(rows) do
+		if r.ok then
+			if not okCivs[r.recipientID] then okCivs[r.recipientID] = true; nOk = nOk + 1 end
+		else
+			if not greySeen[r.recipientID] then
+				greySeen[r.recipientID] = true
+				nGrey = nGrey + 1
+				greyText[#greyText + 1] = PlayerName(r.recipientID) .. " " .. table.concat(r.reasons or {}, "+")
+			end
+			for _, why in ipairs(r.reasons or {}) do if why ~= "VOL_NEEDS_ACCESS" then extra[#extra + 1] = why end end
+		end
+	end
+	table.sort(greyText)
+	local want = SHOT1_GREY_FRIENDS and 2 or 0
+	local ok = full and nOk == 1 and okCivs[st.ally] and nGrey == want and #extra == 0 and D ~= nil
+	Check("SHOT1", ok and "PASS" or "CHECK", "'Legio VEF' next to your capital (full moves " .. tostring(full) ..
+		"); Volunteer picker rows " .. #rows .. ", partner civs " .. nOk .. " (" .. PlayerName(st.ally) .. "), greyed civs " .. nGrey ..
+		(#greyText > 0 and (" (" .. table.concat(greyText, ", ") .. ")") or "") .. (#notes > 0 and ("; " .. table.concat(notes, "; ")) or ""))
 end
 
--- Shot 2 Arrival: your Expeditionary Swordsman (B's colours) and your
--- Volunteer Swordsman (your colours) next to B's capital, both recorded
+-- Shot 2 Arrival: your Expeditionary Legion (B's colours) and your
+-- Volunteer Legion (your colours) next to B's capital, both recorded
 -- DEPLOYED this turn, two "Unit Arrived" notifications.
 CMD.shot2 = function(me, p)
 	local st = ShotPrep("SHOT2", me, p)
@@ -2630,13 +2663,13 @@ CMD.shot2 = function(me, p)
 	if cap == nil or capB == nil then ScnSave(st); Check("SHOT2", "CHECK", "your capital or B's capital is missing"); return end
 	RevealCity(me, capB, nil, 5)
 	local store = EFV_Records.Load()
-	local e = NewUnit("shot2", B, "UNIT_SWORDSMAN", FindPlot(capB:GetX(), capB:GetY(), 2, OwnedBy(B), 1))
+	local e = NewUnit("shot2", B, SHOT_UT, FindPlot(capB:GetX(), capB:GetY(), 2, OwnedBy(B), 1))
 	if e == nil then ScnSave(st); Check("SHOT2", "CHECK", "no free tile of B next to its capital"); return end
 	ShotUnit(st, e)
 	local recE = MakeRecord(store, e, { force = FT_EXP, sender = me, recipient = B, basis = st.partner or "FRIEND", origin = cap,
 		dest = capB, duration = EFV_Config.EXPEDITIONARY_DURATION })
 	local p2 = FindPlot(e:GetX(), e:GetY(), 1, OwnedBy(B), 1) or FindPlot(capB:GetX(), capB:GetY(), 2, OwnedBy(B), 1)
-	local v = NewUnit("shot2", me, "UNIT_SWORDSMAN", p2)
+	local v = NewUnit("shot2", me, SHOT_UT, p2)
 	ShotUnit(st, v)
 	local recV = nil
 	if v ~= nil then
@@ -2686,7 +2719,7 @@ CMD.shot3 = function(me, p)
 	end
 	-- 1 Expeditionary to B in Grace (3 turns), on neutral land near B's border
 	local spot = FindPlot(capB:GetX(), capB:GetY(), 8, Neutral, 3)
-	local u1 = NewUnit("shot3", B, "UNIT_SWORDSMAN", spot)
+	local u1 = NewUnit("shot3", B, SHOT_UT, spot)
 	local r1 = nil
 	if u1 ~= nil then
 		r1 = MakeRecord(store, u1, { force = FT_EXP, sender = me, recipient = B, basis = st.partner or "FRIEND", origin = cap,
@@ -2795,7 +2828,7 @@ CMD.shot4 = function(me, p)
 		city:GetX() .. "," .. city:GetY() .. " (" .. Str(note) .. "; " .. Str(weak) .. "); the panel orders Tank 1 to attack")
 end
 
--- Shot 5 Mutiny: your Expeditionary Swordsman (B's) on neutral land near
+-- Shot 5 Mutiny: your Expeditionary Legion (B's) on neutral land near
 -- B's border, MUTINY with 40 damage, one Mutiny notification.
 CMD.shot5 = function(me, p)
 	local st = ShotPrep("SHOT5", me, p)
@@ -2806,8 +2839,8 @@ CMD.shot5 = function(me, p)
 	local spot = FindPlot(capB:GetX(), capB:GetY(), 8, Neutral, 3)
 	if spot == nil then ScnSave(st); Check("SHOT5", "CHECK", "no free neutral land 3-8 tiles from B's capital"); return end
 	RevealCity(me, spot, nil, 5)
-	local u = NewUnit("shot5", B, "UNIT_SWORDSMAN", spot)
-	if u == nil then ScnSave(st); Check("SHOT5", "CHECK", "could not create B's Swordsman"); return end
+	local u = NewUnit("shot5", B, SHOT_UT, spot)
+	if u == nil then ScnSave(st); Check("SHOT5", "CHECK", "could not create the Legion"); return end
 	ShotUnit(st, u)
 	pcall(function() u:SetDamage(40) end)
 	local store = EFV_Records.Load()

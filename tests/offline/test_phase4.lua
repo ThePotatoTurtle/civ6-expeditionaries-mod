@@ -112,7 +112,7 @@ test("P4.1 rules: CS rows = met city-states' cities; fee = Expeditionary column;
 	H.clean()
 end)
 
-test("P4.2 CS war requirement: shared war only; barbarians do not count; no war with the city-state", function()
+test("P4.2 CS war requirement: shared war only; barbarians and Free Cities do not count; no war with the city-state", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local u = MyUnit()
@@ -123,8 +123,8 @@ test("P4.2 CS war requirement: shared war only; barbarians do not count; no war 
 	H.deq(Reasons(), { "NO_COMMON_WAR" })
 	H.war(63, 4); H.war(63, 0)                        -- both fight the barbarians only
 	H.deq(Reasons(), { "NO_COMMON_WAR" }, "barbarians excluded")
-	H.war(62, 4); H.war(62, 0)                        -- Free Cities count (spec 6.1.3)
-	H.deq(Reasons(), {})
+	H.war(62, 4)                                      -- 0 is always at war with the Free Cities
+	H.deq(Reasons(), { "NO_COMMON_WAR" }, "Free Cities excluded (1.0.1)")
 	H.peace(62, 4); H.war(2, 4)                       -- the city-state fights F, 0 does not
 	H.deq(Reasons(), { "NO_COMMON_WAR" }, "a war of the city-state the sender does not share")
 	H.war(3, 4)

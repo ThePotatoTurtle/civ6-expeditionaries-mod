@@ -39,7 +39,7 @@
 -- city-state the sender HasMet (CS_NOT_MET otherwise; majors, Free Cities
 -- and barbarians are never CS recipients); war requirement = EFV_HasCommonWar
 -- (the sender and the city-state both at war with some third player,
--- barbarians excluded; Free Cities count); not at war with the city-state
+-- barbarians and Free Cities excluded, 1.0.1); not at war with the city-state
 -- (AT_WAR_WITH_RECIPIENT); fee FEE_CS_EXPEDITIONARY (= the Expeditionary
 -- column); duration CS_EXPEDITIONARY_DURATION (10); naval dry run as the
 -- city-state (future owner); valid return territory = the city-state's or
@@ -568,13 +568,28 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_HasCommonWar(s, r) -> bool
--- true if some alive player e (sorted IDs), not barbarian, e ~= s and e ~= r,
--- has s:IsAtWarWith(e) and r:IsAtWarWith(e). Works for city-states and Free
--- Cities (R3 2.2); Free Cities count as a common enemy, barbarians do not.
+-- true if some alive player e (sorted IDs), e ~= s and e ~= r, that is a
+-- major civ or a city-state, has s:IsAtWarWith(e) and r:IsAtWarWith(e).
+-- Only real war states count (spec 6.1.3, DECISIONS "Common enemy",
+-- 1.0.1): barbarians and the Free Cities player are skipped. The engine
+-- keeps every major permanently at war with both (Session E H_DIPLO matrix,
+-- research/phase0_results/raw/sessionE_Lua.log L17468-L17483), so counting
+-- them made any two majors share an enemy (1.0.0 bug: Expeditionary to a
+-- friend with no wars was allowed, and the Volunteer WAR lapse never
+-- fired). Free Cities count only for Entrust's "at war with the old owner"
+-- (EFV_EntrustCandidates). A city-state counts when both sides are really
+-- at war with it. Used unchanged by all three force types, by the UI and
+-- gameplay adapters (RecipientInfo) and by the Volunteer lapse
+-- (EFV_VolunteerLapseReason).
 -- Params:  s, r player IDs.
 -- Returns: boolean.
--- PLAN 2.3; spec 6.1.3. APIs: A43, A42, A36.
+-- PLAN 2.3; spec 6.1.3. APIs: A43, A42, A36 (+ EFV_PlayerKind adapters).
 -- ---------------------------------------------------------------------------
+function EFV_IsCommonEnemyCandidate(e)
+	local kind = EFV_PlayerKind(e)
+	return kind == "MAJOR" or kind == "CITY_STATE"
+end
+
 function EFV_HasCommonWar(s, r)
 	if s == nil or r == nil then
 		return false
@@ -584,13 +599,10 @@ function EFV_HasCommonWar(s, r)
 		return false
 	end
 	for _, e in ipairs(EFV_SortedAlivePlayers()) do
-		if e ~= s and e ~= r then
-			local okB, isBarb = pcall(function() return Players[e]:IsBarbarian() end)
-			if okB and not isBarb then
-				local ok, both = pcall(function() return dS:IsAtWarWith(e) and dR:IsAtWarWith(e) end)
-				if ok and both then
-					return true
-				end
+		if e ~= s and e ~= r and EFV_IsCommonEnemyCandidate(e) then
+			local ok, both = pcall(function() return dS:IsAtWarWith(e) and dR:IsAtWarWith(e) end)
+			if ok and both then
+				return true
 			end
 		end
 	end

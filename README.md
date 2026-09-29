@@ -2,7 +2,7 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 1.0.0.
+Version 1.0.1.
 
 ## The four options
 
@@ -66,7 +66,7 @@ If nobody qualifies, the button is greyed out and the tooltip says why. Entrust 
 - Volunteers: a teammate, an ally, or a declared friend who grants you open borders. Open borders without friendship do not count, and neither does friendship without open borders.
 - City-State Expeditionary: any city-state you have met.
 - Entrust: an ally, a teammate or a declared friend who was at war with the city's former owner when you took it (any partner for a Free City).
-- In every case you and the partner must be at war with the same enemy (Barbarians don't count), and not at war with each other.
+- In every case you and the partner must be at war with the same enemy (Barbarians and Free Cities don't count), and not at war with each other.
 
 ### Which units can go
 Land and naval combat units, including Warrior Monks and Nihangs. The unit must:
@@ -152,6 +152,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
+- 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.
 - 1.0.0: First public release, on the Steam Workshop and GitHub. Same rules as 0.7.4.
 - 0.7.4: Veterans with three or more promotions no longer lose their level when they come home. They get one promotion back per turn until all are back.
 - 0.7.3: In the tracker, every column you can sort by shows a faded up and down mark next to its title. The sorted column keeps its single arrow.
