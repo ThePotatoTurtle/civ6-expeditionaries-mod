@@ -145,6 +145,69 @@ function FAKE_UI.Enable()
 		FAKE_UI.cityCommands[#FAKE_UI.cityCommands + 1] = { x = city:GetX(), y = city:GetY(), cmd = cmd,
 			flags = params and params[UnitOperationTypes.PARAM_FLAGS] }
 	end
+	-- Unit promotion (0.7 veteran route B; base UnitPromotionPopup.lua:66-82).
+	-- CanStartCommand(u, PROMOTE, true, true): a promotion is pending when
+	-- XP >= the next-level threshold; the list = promotions of the unit's
+	-- PromotionClass not held whose Level <= held + 1 (tiers, a stand-in for
+	-- the prerequisite tree). FAKE_UI.canPromote = false refuses.
+	-- RequestCommand is recorded in FAKE_UI.unitCommands and applied on the
+	-- next FAKE_UI.Update tick (a networked command): promotion added,
+	-- unit.level + 1 (script-created unit), damage - FAKE_UI.promoteHeal
+	-- (EXPERIENCE_PROMOTE_HEALED = 50), Events.UnitPromoted(owner, id).
+	UnitCommandTypes = { PROMOTE = "PROMOTE", PARAM_PROMOTION_TYPE = "PARAM_PROMOTION_TYPE" }
+	UnitCommandResults = { PROMOTIONS = "PROMOTIONS" }
+	FAKE_UI.unitCommands = {}
+	FAKE_UI.pendingUnitCommands = {}
+	FAKE_UI.canPromote = true
+	FAKE_UI.promoteHeal = 50
+	UnitManager.CanStartCommand = function(u, cmd, bTest, bResults)
+		if cmd ~= UnitCommandTypes.PROMOTE or u == nil or not FAKE_UI.canPromote then
+			return false, {}
+		end
+		local exp = u:GetExperience()
+		if exp:GetExperiencePoints() < exp:GetExperienceForNextLevel() then
+			return false, {}
+		end
+		local class = GameInfo.Units[u.typeIndex].PromotionClass
+		local held = 0
+		for idx in pairs(u.promotions) do
+			if GameInfo.UnitPromotions[idx].PromotionClass == class then held = held + 1 end
+		end
+		local list = {}
+		for row in GameInfo.UnitPromotions() do
+			if row.PromotionClass == class and not u.promotions[row.Index] and (row.Level or 1) <= held + 1 then
+				list[#list + 1] = row.Index
+			end
+		end
+		local t = {}
+		t[UnitCommandResults.PROMOTIONS] = list
+		return #list > 0, t
+	end
+	UnitManager.RequestCommand = function(u, cmd, params)
+		local c = { pid = FAKE.localPlayer, owner = u and u.owner, uid = u and u.id, cmd = cmd,
+			promotion = params and params[UnitCommandTypes.PARAM_PROMOTION_TYPE] }
+		FAKE_UI.unitCommands[#FAKE_UI.unitCommands + 1] = c
+		FAKE_UI.pendingUnitCommands[#FAKE_UI.pendingUnitCommands + 1] = c
+	end
+end
+
+-- Applies the queued unit commands (the engine side of RequestCommand).
+function FAKE_UI.ApplyUnitCommands()
+	local list = FAKE_UI.pendingUnitCommands or {}
+	FAKE_UI.pendingUnitCommands = {}
+	for _, c in ipairs(list) do
+		local u = FAKE.units[c.uid]
+		if c.cmd == UnitCommandTypes.PROMOTE and u ~= nil and u.owner == c.pid then
+			local ok = UnitManager.CanStartCommand(u, c.cmd, true, true)
+			if ok and not u.promotions[c.promotion] then
+				u.promotions[c.promotion] = true
+				if u.level ~= nil then u.level = u.level + 1 end
+				u.damage = math.max(0, u.damage - (FAKE_UI.promoteHeal or 0))
+				c.applied = true
+				Events.UnitPromoted(u.owner, u.id)
+			end
+		end
+	end
 end
 
 -- Key press through the context's input handler. mods: { ctrl = bool, shift = bool }
@@ -195,7 +258,9 @@ function FAKE_UI.Frame(env)
 end
 
 -- Runs the context's update handler (ContextPtr:SetUpdate) with dt seconds.
+-- Queued unit commands (RequestCommand) are applied first (next tick).
 function FAKE_UI.Update(env, dt)
+	FAKE_UI.ApplyUnitCommands()
 	local fn = env.ContextPtr.updateHandler
 	if fn ~= nil then fn(dt or 1) end
 	return fn ~= nil

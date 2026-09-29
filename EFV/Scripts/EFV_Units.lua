@@ -8,6 +8,11 @@
 -- record fields, remove a unit silently, recreate a unit from a record
 -- (type, promotions, XP, damage, name, 0 moves) and exhaust the moves of
 -- newly created units at PlayerTurnStartComplete (pending list).
+-- 0.7 (FIXPLAN_0.7 items 7, 9; INTERFACES note 33): Recreate names the unit
+-- right after Create and, for a human owner (EFV_Veteran.UseRouteB), leaves
+-- the promotions to veteran route B (an EFV_Veteran job completed by the
+-- owner's own PROMOTE commands); RestoreXPClamped is the shared XP restore
+-- with the FLAG_XP_CLAMP clamp (also used by EFV_Veteran.Fallback).
 --
 -- Snapshot shape (INTERFACES "Snapshot"):
 --   { unitType, veteranName, damage, experience, xpNext, promotions = {..},
@@ -26,6 +31,9 @@ end
 include("EFV_Config")
 include("EFV_Util")
 include("EFV_Records")
+-- 0.7 (INTERFACES note 33): veteran route B. EFV_Veteran never includes
+-- EFV_Units (it reads the EFV_Units global at call time), so no cycle.
+include("EFV_Veteran")
 
 EFV_Units = {}
 
@@ -300,23 +308,121 @@ function EFV_Units.Remove(pUnit)
 end
 
 -- ---------------------------------------------------------------------------
+-- EFV_Units.RestoreXPClamped(pUnit, target) -> xpNow, xpNext, clamped
+-- (0.7, INTERFACES note 33; extracted from Recreate step 3.) Sets the XP to
+-- target (ChangeExperience(target - current); the engine caps it at the
+-- next-level threshold while a promotion is pending, Session B / F T08),
+-- then, when FLAG_XP_CLAMP, clamps it to threshold - 1 so the unit gets no
+-- free promotion. Errors propagate (callers pcall).
+-- Params:  pUnit unit object, target XP number (nil -> 0).
+-- Returns: XP after the restore, the next-level threshold, the XP removed
+--          by the clamp (0 when none).
+-- APIs: A26, A25, A30.
+-- ---------------------------------------------------------------------------
+function EFV_Units.RestoreXPClamped(pUnit, target)
+	local exp = pUnit:GetExperience()
+	local want = tonumber(target) or 0
+	local cur = exp:GetExperiencePoints() or 0
+	if want ~= cur then
+		exp:ChangeExperience(want - cur)
+	end
+	local xpNext = exp:GetExperienceForNextLevel()
+	local xpNow = exp:GetExperiencePoints()
+	local clamped = 0
+	if EFV_Config.FLAG_XP_CLAMP and type(xpNext) == "number" and xpNext > 0 and xpNow >= xpNext then
+		local limit = xpNext - 1
+		if limit < 0 then
+			limit = 0
+		end
+		exp:ChangeExperience(limit - xpNow)
+		clamped = xpNow - limit
+		xpNow = exp:GetExperiencePoints()
+	end
+	return xpNow, xpNext, clamped
+end
+
+-- Classic restore (Recreate steps 3a / 3b): SetPromotion for every stored
+-- type, then the XP with the clamp. Returns restored, wanted, xpNow, xpNext,
+-- xpClamped for the log line.
+local function RestoreClassic(pUnit, exp, rec, rid)
+	local wanted, restored = 0, 0
+	if exp ~= nil and rec.promotions ~= nil then
+		for _, pType in ipairs(rec.promotions) do
+			wanted = wanted + 1
+			local pRow = GameInfo.UnitPromotions[pType]
+			if pRow == nil then
+				EFV_Log(1, "Restore", "id=%s unknown promotion=%s skipped", rid, tostring(pType))
+			else
+				local okP, errP = pcall(function()
+					if not exp:HasPromotion(pRow.Index) then
+						exp:SetPromotion(pRow.Index)
+					end
+					return exp:HasPromotion(pRow.Index)
+				end)
+				if not okP then
+					EFV_Log(1, "Restore", "id=%s SetPromotion %s failed err=%s", rid, tostring(pType), ErrText(errP))
+				elseif errP then
+					restored = restored + 1
+				else
+					EFV_Log(1, "Restore", "id=%s SetPromotion %s had no effect", rid, tostring(pType))
+				end
+			end
+		end
+	end
+
+	local xpNow, xpNext, xpClamped = nil, nil, 0
+	if exp ~= nil then
+		local okX, a, b, c = pcall(EFV_Units.RestoreXPClamped, pUnit, rec.experience)
+		if okX then
+			xpNow, xpNext, xpClamped = a, b, c
+		else
+			EFV_Log(1, "Restore", "id=%s experience restore failed err=%s", rid, ErrText(a))
+		end
+		if xpNext ~= nil and rec.xpNext ~= nil and xpNext ~= rec.xpNext then
+			EFV_Log(2, "Restore", "id=%s xpNext mismatch new=%s snap=%s (T08)", rid, tostring(xpNext), tostring(rec.xpNext))
+		end
+		-- Session B: ChangeExperience is capped at the next-level threshold while
+		-- a promotion is pending, so the restored XP can be lower than stored.
+		local want = tonumber(rec.experience) or 0
+		if type(xpNow) == "number" and xpClamped == 0 and xpNow < want then
+			EFV_Log(2, "Restore", "id=%s xp capped by the engine got=%s want=%s next=%s (T08)",
+				rid, tostring(xpNow), tostring(want), tostring(xpNext))
+		end
+	end
+	return restored, wanted, xpNow, xpNext, xpClamped
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_Units.Recreate(store, ownerID, rec, plot, turn) -> pUnit
--- S10 order: create rec.unitType for ownerID at plot (FLAG_CREATE_API:
--- "CREATE" -> Players[ownerID]:GetUnits():Create(GameInfo.Units[t].Index, x,
--- y), A18; "INITUNIT" -> UnitManager.InitUnit(ownerID, t, x, y), A19; nil
--- check) -> SetPromotion(GameInfo.UnitPromotions[type].Index) for each stored
--- type (unknown types logged and skipped) -> ChangeExperience(rec.experience
--- - current) -> log GetExperienceForNextLevel() vs rec.xpNext (T08) and, if
--- FLAG_XP_CLAMP, clamp XP to threshold - 1 -> SetDamage(rec.damage) ->
--- SetVeteranName if non-empty -> UnitManager.FinishMoves -> EFV_Records.
--- AddPending(store, ownerID, newID, turn). Formation is NOT restored (D3).
--- Logs "[Restore] ...".
+-- Order (S10; 0.7 INTERFACES note 33):
+--   1. create rec.unitType for ownerID at plot (FLAG_CREATE_API: "CREATE" ->
+--      Players[ownerID]:GetUnits():Create(GameInfo.Units[t].Index, x, y),
+--      A18; "INITUNIT" -> UnitManager.InitUnit(ownerID, t, x, y), A19; nil
+--      check);
+--   2. SetVeteranName if non-empty (0.7, FIXPLAN item 9 hardening: right
+--      after Create, so every later change carries the name to the UI);
+--   3. the level, by route (EFV_Veteran.UseRouteB(ownerID, rec)):
+--      classic (AI owner, FLAG_VET_ROUTE_B off, no known promotion):
+--        3a SetPromotion(GameInfo.UnitPromotions[type].Index) for each
+--           stored type (unknown types logged and skipped);
+--        3b EFV_Units.RestoreXPClamped(pUnit, rec.experience) (threshold
+--           logged against rec.xpNext, T08; clamp when FLAG_XP_CLAMP);
+--      route B (human owner): nothing here, see 4b;
+--   4. SetDamage(rec.damage) (below max HP);
+--   4b route B: EFV_Veteran.Begin(store, ownerID, pUnit, rec, turn) (XP to
+--      the first threshold and a job for the owner's own PROMOTE commands;
+--      the damage of step 4 is the job's floor against the promotion heal).
+--      Begin false or failing -> 3a / 3b run now, then step 4 again;
+--   5. UnitManager.FinishMoves -> EFV_Records.AddPending(store, ownerID,
+--      newID, turn).
+-- Formation is NOT restored (D3). Logs "[Restore] ... route=B|classic".
 -- Each restore step runs in its own pcall; a failed step is logged as ERROR
 -- and the remaining steps still run. Once the unit exists it is returned.
 -- Params:  store, ownerID player ID (new owner), rec record (snapshot
 --          fields), plot plot object (spawn tile), turn number.
 -- Returns: the new unit object, or nil if creation failed.
--- PLAN 2.5; SPIKES S10; D3. APIs: A18, A19, A28, A26, A25, A30, A22.
+-- PLAN 2.5; SPIKES S10; D3; FIXPLAN_0.7 items 7, 9. APIs: A18, A19, A28,
+-- A26, A25, A30, A22.
 -- ---------------------------------------------------------------------------
 function EFV_Units.Recreate(store, ownerID, rec, plot, turn)
 	if rec == nil or plot == nil or type(ownerID) ~= "number" then
@@ -369,87 +475,7 @@ function EFV_Units.Recreate(store, ownerID, rec, plot, turn)
 		exp = nil
 	end
 
-	-- 2. Promotions (stored as type strings; unknown types skipped).
-	local wanted, restored = 0, 0
-	if exp ~= nil and rec.promotions ~= nil then
-		for _, pType in ipairs(rec.promotions) do
-			wanted = wanted + 1
-			local pRow = GameInfo.UnitPromotions[pType]
-			if pRow == nil then
-				EFV_Log(1, "Restore", "id=%s unknown promotion=%s skipped", rid, tostring(pType))
-			else
-				local okP, errP = pcall(function()
-					if not exp:HasPromotion(pRow.Index) then
-						exp:SetPromotion(pRow.Index)
-					end
-					return exp:HasPromotion(pRow.Index)
-				end)
-				if not okP then
-					EFV_Log(1, "Restore", "id=%s SetPromotion %s failed err=%s", rid, tostring(pType), ErrText(errP))
-				elseif errP then
-					restored = restored + 1
-				else
-					EFV_Log(1, "Restore", "id=%s SetPromotion %s had no effect", rid, tostring(pType))
-				end
-			end
-		end
-	end
-
-	-- 3. Experience, then log the threshold against the snapshot (T08).
-	local xpNow, xpNext, xpClamped = nil, nil, 0
-	if exp ~= nil then
-		local okX, errX = pcall(function()
-			local target = tonumber(rec.experience) or 0
-			local cur = exp:GetExperiencePoints() or 0
-			if target ~= cur then
-				exp:ChangeExperience(target - cur)
-			end
-			xpNext = exp:GetExperienceForNextLevel()
-			xpNow = exp:GetExperiencePoints()
-			if EFV_Config.FLAG_XP_CLAMP and type(xpNext) == "number" and xpNext > 0 and xpNow >= xpNext then
-				local limit = xpNext - 1
-				if limit < 0 then
-					limit = 0
-				end
-				exp:ChangeExperience(limit - xpNow)
-				xpClamped = xpNow - limit
-				xpNow = exp:GetExperiencePoints()
-			end
-		end)
-		if not okX then
-			EFV_Log(1, "Restore", "id=%s experience restore failed err=%s", rid, ErrText(errX))
-		end
-		if xpNext ~= nil and rec.xpNext ~= nil and xpNext ~= rec.xpNext then
-			EFV_Log(2, "Restore", "id=%s xpNext mismatch new=%s snap=%s (T08)", rid, tostring(xpNext), tostring(rec.xpNext))
-		end
-		-- Session B: ChangeExperience is capped at the next-level threshold while
-		-- a promotion is pending, so the restored XP can be lower than stored.
-		local want = tonumber(rec.experience) or 0
-		if type(xpNow) == "number" and xpClamped == 0 and xpNow < want then
-			EFV_Log(2, "Restore", "id=%s xp capped by the engine got=%s want=%s next=%s (T08)",
-				rid, tostring(xpNow), tostring(want), tostring(xpNext))
-		end
-	end
-
-	-- 4. Damage (clamped below max HP so the restore can never kill).
-	local okD, errD = pcall(function()
-		local dmg = tonumber(rec.damage) or 0
-		if dmg < 0 then
-			dmg = 0
-		end
-		local maxD = pUnit:GetMaxDamage()
-		if type(maxD) == "number" and maxD > 0 and dmg >= maxD then
-			dmg = maxD - 1
-		end
-		if dmg ~= pUnit:GetDamage() then
-			pUnit:SetDamage(dmg)
-		end
-	end)
-	if not okD then
-		EFV_Log(1, "Restore", "id=%s SetDamage failed err=%s", rid, ErrText(errD))
-	end
-
-	-- 5. Custom name (only when non-empty).
+	-- 2. Custom name (only when non-empty), right after Create (item 9).
 	if exp ~= nil and type(rec.veteranName) == "string" and rec.veteranName ~= "" then
 		local okN, errN = pcall(function() exp:SetVeteranName(rec.veteranName) end)
 		if not okN then
@@ -457,7 +483,63 @@ function EFV_Units.Recreate(store, ownerID, rec, plot, turn)
 		end
 	end
 
-	-- 6. Zero the moves now, and again at the owner's PlayerTurnStartComplete
+	-- 3. Level: route B (human owner) or classic (promotions + clamped XP).
+	local okR, routeB = pcall(EFV_Veteran.UseRouteB, ownerID, rec)
+	if not okR then
+		EFV_Log(1, "Restore", "id=%s route check failed err=%s; classic restore", rid, ErrText(routeB))
+		routeB = false
+	end
+	if exp == nil then
+		routeB = false
+	end
+	local restored, wanted, xpNow, xpNext, xpClamped = 0, 0, nil, nil, 0
+	if not routeB then
+		restored, wanted, xpNow, xpNext, xpClamped = RestoreClassic(pUnit, exp, rec, rid)
+	end
+
+	-- 4. Damage (clamped below max HP so the restore can never kill).
+	local function RestoreDamage()
+		local okD, errD = pcall(function()
+			local dmg = tonumber(rec.damage) or 0
+			if dmg < 0 then
+				dmg = 0
+			end
+			local maxD = pUnit:GetMaxDamage()
+			if type(maxD) == "number" and maxD > 0 and dmg >= maxD then
+				dmg = maxD - 1
+			end
+			if dmg ~= pUnit:GetDamage() then
+				pUnit:SetDamage(dmg)
+			end
+		end)
+		if not okD then
+			EFV_Log(1, "Restore", "id=%s SetDamage failed err=%s", rid, ErrText(errD))
+		end
+	end
+	RestoreDamage()
+
+	-- 4b. Route B: the job (XP to the first threshold); failure -> classic.
+	local route = "classic"
+	if routeB then
+		local okB, began = pcall(EFV_Veteran.Begin, store, ownerID, pUnit, rec, turn)
+		if okB and began then
+			route = "B"
+			pcall(function()
+				xpNow = exp:GetExperiencePoints()
+				xpNext = exp:GetExperienceForNextLevel()
+			end)
+		else
+			if not okB then
+				EFV_Log(1, "Restore", "id=%s route B failed err=%s; classic restore", rid, ErrText(began))
+			else
+				EFV_Log(2, "Restore", "id=%s route B not started; classic restore", rid)
+			end
+			restored, wanted, xpNow, xpNext, xpClamped = RestoreClassic(pUnit, exp, rec, rid)
+			RestoreDamage()
+		end
+	end
+
+	-- 5. Zero the moves now, and again at the owner's PlayerTurnStartComplete
 	--    (moves are restored between PlayerTurnStarted and
 	--    PlayerTurnStartComplete, S10 gotcha).
 	local okM, errM = pcall(function() UnitManager.FinishMoves(pUnit) end)
@@ -470,8 +552,8 @@ function EFV_Units.Recreate(store, ownerID, rec, plot, turn)
 		EFV_Log(1, "Restore", "id=%s no store: pending exhaust not queued", rid)
 	end
 
-	EFV_Log(2, "Restore", "id=%s owner=%s uid=%s type=%s x=%s y=%s api=%s promotions=%d/%d xp=%s/%s next=%s/%s clamped=%s dmg=%s name=%s",
-		rid, tostring(ownerID), tostring(newID), unitType, tostring(x), tostring(y), tostring(api),
+	EFV_Log(2, "Restore", "id=%s owner=%s uid=%s type=%s x=%s y=%s api=%s route=%s promotions=%d/%d xp=%s/%s next=%s/%s clamped=%s dmg=%s name=%s",
+		rid, tostring(ownerID), tostring(newID), unitType, tostring(x), tostring(y), tostring(api), route,
 		restored, wanted, tostring(xpNow), tostring(rec.experience), tostring(xpNext), tostring(rec.xpNext),
 		tostring(xpClamped), tostring(rec.damage), tostring(rec.veteranName or "-"))
 	return pUnit

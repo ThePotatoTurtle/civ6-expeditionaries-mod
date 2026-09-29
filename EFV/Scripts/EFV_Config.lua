@@ -30,7 +30,7 @@ EFV_Config = {}
 -- Mod version (keep equal to the version in EFV.modinfo LOC_EFV_MOD_TITLE /
 -- LOC_EFV_MOD_DESCRIPTION and EFV_Dev.modinfo; logged at load by
 -- EFV_Gameplay and EFV_Dev so a Lua.log names the installed build).
-EFV_Config.VERSION = "0.6.1-dev"
+EFV_Config.VERSION = "0.7.0-dev"
 
 -- ---------------------------------------------------------------------------
 -- Spec section 3 constants (verbatim)
@@ -116,6 +116,7 @@ EFV_Config.PROP = {
 	ENTRUST    = "EFV_Entrust",         -- map "p"..plotIndex -> Entrust snapshot
 	LAST_TURN  = "EFV_LastTurn",        -- number, last turn the pipeline completed (DV9)
 	REV        = "EFV_Rev",             -- number, incremented on every commit that wrote something
+	VET        = "EFV_VetJobs",         -- 0.7 (INTERFACES note 33): dense array of veteran route B jobs, sorted by (t, p, u)
 }
 
 -- ---------------------------------------------------------------------------
@@ -124,6 +125,9 @@ EFV_Config.PROP = {
 EFV_Config.REQ_SEND    = "EFV_Send"
 EFV_Config.REQ_RECALL  = "EFV_Recall"
 EFV_Config.REQ_ENTRUST = "EFV_Entrust"
+-- 0.7 (INTERFACES note 33): the owner's UI reports a promotion taken for a
+-- veteran route B job; params unitID n, have n -> EFV_Veteran.OnRequestStep.
+EFV_Config.REQ_VETSTEP = "EFV_VetStep"
 
 -- ---------------------------------------------------------------------------
 -- Notification type names (PLAN 4.1). Must match Data/EFV_Notifications.sql.
@@ -174,7 +178,9 @@ EFV_Config.FLAG_FLAG_BADGES                  = true                   -- D8: wra
 EFV_Config.FLAG_DEFEAT_HINT                  = true                   -- DV13; Phase 8 review
 EFV_Config.FLAG_SPAWN_EXCLUDE_NATURAL_WONDER = true                   -- design choice (SPIKES 3 row 11)
 EFV_Config.FLAG_UPGRADE_RELINK               = true                   -- ON since 0.5.2 (Session F T30: an upgrade creates a new unit ID on the same plot; relink only a provable match, unique units included)
-EFV_Config.LOG_LEVEL                         = 2                      -- 0 off, 1 errors, 2 events, 3 verbose (stubs log at 3)
+EFV_Config.FLAG_VET_ROUTE_B                  = true                   -- 0.7 (designer ruling "Veteran level restore", final session S6; note 33): a unit restored to a human owner gets its promotions through the owner's own PROMOTE command (keeps the level); false -> FLAG_XP_CLAMP path for everyone
+EFV_Config.VET_JOB_TURNS                     = 2                      -- 0.7 (note 33): a route B job still open at turn >= created + this falls back to SetPromotion + the XP clamp
+EFV_Config.LOG_LEVEL                         = 2                     -- 0 off, 1 errors, 2 events, 3 verbose (stubs log at 3)
 
 -- Phase gates (PLAN 5.1-5.4): which features are released. The single switch
 -- for both contexts: EFV_Rules prepends NOT_IMPLEMENTED to every send of an

@@ -29,6 +29,9 @@ include("EFV_Util")
 include("EFV_Rules")
 include("EFV_Records")
 include("EFV_Units")
+include("EFV_Spawn")
+include("EFV_Notify")
+-- EFV:GLOBALS EFV_Spawn EFV_Notify EFV_DestinationRows EFV_PlayerName EFV_CityName EFV_UnitDisplayName
 -- EFV:GLOBALS EFV_Config EFV_Util EFV_Records EFV_Units EFV_SortedAlivePlayers EFV_HasOpenBordersFrom EFV_UnitMatches
 -- EFV:GLOBALS EFV_SortedKeys EFV_PlayerKind EFV_ValidReturnTerritory EFV_IsUpgradeOf EFV_UnitGoneReason EFV_UpgradeTargets
 -- EFV:GLOBALS EFV_PartnerBasis EFV_VolunteerBasis EFV_EvaluateSend
@@ -37,10 +40,11 @@ EFV_Dev = {}
 
 -- Dev-tools version (EFV_Dev.modinfo Name) and the EFV version it was built
 -- for (EFV_Config.VERSION). EFV_Dev may be bumped on its own (final-session
--- scenarios: 0.6.0-dev.1; the session from a brand-new game: 0.6.1-dev.1); a
+-- scenarios: 0.6.0-dev.1; the session from a brand-new game: 0.6.1-dev.1;
+-- the 0.7 re-test S12 / S13 and the Workshop Shot buttons: 0.7.0-dev.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.6.1-dev.1"
-EFV_Dev.FOR_EFV = "0.6.1-dev"
+EFV_Dev.VERSION = "0.7.0-dev.1"
+EFV_Dev.FOR_EFV = "0.7.0-dev"
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -871,14 +875,15 @@ local function RevealedTo(pid, x, y)
 	return nil
 end
 
--- Reveals the plots within REVEAL_RADIUS of city to pid (the city tile
--- included); a Scout of pid next to the city if that did not work.
--- owners: plot owners a Scout may be created on (nil: no Scout).
+-- Reveals the plots within radius (default REVEAL_RADIUS) of city to pid
+-- (the city tile included); a Scout of pid next to the city if that did not
+-- work. owners: plot owners a Scout may be created on (nil: no Scout).
+-- city may also be a plot (GetX / GetY / GetOwner), e.g. a Shot's scene.
 -- Returns revealed, scout.
-local function RevealCity(pid, city, owners)
+local function RevealCity(pid, city, owners, radius)
 	local x, y = city:GetX(), city:GetY()
 	local n, err = 0, nil
-	for ring = 0, REVEAL_RADIUS do
+	for ring = 0, (radius or REVEAL_RADIUS) do
 		for _, plot in ipairs(Ring(x, y, ring)) do
 			local ok, e = pcall(function() PlayersVisibility[pid]:ChangeVisibilityCount(plot:GetIndex(), 1) end)
 			if ok then n = n + 1 else err = e end
@@ -1043,11 +1048,13 @@ CMD.scn_setup = function(me, p)
 	pcall(function() Players[me]:GetTreasury():ChangeGoldBalance(2000) end)
 	pcall(function() Players[me]:GetResources():ChangeResourceAmount(GameInfo.Resources["RESOURCE_IRON"].Index, 10) end)
 	local swords, full = {}, 0
+	st.setupUnits = {}
 	for _ = 1, 3 do
 		local plot = FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1) or FindPlot(cap:GetX(), cap:GetY(), 4, OwnedByAny({ -1, me }), 1)
 		local u = NewUnit("scn_setup", me, "UNIT_SWORDSMAN", plot)
 		if u ~= nil then
 			swords[#swords + 1] = u
+			st.setupUnits[#st.setupUnits + 1] = { o = me, u = u:GetID(), ut = "UNIT_SWORDSMAN" }
 			if FullMoves(u) then full = full + 1 end
 		end
 	end
@@ -1206,8 +1213,11 @@ local function CheckHome(st, store, t)
 end
 
 -- ---------------------------------------------------------------------------
--- S2: your newest deployed City-State unit expires next turn inside the
--- city-state's land (it is moved there if needed): it must start home.
+-- S2 (0.7): your newest deployed City-State unit ends its service next turn
+-- OFF its host's land: it is moved onto free neutral land within 6 tiles
+-- (else onto land owned by neither the city-state nor you). Designer ruling
+-- "City-State units never mutiny": it must start home at once, wherever it
+-- is, with no grace.
 -- ---------------------------------------------------------------------------
 CMD.scn_expire_cs = function(me, p)
 	local st = Session("EXPIRE", me)
@@ -1217,18 +1227,26 @@ CMD.scn_expire_cs = function(me, p)
 	if rec == nil then Check("EXPIRE", "CHECK", "no deployed City-State unit of yours (send one first)"); return end
 	local u = RecUnit(rec)
 	if u == nil then Check("EXPIRE", "CHECK", "record " .. rec.id .. ": unit not found"); return end
-	if not EFV_ValidReturnTerritory(rec, Map.GetPlot(u:GetX(), u:GetY())) then
-		local plot = FindPlot(rec.destX, rec.destY, 3, OwnedBy(rec.recipientID), 1)
-		if plot ~= nil then Place(u, plot) end
+	local plot = FindPlot(u:GetX(), u:GetY(), 6, Neutral, 1)
+	local where = "neutral land"
+	if plot == nil then
+		plot = FindPlot(u:GetX(), u:GetY(), 6, function(q)
+			local o = PlotOwner(q)
+			return o ~= rec.recipientID and o ~= me
+		end, 1)
+		where = "land owned by neither the city-state nor you"
 	end
+	if plot == nil then Check("EXPIRE", "CHECK", "no free land off the city-state's territory within 6 tiles of the unit"); return end
+	Place(u, plot)
 	Hold(store, u)
 	rec.deployedTurn = Turn() + 1 - (tonumber(rec.durationTurns) or EFV_Config.CS_EXPEDITIONARY_DURATION)
 	EFV_Records.Touch(store)
 	EFV_Records.Commit(store)
-	st.s2 = { id = rec.id, turn = Turn() }
+	st.s2 = { id = rec.id, turn = Turn(), x = u:GetX(), y = u:GetY(), where = where }
 	Focus(st, u:GetX(), u:GetY(), nil, nil, p.stamp)
 	ScnSave(st)
-	Check("EXPIRE", "INFO", "record " .. rec.id .. " expires at the next turn start inside the city-state's land")
+	Check("EXPIRE", "INFO", "record " .. rec.id .. " stands on " .. where .. " at " .. u:GetX() .. "," .. u:GetY() ..
+		" and its service ends at the next turn start")
 end
 
 local function EvalS2(st, store, t)
@@ -1236,9 +1254,13 @@ local function EvalS2(st, store, t)
 	if type(s) ~= "table" or t <= s.turn then return end
 	st.s2 = nil
 	local rec = EFV_Records.Get(store, s.id)
+	local at = Str(s.where or "the unit's tile") .. " at " .. Str(s.x) .. "," .. Str(s.y)
 	if rec ~= nil and rec.state == ST.RET and rec.returnReason == "EXPIRED" then
 		Watch(st, rec)
-		Check("EXPIRE", "PASS", "record " .. s.id .. " expired on valid land and is going home (arrives turn " .. Str(rec.arrivalTurn) .. ")")
+		Check("EXPIRE", "PASS", "record " .. s.id .. " expired on " .. at .. " and is going home without grace (arrives turn " ..
+			Str(rec.arrivalTurn) .. ")")
+	elseif rec ~= nil and rec.state == ST.GRACE then
+		Check("EXPIRE", "CHECK", "record " .. s.id .. " went into GRACE on " .. at .. ": the 0.7 City-State rule is missing")
 	else
 		Check("EXPIRE", "CHECK", "record " .. s.id .. " state=" .. Str(rec and rec.state) .. " reason=" .. Str(rec and rec.returnReason) ..
 			" (expected RETURNING / EXPIRED)")
@@ -1764,9 +1786,14 @@ local function EvalS8(st, store, t)
 end
 
 -- ---------------------------------------------------------------------------
--- S9: crowded arrival. Rings 1-2 around B's capital are filled with B's
--- Warriors (held in place), and a Swordsman of yours is sent to that city
--- as Expeditionary, arriving next turn: EFV must pick ring 3-5.
+-- S9: crowded arrival. Every free land tile of rings 1-2 around B's capital
+-- gets one of B's Warriors (held in place; water, impassable and occupied
+-- tiles are skipped), and a Swordsman of yours is sent to that city as
+-- Expeditionary, arriving next turn. Designer ruling "Crowded arrival
+-- accepted" (FIXPLAN_0.7 item 8): EFV must use the nearest ring that still
+-- has a valid free tile (ring 2 is fine when one tile there is left), never
+-- a city centre or closed / war land. EFV_Spawn.DryRun at setup time is
+-- logged as info ("expected ring R").
 -- ---------------------------------------------------------------------------
 CMD.scn_place = function(me, p)
 	local st = Session("CROWDED", me)
@@ -1796,11 +1823,25 @@ CMD.scn_place = function(me, p)
 	if not removed then EFV_Records.Delete(store, rec.id) end
 	EFV_Records.Touch(store)
 	EFV_Records.Commit(store)
+	local okD, found, ring, n = pcall(EFV_Spawn.DryRun, dest:GetX(), dest:GetY(), "LAND", B)
+	local expect = (okD and found) and ("expected ring " .. Str(ring) .. " (" .. Str(n) .. " free valid tile(s) there)") or "no valid tile found now"
 	st.s9 = { id = rec.id, cx = dest:GetX(), cy = dest:GetY(), fill = fill, turn = Turn() }
 	Focus(st, dest:GetX(), dest:GetY(), nil, nil, p.stamp)
 	ScnSave(st)
-	Check("CROWDED", removed and "INFO" or "CHECK", "record " .. rec.id .. ": " .. #fill .. " Warriors fill rings 1-2 of " ..
-		PlayerName(B) .. "'s capital; the Swordsman arrives next turn")
+	Check("CROWDED", removed and "INFO" or "CHECK", "record " .. rec.id .. ": " .. #fill .. " Warriors fill the free land tiles of rings 1-2 of " ..
+		PlayerName(B) .. "'s capital; the Swordsman arrives next turn; " .. expect)
+end
+
+-- Inner rings (1 .. ring-1) that still hold a valid spawn tile for owner.
+local function InnerValidRings(cx, cy, ring, owner)
+	local out = {}
+	for r = 1, ring - 1 do
+		for _, plot in ipairs(Ring(cx, cy, r)) do
+			local ok, valid = pcall(EFV_Spawn.Valid, plot, "LAND", owner)
+			if ok and valid then out[#out + 1] = r; break end
+		end
+	end
+	return out
 end
 
 local function EvalS9(st, store, t)
@@ -1814,9 +1855,13 @@ local function EvalS9(st, store, t)
 			Str(rec and rec.spawnFailCount) .. ")")
 	else
 		local why, ring = PlacementProblem(u, s.cx, s.cy)
-		if ring < 3 then why[#why + 1] = "ring " .. ring .. " was meant to be full" end
+		local count = -1
+		pcall(function() count = Map.GetPlot(u:GetX(), u:GetY()):GetUnitCount() end)
+		if count ~= 1 then why[#why + 1] = "the tile holds " .. Str(count) .. " units" end
+		local inner = InnerValidRings(s.cx, s.cy, ring, u:GetOwner())
+		if #inner > 0 then why[#why + 1] = "ring " .. inner[1] .. " still has a valid free tile" end
 		Check("CROWDED", #why == 0 and "PASS" or "CHECK", "record " .. s.id .. " placed at ring " .. ring .. " plot=" .. u:GetX() ..
-			"," .. u:GetY() .. (#why > 0 and (" PROBLEM: " .. table.concat(why, "; ")) or ""))
+			"," .. u:GetY() .. (#why > 0 and (" PROBLEM: " .. table.concat(why, "; ")) or ": the nearest ring with a free valid tile"))
 		pcall(function() Players[u:GetOwner()]:GetUnits():Destroy(u) end)
 		EFV_Records.Delete(store, s.id)
 		EFV_Records.Touch(store)
@@ -1829,10 +1874,16 @@ end
 
 -- ---------------------------------------------------------------------------
 -- S10: combat during mutiny (T31, EFV/TESTING_FINAL_DRAFT_T31.md). You host
--- B's Expeditionary Spearman 'VEF-T31' in MUTINY on neutral land, next to two
+-- B's Expeditionary Spearman in MUTINY on neutral land, next to two
 -- Barbarian Warriors. Attack one (and let them attack you): the combat
 -- damage must be seen at the combat event (EFV raises its heal floor) and
 -- kept; the next turn start adds exactly the 20 mutiny damage.
+-- 0.7 (FIXPLAN items 9, 10): the Spearman has no custom name (a name set
+-- at creation was not shown by the unit panel); the verdict never removes a
+-- unit of yours at your PlayerTurnStartComplete (the engine re-selected the
+-- removed unit: SelectedUnit.lua:195 error). The Spearman and the two
+-- Barbarians go to st.cleanup and are removed at GameEvents.OnGameTurnEnded
+-- of that turn (DevCleanup below).
 -- ---------------------------------------------------------------------------
 CMD.scn_t31 = function(me, p)
 	local st = Session("T31", me)
@@ -1854,7 +1905,7 @@ CMD.scn_t31 = function(me, p)
 		end
 	end
 	if spot == nil then Check("T31", "CHECK", "no neutral land with two free neutral neighbours within 12 tiles of your capital"); return end
-	local u = NewUnit("scn_t31", me, "UNIT_SPEARMAN", spot, "VEF-T31") or NewUnit("scn_t31", me, "UNIT_WARRIOR", spot, "VEF-T31")
+	local u = NewUnit("scn_t31", me, "UNIT_SPEARMAN", spot) or NewUnit("scn_t31", me, "UNIT_WARRIOR", spot)
 	if u == nil then Check("T31", "CHECK", "could not create the Spearman"); return end
 	local b1 = NewUnit("scn_t31", barb, "UNIT_WARRIOR", next1)
 	local b2 = NewUnit("scn_t31", barb, "UNIT_WARRIOR", next2)
@@ -1870,8 +1921,8 @@ CMD.scn_t31 = function(me, p)
 		pre = UnitDamage(u), turn = Turn() }
 	Focus(st, spot:GetX(), spot:GetY(), me, u:GetID(), p.stamp)
 	ScnSave(st)
-	Check("T31", "INFO", "record " .. rec.id .. ": 'VEF-T31' is in mutiny at " .. spot:GetX() .. "," .. spot:GetY() ..
-		" next to 2 Barbarian Warriors: attack one, then End Turn")
+	Check("T31", "INFO", "record " .. rec.id .. ": the " .. UnitTypeName(u) .. " in mutiny (the camera selects it) stands at " ..
+		spot:GetX() .. "," .. spot:GetY() .. " next to 2 Barbarian Warriors: attack one, then End Turn")
 end
 
 -- GameEvents.OnCombatOccurred (registered after EFV's own handler): what EFV
@@ -1906,7 +1957,7 @@ local function EvalS10(st, store, t)
 	local rec = EFV_Records.Get(store, s.id)
 	if s.combat == nil and (s.waited or 0) < 1 then
 		s.waited, s.turn = 1, t
-		Check("T31", "INFO", "no fight with 'VEF-T31' yet: attack a Barbarian Warrior, then End Turn")
+		Check("T31", "INFO", "no fight with the Spearman in mutiny yet: attack a Barbarian Warrior, then End Turn")
 		return
 	end
 	st.s10 = nil
@@ -1921,11 +1972,14 @@ local function EvalS10(st, store, t)
 			" + mutiny 20 = " .. expect .. ")" .. (d >= expect and ": combat damage kept, heal cancelled" or ": combat damage was healed away"))
 	end
 	if rec ~= nil then EFV_Records.Delete(store, s.id); EFV_Records.Touch(store) end
-	if u ~= nil then pcall(function() Players[st.me]:GetUnits():Destroy(u) end) end
+	-- Removed at the end of this turn (OnGameTurnEnded), never now.
+	local c = Sub(st, "cleanup")
+	if u ~= nil then c[#c + 1] = { o = st.me, u = s.uid, ut = UnitTypeName(u) } end
 	for _, uid in ipairs(s.b or {}) do
 		local b = FindUnit(s.barb, uid)
-		if b ~= nil then pcall(function() Players[s.barb]:GetUnits():Destroy(b) end) end
+		if b ~= nil then c[#c + 1] = { o = s.barb, u = uid, ut = UnitTypeName(b) } end
 	end
+	Check("T31", "INFO", #c .. " test unit(s) are removed when you end this turn")
 end
 
 -- ---------------------------------------------------------------------------
@@ -1937,12 +1991,11 @@ end
 -- war with C; your partner basis with B renewed if S4 left it off). Take the
 -- city and press Entrust.
 -- ---------------------------------------------------------------------------
-CMD.scn_entrust = function(me, p)
-	local st = Session("ENTRUST", me)
-	if st == nil then return end
+-- The S11 scene (also Shot 4): returns city, tanks, note, weak, or nil, why.
+local function BuildEntrustScene(cmd, me, st, radius)
 	local C = st.enemy
 	local cap = Capital(me)
-	if cap == nil then Check("ENTRUST", "CHECK", "you have no capital"); return end
+	if cap == nil then return nil, "you have no capital" end
 	local capC = Capital(C)
 	local best, bestD = nil, nil
 	for _, c in ipairs(Cities(C)) do
@@ -1957,38 +2010,612 @@ CMD.scn_entrust = function(me, p)
 			note = note .. "; using C's only city (taking it eliminates C)"
 		end
 	end
-	if best == nil then Check("ENTRUST", "CHECK", "the enemy has no city"); return end
-	if EFV_PartnerBasis(me, st.ally) == nil then EnsurePartner("scn_entrust", me, st.ally) end
+	if best == nil then return nil, "the enemy has no city" end
+	if EFV_PartnerBasis(me, st.ally) == nil then EnsurePartner(cmd, me, st.ally) end
 	DeclareWar(me, C); DeclareWar(st.ally, C)
-	RevealCity(me, best, { -1, C, me, st.ally })
+	RevealCity(me, best, { -1, C, me, st.ally }, radius)
 	local _, weak = WeakenCity(best)
-	local n = 0
+	local tanks = {}
 	for _ = 1, 3 do
-		if NewUnit("scn_entrust", me, "UNIT_TANK", FindPlot(best:GetX(), best:GetY(), 4, OwnedByAny({ -1, C, me, st.ally }), 1)) ~= nil then n = n + 1 end
+		local t = NewUnit(cmd, me, "UNIT_TANK", FindPlot(best:GetX(), best:GetY(), 4, OwnedByAny({ -1, C, me, st.ally }), 1))
+		if t ~= nil then tanks[#tanks + 1] = t end
 	end
-	st.s12 = { cx = best:GetX(), cy = best:GetY(), owner = C, turn = Turn(), tries = 0 }
+	return best, tanks, note, weak
+end
+
+CMD.scn_entrust = function(me, p)
+	local st = Session("ENTRUST", me)
+	if st == nil then return end
+	local C = st.enemy
+	local best, tanks, note, weak = BuildEntrustScene("scn_entrust", me, st)
+	if best == nil then Check("ENTRUST", "CHECK", tanks); return end
+	local n = #tanks
+	st.s11 = { cx = best:GetX(), cy = best:GetY(), owner = C, turn = Turn(), tries = 0 }
 	Focus(st, best:GetX(), best:GetY(), nil, nil, p.stamp)
 	ScnSave(st)
 	Check("ENTRUST", "INFO", n .. " Tanks next to " .. PlayerName(C) .. "'s city at " .. best:GetX() .. "," .. best:GetY() ..
 		" (" .. note .. "; " .. weak .. "): take it and choose Entrust -> " .. PlayerName(st.ally))
 end
 
-local function EvalS12(st, store, t, manual)
-	local s = st.s12
+local function EvalS11(st, store, t, manual)
+	local s = st.s11
 	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
 	local city = CityManager.GetCityAt(s.cx, s.cy)
 	local owner = city and city:GetOwner() or -1
 	if owner == st.ally or owner == st.friend then
-		st.s12 = nil
+		st.s11 = nil
 		Check("ENTRUST", "PASS", "the city now belongs to " .. PlayerName(owner))
 	elseif owner == st.me then
-		st.s12 = nil
+		st.s11 = nil
 		Check("ENTRUST", "CHECK", "you kept the city (Entrust was not used or was refused)")
 	elseif not manual then
 		s.tries = (s.tries or 0) + 1
-		if s.tries >= 3 then st.s12 = nil end
+		if s.tries >= 3 then st.s11 = nil end
 		Check("ENTRUST", s.tries >= 3 and "CHECK" or "INFO", "the city still belongs to " .. PlayerName(owner))
 	end
+end
+
+-- ---------------------------------------------------------------------------
+-- S12 (0.7): veteran return, route B (FIXPLAN item 7). A RETURNING Volunteer
+-- record of yours (recipient B) that arrives at your capital at the next
+-- turn start: "VEF-VET", a Warrior at level 3 with two promotions (the
+-- first two level-1 promotions of the Warrior's class in DB order, so no
+-- prerequisite issue), 50/90 XP and 30 damage. EFV recreates it at level 1
+-- and your own UI takes the promotions back with the PROMOTE command
+-- (EFV_VetRestore). The first check (INFO) names the open job; VET_RESTORE
+-- is written once the job is gone (a later turn start, or Check now, which
+-- the panel presses by itself after its UI check VET_RESTORE_LEVEL).
+-- ---------------------------------------------------------------------------
+local VET_NAME = "VEF-VET"
+
+local function LevelOnePromotions(unitType, n)
+	local out = {}
+	local unit = GameInfo.Units[unitType]
+	local cls = unit and unit.PromotionClass
+	for row in GameInfo.UnitPromotions() do
+		if #out < n and row.PromotionClass == cls and tonumber(row.Level) == 1 then
+			out[#out + 1] = row.UnitPromotionType
+		end
+	end
+	return out
+end
+
+local function FindVetJob(store, pid, rid, uid)
+	for _, j in ipairs(store.vet or {}) do
+		if j.p == pid and ((rid ~= nil and j.rid == rid) or (uid ~= nil and j.u == uid)) then return j end
+	end
+	return nil
+end
+
+-- Your newest unit with the given veteran name.
+local function NamedUnit(pid, name)
+	local best = nil
+	pcall(function()
+		for _, u in Players[pid]:GetUnits():Members() do
+			local ok, n = pcall(function() return u:GetExperience():GetVeteranName() end)
+			if ok and n == name and (best == nil or u:GetID() > best:GetID()) then best = u end
+		end
+	end)
+	return best
+end
+
+CMD.scn_vetret = function(me, p)
+	local st = Session("VET_RESTORE", me)
+	if st == nil then return end
+	local B = st.ally
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil then Check("VET_RESTORE", "CHECK", "your capital or B's capital is missing"); return end
+	local promos = LevelOnePromotions("UNIT_WARRIOR", 2)
+	if #promos < 2 then Check("VET_RESTORE", "CHECK", "the Warrior's class has fewer than 2 level-1 promotions"); return end
+	local t = Turn()
+	local store = EFV_Records.Load()
+	local rec = EFV_Records.New(store, {
+		forceType = FT_VOL, state = ST.RET, senderID = me, recipientID = B, accessBasis = st.basis or "FRIEND_OB",
+		originCityID = cap:GetID(), originX = cap:GetX(), originY = cap:GetY(),
+		destCityID = capB:GetID(), destX = capB:GetX(), destY = capB:GetY(), rerouted = 0,
+		sentTurn = t - 12, deployedTurn = t - 11, arrivalTurn = t + 1, transitTurns = 1, band = 1,
+		distance = Dist(cap:GetX(), cap:GetY(), capB:GetX(), capB:GetY()),
+		lapsed = 0, spawnFailCount = 0, feePaid = 0, maintGoldPaid = 0,
+		returnCityID = cap:GetID(), returnX = cap:GetX(), returnY = cap:GetY(), returnReason = "RECALL",
+		unitType = "UNIT_WARRIOR", veteranName = VET_NAME, damage = 30, experience = 50, xpNext = 90, level = 3,
+		promotions = promos, formation = 0, snapTurn = t, lastX = capB:GetX(), lastY = capB:GetY(),
+	})
+	if rec == nil then Check("VET_RESTORE", "CHECK", "record creation failed"); return end
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	st.s12 = { id = rec.id, turn = t, promos = promos }
+	Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+	ScnSave(st)
+	Check("VET_RESTORE", "INFO", "record " .. rec.id .. ": " .. VET_NAME .. " (Warrior, level 3, " .. table.concat(promos, "+") ..
+		", XP 50/90, 30 damage) comes home next to your capital at the next turn start")
+end
+
+local function EvalS12(st, store, t, manual)
+	local s = st.s12
+	if type(s) ~= "table" or s.done ~= nil then return end
+	local promos = type(s.promos) == "table" and s.promos or {}
+	if s.uid == nil then
+		if t <= s.turn and not manual then return end
+		local rec = EFV_Records.Get(store, s.id)
+		if rec ~= nil then
+			if not manual then
+				s.done = "CHECK"
+				Check("VET_RESTORE", "CHECK", "record " .. s.id .. " did not arrive (state " .. Str(rec.state) .. ", blocked " ..
+					Str(rec.spawnFailCount) .. ")")
+			end
+			return
+		end
+		local job = FindVetJob(store, st.me, s.id, nil)
+		if job ~= nil then
+			s.uid = job.u
+			local want = type(job.want) == "table" and job.want or {}
+			Check("VET_RESTORE", "INFO", VET_NAME .. " is home (unit " .. Str(job.u) .. "); your UI takes its promotions back (to take: " ..
+				table.concat(want, "+") .. ")")
+			return
+		end
+		local u = NamedUnit(st.me, VET_NAME)
+		if u == nil then
+			s.done = "CHECK"
+			Check("VET_RESTORE", "CHECK", "record " .. s.id .. " closed, but no unit named " .. VET_NAME .. " is found")
+			return
+		end
+		s.uid = u:GetID()
+	end
+	if FindVetJob(store, st.me, nil, s.uid) ~= nil then return end
+	local u = FindUnit(st.me, s.uid)
+	if u == nil then
+		s.done = "CHECK"
+		Check("VET_RESTORE", "CHECK", VET_NAME .. " (unit " .. Str(s.uid) .. ") is gone")
+		return
+	end
+	local xp, nxt = XPInfo(u)
+	local n = PromoCount(u, promos)
+	local d = UnitDamage(u)
+	local ok = xp == 50 and nxt == 90 and n == #promos and n > 0 and d == 30
+	s.done = ok and "PASS" or "CHECK"
+	Check("VET_RESTORE", s.done, VET_NAME .. ": XP " .. xp .. "/" .. nxt .. " (expected 50/90), promotions " .. n .. "/" .. #promos ..
+		", damage " .. d .. " (expected 30)" .. (ok and ": level, XP and damage kept" or ""))
+end
+
+-- ---------------------------------------------------------------------------
+-- S13 (0.7): a unit in B's land (designer ruling "Send from the recipient's
+-- land", FIXPLAN item 12). A Spearman of yours with full moves on a free
+-- tile of B within 3 tiles of B's capital, selected by the camera. The
+-- check FROM_LAND_RULES asks VEF's own picker rule right away: B's rows
+-- open, every other row WRONG_TERRITORY. FROM_LAND passes at the next turn
+-- start when that Spearman was sent to B this turn.
+-- ---------------------------------------------------------------------------
+CMD.scn_inland = function(me, p)
+	local st = Session("FROM_LAND", me)
+	if st == nil then return end
+	local B = st.ally
+	local capB = Capital(B)
+	if capB == nil then Check("FROM_LAND", "CHECK", "B has no capital"); return end
+	local plot = FindPlot(capB:GetX(), capB:GetY(), 3, OwnedBy(B), 1)
+	if plot == nil then Check("FROM_LAND", "CHECK", "no free land tile of B within 3 tiles of its capital"); return end
+	local u = NewUnit("scn_inland", me, "UNIT_SPEARMAN", plot)
+	if u == nil then Check("FROM_LAND", "CHECK", "could not create the Spearman in B's land"); return end
+	local full = FullMoves(u)
+	st.s13 = { turn = Turn(), uid = u:GetID(), x = plot:GetX(), y = plot:GetY() }
+	Focus(st, plot:GetX(), plot:GetY(), me, u:GetID(), p.stamp)
+	ScnSave(st)
+	local rows = EFV_DestinationRows(me, u, FT_EXP, EFV_Records.Load())
+	local openB, wrong, bad = 0, 0, {}
+	for _, r in ipairs(rows) do
+		if r.recipientID == B then
+			if r.ok then openB = openB + 1 else bad[#bad + 1] = "B's row: " .. table.concat(r.reasons or {}, "+") end
+		elseif not r.ok and Has(r.reasons, "WRONG_TERRITORY") then
+			wrong = wrong + 1
+		else
+			bad[#bad + 1] = PlayerName(r.recipientID) .. "'s row is not WRONG_TERRITORY"
+		end
+	end
+	if not full then bad[#bad + 1] = "the Spearman lacks full moves" end
+	if openB == 0 then bad[#bad + 1] = "no open row for B" end
+	Check("FROM_LAND_RULES", #bad == 0 and "PASS" or "CHECK", "Spearman at " .. plot:GetX() .. "," .. plot:GetY() .. " in " ..
+		PlayerName(B) .. "'s land: " .. openB .. " row(s) of B open, " .. wrong .. " other row(s) WRONG_TERRITORY" ..
+		(#bad > 0 and (" PROBLEM: " .. table.concat(bad, "; ")) or ""))
+	Check("FROM_LAND", "INFO", "send the selected Spearman as Expeditionary to " .. PlayerName(B) .. " this turn")
+end
+
+local function EvalS13(st, store, t, manual)
+	local s = st.s13
+	if type(s) ~= "table" then return end
+	local rec = Newest(store, function(r)
+		return r.senderID == st.me and r.forceType == FT_EXP and r.unitType == "UNIT_SPEARMAN" and r.sentTurn == s.turn
+	end)
+	if rec ~= nil then
+		st.s13 = nil
+		local ok = rec.recipientID == st.ally
+		Check("FROM_LAND", ok and "PASS" or "CHECK", "record " .. rec.id .. ": the Spearman left B's land for " ..
+			PlayerName(rec.recipientID) .. " (fee " .. Str(rec.feePaid) .. ", band " .. Str(rec.band) .. ", from your city at " ..
+			Str(rec.originX) .. "," .. Str(rec.originY) .. ")")
+	elseif not manual and t > s.turn then
+		st.s13 = nil
+		Check("FROM_LAND", "CHECK", "the Spearman standing in B's land was not sent to B in turn " .. Str(s.turn))
+	end
+end
+
+-- ---------------------------------------------------------------------------
+-- End-of-turn cleanup (0.7, FIXPLAN item 10): units queued in st.cleanup
+-- ({ o, u, ut }) are removed at GameEvents.OnGameTurnEnded, identity-checked
+-- by type, never at a player's PlayerTurnStartComplete.
+-- ---------------------------------------------------------------------------
+local function DevCleanup(turn)
+	local st = ScnLoad()
+	local c = st.cleanup
+	if type(c) ~= "table" or #c == 0 then return end
+	local n = 0
+	for _, e in ipairs(c) do
+		local o = tonumber(e.o) or -1
+		local u = FindUnit(o, tonumber(e.u) or -1)
+		if u ~= nil and (e.ut == nil or UnitTypeName(u) == e.ut) then
+			if pcall(function() Players[o]:GetUnits():Destroy(u) end) then n = n + 1 end
+		end
+	end
+	st.cleanup = nil
+	ScnSave(st)
+	Log("scn", "end of turn " .. Str(turn) .. ": removed " .. n .. " of " .. #c .. " test unit(s)")
+end
+
+-- ===========================================================================
+-- Workshop screenshots (EFV_Dev 0.7.0-dev.1; workshop/SCREENSHOTS.md Part B).
+-- CMD.shot1 .. shot5: each runs S0 itself when needed (ShotPrep), removes
+-- what the previous Shot button created (ShotReset; list in st.shot), builds
+-- its scene and writes st.focus with the extra fields the panel reads:
+-- open ("PICKER" | "TRACKER" | "CAPTURE"), ft (picker force type), zoom
+-- (UI.SetMapZoom value, 0 = closest), tx / ty (Shot 4's target city).
+-- One line each: [EFV][CHECK] SHOTn PASS|CHECK ...
+-- ===========================================================================
+local ZOOM_CLOSE, ZOOM_MID = 0.25, 0.5
+
+local function ShotList(st)
+	if type(st.shot) ~= "table" then st.shot = {} end
+	if type(st.shot.recs) ~= "table" then st.shot.recs = {} end
+	if type(st.shot.units) ~= "table" then st.shot.units = {} end
+	return st.shot
+end
+
+local function ShotUnit(st, u)
+	if u == nil then return end
+	local l = ShotList(st)
+	l.units[#l.units + 1] = { o = u:GetOwner(), u = u:GetID(), ut = UnitTypeName(u) }
+end
+
+local function ShotRec(st, rec)
+	if rec == nil then return end
+	local l = ShotList(st)
+	l.recs[#l.recs + 1] = rec.id
+end
+
+-- Removes every record and unit the previous Shot created: the records
+-- first (committed, so VEF never sees a tracked unit vanish), then the units.
+-- Cities founded for a shot and a captured city stay.
+local function ShotReset(st)
+	local l = ShotList(st)
+	local store = EFV_Records.Load()
+	local doomed = {}
+	local nr = 0
+	for _, id in ipairs(l.recs) do
+		local rec = EFV_Records.Get(store, tonumber(id) or -1)
+		if rec ~= nil then
+			local u = RecUnit(rec)
+			if u ~= nil then doomed[#doomed + 1] = { o = u:GetOwner(), u = u:GetID(), ut = UnitTypeName(u) } end
+			EFV_Records.Delete(store, rec.id)
+			nr = nr + 1
+		end
+	end
+	for _, e in ipairs(l.units) do doomed[#doomed + 1] = e end
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	local nu = 0
+	for _, e in ipairs(doomed) do
+		local o = tonumber(e.o) or -1
+		local u = FindUnit(o, tonumber(e.u) or -1)
+		if u ~= nil and (e.ut == nil or UnitTypeName(u) == e.ut) then
+			if pcall(function() Players[o]:GetUnits():Destroy(u) end) then nu = nu + 1 end
+		end
+	end
+	st.shot = { recs = {}, units = {} }
+	Log("shot", "reset: " .. nr .. " record(s) and " .. nu .. " unit(s) of the previous shot removed")
+end
+
+-- Session for a Shot: S0 when needed (its three Swordsmen are removed with
+-- the reset), the wars renewed, the Volunteer basis with B renewed, the
+-- previous shot removed, gold at least 2000. Returns st or nil.
+local function ShotPrep(cmd, me, p)
+	local st = ScnLoad()
+	local ranSetup = false
+	if st.ally == nil or st.me ~= me then
+		CMD.scn_setup(me, p)
+		ranSetup = true
+		st = ScnLoad()
+		if st.ally == nil or st.me ~= me then
+			Check(cmd, "CHECK", "setup failed: see the SETUP line")
+			return nil
+		end
+	end
+	st = Session(cmd, me)
+	if st == nil then return nil end
+	if EFV_VolunteerBasis(me, st.ally) == nil then EnsurePartner(cmd, me, st.ally) end
+	if ranSetup and type(st.setupUnits) == "table" then
+		local l = ShotList(st)
+		for _, e in ipairs(st.setupUnits) do l.units[#l.units + 1] = e end
+		st.setupUnits = nil
+	end
+	ShotReset(st)
+	pcall(function()
+		local t = Players[me]:GetTreasury()
+		local g = t:GetGoldBalance()
+		if g < 2000 then t:ChangeGoldBalance(2000 - g) end
+	end)
+	return st
+end
+
+local function ShotName(rec)
+	local ok, s = pcall(EFV_UnitDisplayName, rec.unitType, rec.veteranName)
+	if ok and type(s) == "string" and s ~= "" then return s end
+	return Str(rec.unitType)
+end
+
+-- Shot 1 Send picker: "Legio VEF" selected next to your capital, the
+-- Expeditionary picker opened by the panel. B and F get a second city when
+-- they have one only; D (the next major) becomes your friend without a
+-- common enemy, so its row is greyed.
+CMD.shot1 = function(me, p)
+	local st = ShotPrep("SHOT1", me, p)
+	if st == nil then return end
+	local cap = Capital(me)
+	local notes = {}
+	for _, pid in ipairs({ st.ally, st.friend }) do
+		local c0 = Capital(pid)
+		if c0 ~= nil and #Cities(pid) < 2 then
+			local c, msg = FoundCityFor(pid, c0:GetX(), c0:GetY())
+			notes[#notes + 1] = msg
+			if c ~= nil then RevealCity(me, c, nil, 5) end
+		end
+	end
+	local D = nil
+	for _, i in ipairs(SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)) do
+		if D == nil and i ~= st.ally and i ~= st.friend and i ~= st.enemy then D = i end
+	end
+	if D ~= nil then
+		MeetPair(me, D)
+		if EFV_PartnerBasis(me, D) == nil then SetDiploPair("shot1", me, D, "SetHasDeclaredFriendship", true) end
+		local cD = Capital(D)
+		if cD ~= nil then RevealCity(me, cD, nil, 5) end
+		notes[#notes + 1] = "greyed row: " .. PlayerName(D) .. " (friend, no common enemy)"
+	end
+	local u = NewUnit("shot1", me, "UNIT_SWORDSMAN", FindPlot(cap:GetX(), cap:GetY(), 2, OwnedBy(me), 1), "Legio VEF")
+	if u == nil then
+		ScnSave(st)
+		Check("SHOT1", "CHECK", "could not create the Swordsman next to your capital")
+		return
+	end
+	local full = FullMoves(u)
+	ShotUnit(st, u)
+	Focus(st, cap:GetX(), cap:GetY(), me, u:GetID(), p.stamp)
+	st.focus.open, st.focus.ft, st.focus.zoom = "PICKER", FT_EXP, ZOOM_MID
+	ScnSave(st)
+	local rows = EFV_DestinationRows(me, u, FT_EXP, EFV_Records.Load())
+	local open = 0
+	for _, r in ipairs(rows) do if r.ok then open = open + 1 end end
+	Check("SHOT1", (open > 0 and full) and "PASS" or "CHECK", "'Legio VEF' next to your capital (full moves " .. tostring(full) ..
+		"); picker rows " .. #rows .. ", open " .. open .. (#notes > 0 and ("; " .. table.concat(notes, "; ")) or ""))
+end
+
+-- Shot 2 Arrival: your Expeditionary Swordsman (B's colours) and your
+-- Volunteer Swordsman (your colours) next to B's capital, both recorded
+-- DEPLOYED this turn, two "Unit Arrived" notifications.
+CMD.shot2 = function(me, p)
+	local st = ShotPrep("SHOT2", me, p)
+	if st == nil then return end
+	local B = st.ally
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil then ScnSave(st); Check("SHOT2", "CHECK", "your capital or B's capital is missing"); return end
+	RevealCity(me, capB, nil, 5)
+	local store = EFV_Records.Load()
+	local e = NewUnit("shot2", B, "UNIT_SWORDSMAN", FindPlot(capB:GetX(), capB:GetY(), 2, OwnedBy(B), 1))
+	if e == nil then ScnSave(st); Check("SHOT2", "CHECK", "no free tile of B next to its capital"); return end
+	ShotUnit(st, e)
+	local recE = MakeRecord(store, e, { force = FT_EXP, sender = me, recipient = B, basis = st.partner or "FRIEND", origin = cap,
+		dest = capB, duration = EFV_Config.EXPEDITIONARY_DURATION })
+	local p2 = FindPlot(e:GetX(), e:GetY(), 1, OwnedBy(B), 1) or FindPlot(capB:GetX(), capB:GetY(), 2, OwnedBy(B), 1)
+	local v = NewUnit("shot2", me, "UNIT_SWORDSMAN", p2)
+	ShotUnit(st, v)
+	local recV = nil
+	if v ~= nil then
+		recV = MakeRecord(store, v, { force = FT_VOL, sender = me, recipient = B, basis = st.basis or "FRIEND_OB", origin = cap, dest = capB })
+	end
+	Hold(store, e)
+	EFV_Records.Commit(store)
+	for _, rec in ipairs({ recE or false, recV or false }) do
+		if rec then
+			ShotRec(st, rec)
+			EFV_Notify.Queue(me, EFV_Config.NOTIF.ARRIVED, "LOC_" .. EFV_Config.NOTIF.ARRIVED,
+				{ ShotName(rec), EFV_PlayerName(me), EFV_CityName(capB) }, rec.lastX, rec.lastY, { recordID = rec.id, kind = "ARRIVED" })
+		end
+	end
+	EFV_Notify.Flush()
+	local mx, my = e:GetX(), e:GetY()
+	if v ~= nil then mx, my = math.floor((e:GetX() + v:GetX()) / 2), math.floor((e:GetY() + v:GetY()) / 2) end
+	Focus(st, mx, my, nil, nil, p.stamp)
+	st.focus.zoom = ZOOM_CLOSE
+	ScnSave(st)
+	local ok = recE ~= nil and recV ~= nil and e:GetOwner() == B and v:GetOwner() == me
+	Check("SHOT2", ok and "PASS" or "CHECK", "Expeditionary " .. (recE and ("record " .. recE.id) or "MISSING") .. " (owner " ..
+		PlayerName(e:GetOwner()) .. "), Volunteers " .. (recV and ("record " .. recV.id) or "MISSING") .. " next to " .. PlayerName(B) ..
+		"'s capital; Unit Arrived notifications sent")
+end
+
+-- Shot 3 Tracker: six records in different states (Grace first), one Grace
+-- notification, the tracker opened by the panel (LuaEvents.EFV_TrackerOpen).
+CMD.shot3 = function(me, p)
+	local st = ShotPrep("SHOT3", me, p)
+	if st == nil then return end
+	local B, F, cs = st.ally, st.friend, st.cs
+	local cap, capB, capF, capCS = Capital(me), Capital(B), Capital(F), Capital(cs)
+	if cap == nil or capB == nil or capF == nil or capCS == nil then
+		ScnSave(st)
+		Check("SHOT3", "CHECK", "a capital of you, B, F or the city-state is missing")
+		return
+	end
+	local store = EFV_Records.Load()
+	local T = Turn()
+	local EXP_D = EFV_Config.EXPEDITIONARY_DURATION
+	local made, why = {}, {}
+	local function Add(label, rec, u)
+		if u ~= nil then ShotUnit(st, u) end
+		if rec ~= nil then ShotRec(st, rec); made[#made + 1] = label else why[#why + 1] = label .. " failed" end
+		return rec
+	end
+	-- 1 Expeditionary to B in Grace (3 turns), on neutral land near B's border
+	local spot = FindPlot(capB:GetX(), capB:GetY(), 8, Neutral, 3)
+	local u1 = NewUnit("shot3", B, "UNIT_SWORDSMAN", spot)
+	local r1 = nil
+	if u1 ~= nil then
+		r1 = MakeRecord(store, u1, { force = FT_EXP, sender = me, recipient = B, basis = st.partner or "FRIEND", origin = cap,
+			dest = capB, duration = EXP_D, deployedTurn = T - EXP_D - 2 })
+	end
+	if r1 ~= nil then
+		r1.state, r1.graceTurnsLeft, r1.lastDamage = ST.GRACE, 3, nil
+		Hold(store, u1)
+		RevealCity(me, spot, nil, 5)
+	end
+	Add("Grace", r1, u1)
+	-- 2 Expeditionary to F, Deployed, 14 turns left
+	local u2 = NewUnit("shot3", F, "UNIT_ARCHER", FindPlot(capF:GetX(), capF:GetY(), 3, OwnedBy(F), 1))
+	local r2 = nil
+	if u2 ~= nil then
+		r2 = MakeRecord(store, u2, { force = FT_EXP, sender = me, recipient = F, basis = EFV_PartnerBasis(me, F) or "FRIEND",
+			origin = cap, dest = capF, duration = EXP_D, deployedTurn = T - 6 })
+	end
+	Add("Deployed (F)", r2, u2)
+	-- 3 Volunteers in B's land, Deployed
+	local u3 = NewUnit("shot3", me, "UNIT_SPEARMAN", FindPlot(capB:GetX(), capB:GetY(), 3, OwnedBy(B), 1))
+	local r3 = nil
+	if u3 ~= nil then
+		r3 = MakeRecord(store, u3, { force = FT_VOL, sender = me, recipient = B, basis = st.basis or "FRIEND_OB",
+			origin = cap, dest = capB, deployedTurn = T - 12 })
+	end
+	Add("Volunteers", r3, u3)
+	-- 4 City-State unit Returning, 2 turns (the fields EFV_Transit's EnterReturning sets)
+	local u4 = NewUnit("shot3", cs, "UNIT_WARRIOR", FindPlot(capCS:GetX(), capCS:GetY(), 3, OwnedByAny({ -1, cs }), 1))
+	local r4 = nil
+	if u4 ~= nil then
+		r4 = MakeRecord(store, u4, { force = FT_CS, sender = me, recipient = cs, basis = "CITY_STATE", origin = cap, dest = capCS,
+			duration = EFV_Config.CS_EXPEDITIONARY_DURATION, deployedTurn = T - 10 })
+	end
+	if r4 ~= nil then
+		if EFV_Units.Remove(u4) then
+			u4 = nil
+			r4.state, r4.arrivalTurn, r4.transitTurns, r4.band = ST.RET, T + 2, 2, 2
+			r4.returnCityID, r4.returnX, r4.returnY, r4.returnReason = cap:GetID(), cap:GetX(), cap:GetY(), "EXPIRED"
+			r4.onMapPlayerID, r4.onMapUnitID, r4.graceTurnsLeft, r4.lastDamage, r4.lapsed = nil, nil, nil, nil, 0
+		else
+			why[#why + 1] = "City-State unit not removed"
+		end
+	end
+	Add("Returning (CS)", r4, u4)
+	-- 5 Expeditionary to B, Outbound, 3 turns (the S9 pattern)
+	local destB = Cities(B)[2] or capB
+	local u5 = NewUnit("shot3", me, "UNIT_HORSEMAN", FindPlot(cap:GetX(), cap:GetY(), 3, OwnedBy(me), 1))
+	local r5 = nil
+	if u5 ~= nil then
+		r5 = MakeRecord(store, u5, { force = FT_EXP, state = ST.OUT, sender = me, recipient = B, basis = st.partner or "FRIEND",
+			origin = cap, dest = destB, duration = EXP_D })
+	end
+	if r5 ~= nil then
+		r5.sentTurn, r5.arrivalTurn, r5.transitTurns, r5.band = T, T + 3, 3, 3
+		if EFV_Units.Remove(u5) then u5 = nil else why[#why + 1] = "Horseman not removed" end
+	end
+	Add("Outbound", r5, u5)
+	-- 6 received from B, Deployed, 12 turns left
+	local u6 = NewUnit("shot3", me, "UNIT_SWORDSMAN", FindPlot(cap:GetX(), cap:GetY(), 3, OwnedBy(me), 1))
+	local r6 = nil
+	if u6 ~= nil then
+		r6 = MakeRecord(store, u6, { force = FT_EXP, sender = B, recipient = me, basis = st.partner or "FRIEND", origin = capB,
+			dest = cap, duration = EXP_D, deployedTurn = T - 8 })
+	end
+	Add("Received", r6, u6)
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	if r1 ~= nil then
+		EFV_Notify.Queue(me, EFV_Config.NOTIF.GRACE, "LOC_" .. EFV_Config.NOTIF.GRACE .. "_SENDER",
+			{ ShotName(r1), EFV_PlayerName(B), 3 }, u1:GetX(), u1:GetY(), { recordID = r1.id, kind = "GRACE" })
+		EFV_Notify.Flush()
+		Focus(st, u1:GetX(), u1:GetY(), nil, nil, p.stamp)
+	else
+		Focus(st, capB:GetX(), capB:GetY(), nil, nil, p.stamp)
+	end
+	st.focus.open, st.focus.zoom = "TRACKER", ZOOM_MID
+	ScnSave(st)
+	local alerts = 0
+	for _, id in ipairs(EFV_Records.IDs(store)) do
+		local r = EFV_Records.Get(store, id)
+		if r ~= nil and r.senderID == me and (r.state == ST.GRACE or r.state == ST.MUT) then alerts = alerts + 1 end
+	end
+	Check("SHOT3", (#made == 6 and #why == 0 and alerts == 1) and "PASS" or "CHECK", #made .. " of 6 records (" ..
+		table.concat(made, ", ") .. "), alerts " .. alerts .. (#why > 0 and (" PROBLEM: " .. table.concat(why, "; ")) or ""))
+end
+
+-- Shot 4 Entrust: the S11 scene; the panel orders Tank 1 to attack the city
+-- (the base MOVE_TO with ATTACK), waits for the capture screen and expands
+-- the Entrust list (LuaEvents.EFV_EntrustExpand).
+CMD.shot4 = function(me, p)
+	local st = ShotPrep("SHOT4", me, p)
+	if st == nil then return end
+	local city, tanks, note, weak = BuildEntrustScene("shot4", me, st, 5)
+	if city == nil then ScnSave(st); Check("SHOT4", "CHECK", Str(tanks)); return end
+	for _, t in ipairs(tanks) do ShotUnit(st, t) end
+	local t1 = tanks[1]
+	if t1 ~= nil then
+		Focus(st, city:GetX(), city:GetY(), me, t1:GetID(), p.stamp)
+		st.focus.open, st.focus.tx, st.focus.ty, st.focus.zoom = "CAPTURE", city:GetX(), city:GetY(), ZOOM_MID
+	else
+		Focus(st, city:GetX(), city:GetY(), nil, nil, p.stamp)
+	end
+	ScnSave(st)
+	Check("SHOT4", #tanks == 3 and "PASS" or "CHECK", #tanks .. " Tanks next to " .. PlayerName(st.enemy) .. "'s city at " ..
+		city:GetX() .. "," .. city:GetY() .. " (" .. Str(note) .. "; " .. Str(weak) .. "); the panel orders Tank 1 to attack")
+end
+
+-- Shot 5 Mutiny: your Expeditionary Swordsman (B's) on neutral land near
+-- B's border, MUTINY with 40 damage, one Mutiny notification.
+CMD.shot5 = function(me, p)
+	local st = ShotPrep("SHOT5", me, p)
+	if st == nil then return end
+	local B = st.ally
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil then ScnSave(st); Check("SHOT5", "CHECK", "your capital or B's capital is missing"); return end
+	local spot = FindPlot(capB:GetX(), capB:GetY(), 8, Neutral, 3)
+	if spot == nil then ScnSave(st); Check("SHOT5", "CHECK", "no free neutral land 3-8 tiles from B's capital"); return end
+	RevealCity(me, spot, nil, 5)
+	local u = NewUnit("shot5", B, "UNIT_SWORDSMAN", spot)
+	if u == nil then ScnSave(st); Check("SHOT5", "CHECK", "could not create B's Swordsman"); return end
+	ShotUnit(st, u)
+	pcall(function() u:SetDamage(40) end)
+	local store = EFV_Records.Load()
+	local D = EFV_Config.EXPEDITIONARY_DURATION
+	local rec = MakeRecord(store, u, { force = FT_EXP, sender = me, recipient = B, basis = st.partner or "FRIEND", origin = cap,
+		dest = capB, duration = D, deployedTurn = Turn() - D - EFV_Config.GRACE_TURNS - 2 })
+	if rec ~= nil then
+		rec.state, rec.graceTurnsLeft, rec.lastDamage = ST.MUT, nil, 40
+		ShotRec(st, rec)
+	end
+	Hold(store, u)
+	EFV_Records.Commit(store)
+	if rec ~= nil then
+		EFV_Notify.Queue(me, EFV_Config.NOTIF.MUTINY, "LOC_" .. EFV_Config.NOTIF.MUTINY .. "_SENDER",
+			{ ShotName(rec), 3, EFV_PlayerName(B) }, u:GetX(), u:GetY(), { recordID = rec.id, kind = "MUTINY" })
+		EFV_Notify.Flush()
+	end
+	Focus(st, spot:GetX(), spot:GetY(), nil, nil, p.stamp)
+	st.focus.zoom = ZOOM_CLOSE
+	ScnSave(st)
+	local ok = rec ~= nil and UnitDamage(u) == 40 and PlotOwner(spot) < 0 and u:GetOwner() == B
+	Check("SHOT5", ok and "PASS" or "CHECK", "record " .. Str(rec and rec.id) .. " MUTINY, damage " .. UnitDamage(u) .. ", owner " ..
+		PlayerName(u:GetOwner()) .. " at " .. spot:GetX() .. "," .. spot:GetY() .. " (tile owner " .. PlotOwner(spot) .. ")")
 end
 
 -- ---------------------------------------------------------------------------
@@ -2015,7 +2642,9 @@ local function Evaluate(me, manual)
 		EvalS10(st, store, t)
 	end
 	EvalS7(st, store, t, manual)
+	EvalS11(st, store, t, manual)
 	EvalS12(st, store, t, manual)
+	EvalS13(st, store, t, manual)
 	EFV_Records.Commit(store)
 	ScnSave(st)
 	if manual then Check("CHECK_NOW", "INFO", "evaluated") end
@@ -2037,8 +2666,14 @@ local function OnCombat(aP, aU, dP, dU)
 	if not ok then Log("scn", "ERROR combat check: " .. Str(err)) end
 end
 
+local function OnTurnEnded(turn)
+	local ok, err = pcall(DevCleanup, turn)
+	if not ok then Log("scn", "ERROR end-of-turn cleanup: " .. Str(err)) end
+end
+
 GameEvents.PlayerTurnStartComplete.Add(OnTurnStartComplete)
 GameEvents.OnCombatOccurred.Add(OnCombat)
+GameEvents.OnGameTurnEnded.Add(OnTurnEnded)
 EFV_Dev.Evaluate = Evaluate
 end -- final session
 

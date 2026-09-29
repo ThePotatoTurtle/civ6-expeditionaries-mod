@@ -6,6 +6,7 @@
 fixtures/good/EFV_Fixture   PLAN-shaped mini mod: every tool must report 0 errors.
 fixtures/bad/EFV_Broken     one planted defect per check: every expected finding must be reported.
 fixtures/logs/{good,bad}    synthetic game logs for check_logs.py.
+fixtures/logs/retest        synthetic Lua.log of a passing 0.7 re-test for summarize_efv_log.py --retest.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import validate_data  # noqa: E402
 import api_audit  # noqa: E402
 import check_logs  # noqa: E402
 import check_all  # noqa: E402
+import summarize_efv_log  # noqa: E402
 
 FIX = os.path.join(L.TOOLS_DIR, "fixtures")
 GOOD = os.path.join(FIX, "good")
@@ -231,6 +233,63 @@ class TestCheckLogsAndAll(unittest.TestCase):
         self.assertEqual(check_all.run([GOOD], out=out)[0], 0)
         self.assertEqual(check_all.run([BAD], out=out)[0], 1)
         self.assertEqual(check_all.run([GOOD], strict=True, out=out)[0], 1)   # good fixture has 2 WARNs
+
+
+class TestSummarizeRetest(unittest.TestCase):
+    """summarize_efv_log.py --retest (0.7 re-test, EFV/TESTING_RETEST_0.7.md)."""
+
+    LOG = os.path.join(FIX, "logs", "retest", "Lua.log")
+
+    def run_summary(self, args):
+        out = io.StringIO()
+        old = sys.stdout
+        sys.stdout = out
+        try:
+            code = summarize_efv_log.main(args + ["--db", os.path.join(FIX, "no_such.sqlite")])
+        finally:
+            sys.stdout = old
+        return code, out.getvalue()
+
+    def test_versions(self):
+        self.assertEqual(summarize_efv_log.EFV_VERSION, "0.7.0-dev")
+        self.assertEqual(summarize_efv_log.DEV_VERSION, "0.7.0-dev.1")
+        self.assertEqual(len(summarize_efv_log.RETEST_STEPS), 6)
+
+    def test_good_retest(self):
+        code, text = self.run_summary(["--retest", "--log", self.LOG])
+        self.assertEqual(code, 0, text)
+        self.assertIn("VEF 0.7 re-test summary", text)
+        for n in range(1, 7):
+            self.assertIn("Step  %d  PASS" % n, text)
+        self.assertIn("Errors: none", text)
+        # the full-session mode still reads the same log without failing on a step
+        code_full, text_full = self.run_summary(["--log", self.LOG])
+        self.assertIn("VEF final session summary", text_full)
+        self.assertNotIn("summary error", text_full)
+
+    def test_bad_retest(self):
+        with open(self.LOG, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        lines = [ln for ln in lines if "VET_RESTORE_LEVEL" not in ln and "FROM_LAND PASS" not in ln
+                 and "ARRIVE PASS T3 record 4" not in ln]
+        lines += ["Runtime Error: C:/Games/Base/Assets/UI/SelectedUnit.lua:195: attempt to index a nil value",
+                  "stack traceback:", "EFV_Dev_Gameplay: [EFV][T6][Dev] scn: after the error"]
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "Lua.log")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(os.linesep.join(lines))
+            code, text = self.run_summary(["--retest", "--log", path])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self.assertEqual(code, 1)
+        self.assertIn("Step  2  CHECK", text)      # FROM_LAND not seen
+        self.assertIn("Step  3  CHECK", text)      # only 3 arrivals
+        self.assertIn("expected at least 4 arrivals", text)
+        self.assertIn("Step  5  CHECK", text)      # UI level check missing
+        self.assertIn("VET_RESTORE_LEVEL not seen", text)
+        self.assertIn("Step  6  CHECK", text)      # the runtime error
+        self.assertIn("SelectedUnit.lua:195", text)
 
 
 class TestOfflineRunnerClassify(unittest.TestCase):

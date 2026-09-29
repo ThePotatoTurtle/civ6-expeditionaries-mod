@@ -5,15 +5,15 @@
 --        duration 10, send -> arrival as a city-state-owned unit with 0 moves;
 --   P4.2 CS war requirement (a war the city-state shares; barbarians do not
 --        count; at war with the city-state -> rejected);
---   P4.3 10-turn timer, EXPIRY_SOON at 3 and 1, auto-return from the
---        city-state's tiles, grace / mutiny outside;
+--   P4.3 10-turn timer, EXPIRY_SOON at 3 and 1 (_CS sender text), return
+--        at expiry from anywhere (0.7: no grace / mutiny for CS);
 --   P4.4 valid return territory = the city-state's or the sender's tiles,
---        NOT an ally's;
+--        NOT an ally's (still used by EXP-style checks; CS expiry ignores it);
 --   spec 11 rows for CS (WP5.1 brought forward, INTERFACES note 24):
 --        sender-CS war -> revert / return, city-state eliminated -> return
 --        (in transit and from the snapshot);
---   suzerain levy -> relink (RelinkLevied);
---   UI: the "Send to City-State" button and its picker rows.
+--   suzerain levy -> relink (RelinkLevied).
+-- The UI tests for "Send to City-State" moved to test_070_send.lua (0.7).
 -- Scenario (H.baseScenario): 0 human (cities (10,10), (14,20)), 1 ally B,
 -- 2 friend F, 3 enemy C (at war with 0, 1, 2 and the city-state), 4 city-state
 -- at (30,20) (met by 0, at war with C).
@@ -192,7 +192,7 @@ test("P4.3 timeline: EXPIRY_SOON at 3 and 1 (names the city-state), expiry on it
 		local w = Sent(0, "EXPIRY_SOON", FAKE.turn)
 		if #w > 0 then
 			warned[#warned + 1] = FAKE.turn - D
-			H.eq(Summary(w[1]), Locale.Lookup("LOC_EFV_NOTIF_EXPIRY_SOON_SENDER_SUMMARY", unit, 10 - (FAKE.turn - D), csName))
+			H.eq(Summary(w[1]), Locale.Lookup("LOC_EFV_NOTIF_EXPIRY_SOON_CS_SUMMARY", unit, 10 - (FAKE.turn - D), csName))
 		end
 	end
 	H.deq(warned, { 7, 9 }, "left 3 and left 1")
@@ -213,7 +213,7 @@ test("P4.3 timeline: EXPIRY_SOON at 3 and 1 (names the city-state), expiry on it
 	H.clean()
 end)
 
-test("P4.4 return territory: an ally's tiles are NOT valid (GRACE); the sender's tiles are (GRACE_RETURN)", function()
+test("P4.4 return territory: an ally's tiles are not valid return land, but a CS unit there is recalled at expiry (0.7)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r, cu = SendAndArrive(S)
@@ -224,38 +224,29 @@ test("P4.4 return territory: an ally's tiles are NOT valid (GRACE); the sender's
 	EditRecord(r.id, function(x) x.deployedTurn = FAKE.turn - 9 end)
 	H.endTurn()                                       -- E
 	r = Only()
-	H.eq(r.state, "GRACE"); H.eq(r.graceTurnsLeft, 5)
-	local g = Sent(0, "GRACE", FAKE.turn)
-	H.len(g, 1)
-	H.eq(Summary(g[1]), Locale.Lookup("LOC_EFV_NOTIF_GRACE_SENDER_SUMMARY",
-		EFV_UnitDisplayName("UNIT_SWORDSMAN"), EFV_PlayerName(4), 5), "sender text names the city-state")
-	H.len(Sent(1, "GRACE"), 0, "the ally is not involved")
-	H.endTurn()                                       -- E+1, still in B's land
-	H.eq(Only().graceTurnsLeft, 4)
-	H.moveUnit(cu, 15, 20)                            -- the sender's own borders
-	H.endTurn()
-	r = Only()
-	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "GRACE_RETURN")
+	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "EXPIRED")
+	H.ok(not H.unitAlive(cu), "removed from B's land")
+	H.len(Sent(0, "GRACE"), 0); H.len(Sent(1, "GRACE"), 0, "the ally is not involved")
+	H.ok(H.hasLine("cs=recall-anywhere"))
 	H.clean()
 end)
 
-test("P4.3 mutiny: a CS unit outside valid land mutinies; back on the city-state's tiles -> MUTINY_RETURN, damage kept", function()
+test("P4.3 no mutiny (0.7): a damaged CS unit on neutral land at expiry comes home with its damage", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r, cu = SendAndArrive(S)
 	local p = H.neutralPlot(30, 5)
 	H.moveUnit(cu, p:GetX(), p:GetY())
+	cu.damage = 20
 	EditRecord(r.id, function(x) x.deployedTurn = FAKE.turn - 9 end)
-	H.endTurn()                                       -- E: GRACE 5
-	EditRecord(r.id, function(x) x.graceTurnsLeft = 1 end)
-	H.endTurn()                                       -- mutiny starts, first 20 damage
+	H.endTurn()                                       -- E
 	r = Only()
-	H.eq(r.state, "MUTINY"); H.eq(cu:GetDamage(), 20)
-	H.len(Sent(0, "MUTINY", FAKE.turn), 1)
-	H.moveUnit(cu, 31, 21)                            -- the city-state's ring 1
-	H.endTurn()
-	r = Only()
-	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "MUTINY_RETURN"); H.eq(r.damage, 20)
+	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "EXPIRED"); H.eq(r.damage, 20)
+	H.len(Sent(0, "GRACE"), 0); H.len(Sent(0, "MUTINY"), 0)
+	H.turns(r.arrivalTurn - FAKE.turn)
+	local home = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(home, 1)
+	H.eq(home[1]:GetDamage(), 20, "damage kept")
 	H.clean()
 end)
 
@@ -409,7 +400,7 @@ test("levy: the suzerain levies the city-state -> record follows the levied unit
 	H.clean()
 end)
 
-test("levy: expiry while levied returns the unit from the suzerain (valid land = city-state or sender)", function()
+test("levy: expiry while levied recalls the unit from the suzerain at once, even on the suzerain's land (0.7)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r = SendAndArrive(S)
@@ -419,15 +410,13 @@ test("levy: expiry while levied returns the unit from the suzerain (valid land =
 	H.eq(r.onMapPlayerID, 1)
 	local lu = Players[1]:GetUnits():FindID(r.onMapUnitID)
 	H.notnil(lu)
-	H.moveUnit(lu, 22, 11)                            -- the suzerain's own land is NOT valid
+	H.moveUnit(lu, 22, 11)                            -- the suzerain's own land (not valid return land)
 	EditRecord(r.id, function(x) x.deployedTurn = FAKE.turn - 9 end)
 	H.endTurn()
-	H.eq(Only().state, "GRACE")
-	H.moveUnit(lu, 31, 20)                            -- the city-state's land
-	H.endTurn()
 	r = Only()
-	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "GRACE_RETURN")
+	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "EXPIRED")
 	H.ok(not H.unitAlive(lu), "taken from the suzerain")
+	H.len(Sent(0, "GRACE"), 0)
 	H.ok(#levied >= 1)
 	H.clean()
 end)
@@ -448,79 +437,5 @@ test("levy: no candidate -> DISBANDED as before; a combat marker wins over a lev
 	H.endTurn()
 	H.len(H.records(), 0)
 	H.ok(string.find(Summary(Sent(0, "UNIT_LOST")[1]), Locale.Lookup("LOC_EFV_LOSS_KILLED"), 1, true))
-	H.clean()
-end)
-
--- ===========================================================================
--- UI: "Send to City-State"
--- ===========================================================================
-local function BootUI()
-	local S = H.baseScenario()
-	H.loadEFV()
-	include("fake_ui")
-	FAKE_UI.Enable()
-	EFV_Config.LOG_LEVEL = 3
-	local ctx = {}
-	ctx.actions = FAKE_UI.LoadContext("EFV/UI/EFV_UnitActions.lua")
-	ctx.picker = FAKE_UI.LoadContext("EFV/UI/EFV_DestinationPicker.lua")
-	H.markBody()
-	return S, ctx
-end
-local function IM(name)
-	for _, im in ipairs(FAKE_UI.ims) do
-		if im.instName == name then return im end
-	end
-end
-local function Select(ctx, u)
-	FAKE_UI.selectedUnit = u
-	Events.UnitSelectionChanged(u and u:GetOwner() or -1, u and u:GetID() or -1, 0, 0, 0, true, false)
-	FAKE_UI.Frame(ctx.actions)
-end
-local function CSButton()
-	for _, b in ipairs(IM("EFV_ActionInstance").list) do
-		if b.UnitActionIcon.icon == "ICON_UNITOPERATION_MOVE_TO" then return b end
-	end
-end
-
-test("UI: Send to City-State button -> picker row (duration 10, EXP fee) -> flat EFV_Send accepted", function()
-	local S, ctx = BootUI()
-	local u = MyUnit()
-	Select(ctx, u)
-	local b = CSButton()
-	H.notnil(b, "CS button released (FLAG_RELEASED.CS_EXPEDITIONARY)")
-	H.ok(not b.UnitActionButton.disabled)
-	b.UnitActionButton:Click()
-	H.ok(not ctx.picker.Controls.PickerRoot:IsHidden(), "picker opened")
-	local rows = IM("EFV_DestRowInstance").list
-	H.len(rows, 1, "the met city-state's city only")
-	local band = EFV_Band(S.c0.x, S.c0.y, S.c4.x, S.c4.y)
-	H.eq(rows[1].RecipientLabel.text, EFV_UI_PlayerName(4))
-	H.eq(rows[1].FeeLabel.text, EFV_UI_FeeCell(FEE_EXP[band])); H.ok(FEE_EXP[band] > 0)
-	H.eq(rows[1].DurationLabel.text, EFV_UI_DurationText(10))
-	H.ok(not rows[1].RowButton.disabled)
-	rows[1].RowButton:Click()
-	local popup = FAKE_UI.popups[#FAKE_UI.popups]
-	H.notnil(popup)
-	H.ok(string.find(popup.texts[1], Locale.Lookup("LOC_EFV_FORCE_CS_EXPEDITIONARY"), 1, true), popup.texts[1])
-	H.ok(not string.find(popup.texts[1], "{", 1, true), popup.texts[1])
-	popup.confirm()
-	local req = FAKE_UI.requests[#FAKE_UI.requests]
-	H.eq(req.params.forceType, CS); H.eq(req.params.recipientID, 4); H.eq(req.params.expectedFee, FEE_EXP[band])
-	FAKE_UI.AsGameplay(function() H.request(req.pid, req.params) end)
-	local r = Only()
-	H.eq(r.forceType, CS); H.eq(r.feePaid, FEE_EXP[band], "shown fee == charged fee")
-	H.clean()
-end)
-
-test("UI: CS button disabled with the war reason when no met city-state shares a war", function()
-	local S, ctx = BootUI()
-	H.peace(3, 4)
-	local u = MyUnit()
-	Select(ctx, u)
-	local b = CSButton()
-	H.notnil(b)
-	H.ok(b.UnitActionButton.disabled)
-	H.ok(string.find(b.UnitActionButton.tooltip, Locale.Lookup("LOC_EFV_REASON_NO_COMMON_WAR", EFV_UI_PlayerName(4)), 1, true),
-		b.UnitActionButton.tooltip)
 	H.clean()
 end)

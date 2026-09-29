@@ -52,6 +52,12 @@
 -- is sent only with full movement points (NOT_FULL_MOVES). It replaces spec
 -- 6.2.6 ("has not attacked this turn and has movement remaining"), so
 -- NO_MOVES and ATTACKED are retired (attacking spends moves).
+-- Designer ruling "Send from the recipient's land" (0.7, INTERFACES note 33;
+-- overrides spec 6.2.4 and design note 17 for this case): a unit may also be
+-- sent from the territory of the recipient it goes to, but only to that
+-- recipient's cities (EFV_SendLandOwner; destination code WRONG_TERRITORY).
+-- NOT_OWN_TERRITORY now means unowned land only. Origin, fee and transit are
+-- unchanged (the sender's city nearest to the unit's tile, city to city).
 -- ===========================================================================
 
 if EFV_Rules ~= nil and EFV_Rules.LOADED == 1 then
@@ -75,7 +81,7 @@ EFV_Rules.ALL_REASON_CODES = {
 	-- destination level
 	"NOT_PARTNER", "VOL_NEEDS_ACCESS", "CS_NOT_MET", "AT_WAR_WITH_RECIPIENT",
 	"NO_COMMON_WAR", "CITY_NOT_OWNED", "NOT_REVEALED", "GOLD", "NAVAL_NO_SPAWN",
-	"FEE_CHANGED", "REQ_STALE",
+	"FEE_CHANGED", "REQ_STALE", "WRONG_TERRITORY",
 	-- recall
 	"RECALL_MIN_TURNS", "RECALL_TERRITORY", "RECALL_NOT_VOLUNTEER",
 	-- entrust
@@ -91,6 +97,8 @@ EFV_Rules.ALL_REASON_CODES = {
 --                      name (UI: one name or a comma list);
 --   GOLD, FEE_CHANGED  {1_Num} = fee; RECALL_MIN_TURNS {1_Num} = turns left;
 --   ENTRUST_NO_PARTNER {1_Name} = the captured city's former owner (civ name);
+--   WRONG_TERRITORY    {1_Name} = the LAND OWNER (row.landOwnerID), not the
+--                      row's recipient, so it is not in NAME_REASON_CODES;
 --   all other codes    no arguments.
 EFV_Rules.NAME_REASON_CODES = { "NOT_PARTNER", "VOL_NEEDS_ACCESS", "CS_NOT_MET", "AT_WAR_WITH_RECIPIENT", "NO_COMMON_WAR" }
 
@@ -738,12 +746,44 @@ function EFV_UnitClass(pUnit)
 end
 
 -- ---------------------------------------------------------------------------
+-- EFV_SendLandOwner(pUnit, senderID) -> nil | pid | -1   (0.7, note 33)
+-- Who owns the land a unit would be sent from (designer ruling "Send from
+-- the recipient's land"): nil on the sender's own land; the owner's player
+-- ID on another player's land (majors, city-states and Free Cities alike);
+-- -1 when the tile is unowned or cannot be read. The same call in both
+-- contexts (plot:GetOwner, A13), so the picker and the send handler agree.
+-- Params:  pUnit unit object, senderID player ID.
+-- Returns: nil, a player ID, or -1.
+-- APIs: A13.
+-- ---------------------------------------------------------------------------
+function EFV_SendLandOwner(pUnit, senderID)
+	if pUnit == nil then
+		return -1
+	end
+	local ok, owner = pcall(function()
+		local plot = Map.GetPlot(pUnit:GetX(), pUnit:GetY())
+		if plot == nil then
+			return -1
+		end
+		return plot:GetOwner()
+	end)
+	if not ok or type(owner) ~= "number" or owner < 0 then
+		return -1
+	end
+	if owner == senderID then
+		return nil
+	end
+	return owner
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_UnitSendReasons(pUnit, senderID, store) -> codes
 -- Unit-level send conditions (spec 6.1.1, 6.2), in this order: sender human
 -- major (NOT_HUMAN_MAJOR), owner == sender (NOT_OWNER), unit class
 -- (CLASS_NEVER, from EFV_UnitClass, so the G handler re-validates it),
--- formation STANDARD (FORMATION, D3, A33), damage 0 (DAMAGED), plot owner ==
--- sender (NOT_OWN_TERRITORY), not embarked (EMBARKED; fallback land unit on
+-- formation STANDARD (FORMATION, D3, A33), damage 0 (DAMAGED), plot owned by
+-- someone (NOT_OWN_TERRITORY only on unowned land; another player's land is
+-- a destination rule, WRONG_TERRITORY, 0.7), not embarked (EMBARKED; fallback land unit on
 -- water), full movement points (NOT_FULL_MOVES: moves remaining == max
 -- moves, designer decision replacing spec 6.2.6), not tracked by any record
 -- (ALREADY_TRACKED, DV8). All failing conditions are listed (spec 6).
@@ -783,11 +823,7 @@ function EFV_UnitSendReasons(pUnit, senderID, store)
 		Add(reasons, "DAMAGED")
 	end
 	local plot = Map.GetPlot(pUnit:GetX(), pUnit:GetY())
-	local plotOwner = -1
-	if plot ~= nil then
-		plotOwner = plot:GetOwner()
-	end
-	if plotOwner ~= senderID then
+	if EFV_SendLandOwner(pUnit, senderID) == -1 then
 		Add(reasons, "NOT_OWN_TERRITORY")
 	end
 	if IsEmbarkedCtx(pUnit, plot, UnitRowOf(pUnit)) then
@@ -847,11 +883,13 @@ local function RecipientInfo(senderID, recipientID, forceType)
 	return info
 end
 
--- Unit-level context shared by all rows of one picker build.
+-- Unit-level context shared by all rows of one picker build. landOwner =
+-- EFV_SendLandOwner (nil own land, pid another player's land, -1 unowned).
 local function UnitContext(senderID, pUnit, store)
 	local ctx = { senderID = senderID, pUnit = pUnit, row = nil, unitType = nil,
-		unitReasons = nil, origin = nil, gold = GoldOf(senderID) }
+		unitReasons = nil, origin = nil, gold = GoldOf(senderID), landOwner = nil }
 	ctx.unitReasons = EFV_UnitSendReasons(pUnit, senderID, store)
+	ctx.landOwner = EFV_SendLandOwner(pUnit, senderID)
 	if pUnit ~= nil then
 		ctx.row = UnitRowOf(pUnit)
 		if ctx.row ~= nil then
@@ -870,6 +908,10 @@ local function EvaluateCore(uctx, recipientID, pCity, forceType, rinfo)
 	end
 	for _, code in ipairs(uctx.unitReasons) do
 		Add(reasons, code)
+	end
+	-- Send from the recipient's land (0.7): only to that land owner's cities.
+	if uctx.landOwner ~= nil and uctx.landOwner >= 0 and recipientID ~= uctx.landOwner then
+		Add(reasons, "WRONG_TERRITORY")
 	end
 	if pCity == nil then
 		Add(reasons, "REQ_STALE")
@@ -929,11 +971,15 @@ end
 -- sender HasMet (A41). For each recipient city (sorted by GetID()) one row,
 -- evaluated exactly like EFV_EvaluateSend (shared core; unit and recipient
 -- checks computed once per call). Unreleased force types carry
--- NOT_IMPLEMENTED in every row.
+-- NOT_IMPLEMENTED in every row. A unit on another player's land (0.7) keeps
+-- every row; rows of other recipients carry WRONG_TERRITORY and landOwnerID
+-- names that land owner.
 -- Params:  senderID player ID, pUnit unit object, forceType EFV_Config.FT_*,
 --          store (gameplay or UI store).
 -- Returns: dense array of rows (shape INTERFACES "Destination row"):
---          { recipientID, cityID, destX, destY, ok, reasons, calc }
+--          { recipientID, cityID, destX, destY, ok, reasons, calc,
+--            landOwnerID (0.7: the land owner's ID, nil on own or unowned
+--            land) }
 --          ({} for an unknown force type or on an engine error, logged).
 -- PLAN 2.3, 3.3; spec 6.3, 14.2. APIs: A45, A41 (+ EFV_EvaluateSend).
 -- ---------------------------------------------------------------------------
@@ -944,6 +990,10 @@ function EFV_DestinationRows(senderID, pUnit, forceType, store)
 	end
 	local ok, err = pcall(function()
 		local uctx = UnitContext(senderID, pUnit, store)
+		local landOwnerID = nil
+		if uctx.landOwner ~= nil and uctx.landOwner >= 0 then
+			landOwnerID = uctx.landOwner
+		end
 		for _, r in ipairs(EFV_SortedAlivePlayers()) do
 			if r ~= senderID then
 				local candidate = false
@@ -964,6 +1014,7 @@ function EFV_DestinationRows(senderID, pUnit, forceType, store)
 							ok          = okRow,
 							reasons     = reasons,
 							calc        = calc,
+							landOwnerID = landOwnerID,
 						}
 					end
 				end
@@ -982,7 +1033,9 @@ end
 --   -> ok, reasons, calc
 -- The full spec 6 check list for one destination, used by the UI rows AND
 -- the gameplay send handler, in this order: NOT_IMPLEMENTED (unreleased
--- force type), unit reasons (EFV_UnitSendReasons), city owner == recipient
+-- force type), unit reasons (EFV_UnitSendReasons), unit on another
+-- player's land and recipient ~= that land owner (WRONG_TERRITORY, 0.7),
+-- city owner == recipient
 -- (CITY_NOT_OWNED), revealed to sender (NOT_REVEALED; G: A59 NEW-VERIFY,
 -- skipped with a log line if unavailable), basis present (EXP: NOT_PARTNER,
 -- VOL: VOL_NEEDS_ACCESS / NOT_PARTNER, CS: CS_NOT_MET), not at war

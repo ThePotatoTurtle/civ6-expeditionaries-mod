@@ -17,7 +17,9 @@
 -- gameplay writes; the UI reads through EFV_UIShared.
 --
 -- Store shape (INTERFACES "Store"):
---   { nextID, ids, recs, pending, entrust, lastTurn, rev, dirty = {} }
+--   { nextID, ids, recs, pending, entrust, vet, lastTurn, rev, dirty = {} }
+--   vet (0.7, INTERFACES note 33): dense array of veteran route B jobs
+--   (EFV_Veteran), sorted by (t, p, u); AddVetJob / FindVetJob / RemoveVetJob.
 --   dirty is keyed by property name (EFV_Config.PROP values), value true.
 --   A store whose Load failed carries broken = true; Commit refuses to write
 --   it (a partial store must never overwrite the saved one).
@@ -71,6 +73,7 @@ local COMMIT_ORDER = {
 	{ key = "RECORDS",    field = "recs"     },
 	{ key = "PENDING",    field = "pending"  },
 	{ key = "ENTRUST",    field = "entrust"  },
+	{ key = "VET",        field = "vet"      },
 	{ key = "LAST_TURN",  field = "lastTurn" },
 }
 
@@ -250,6 +253,7 @@ local function EmptyStore()
 		recs     = {},
 		pending  = {},
 		entrust  = {},
+		vet      = {},
 		lastTurn = -1,
 		rev      = 0,
 		dirty    = {},
@@ -291,6 +295,46 @@ local function NormalizeEntrust(entrust)
 	end
 end
 
+-- Veteran jobs (0.7): keeps well-formed jobs only and fills the fields the
+-- property round trip may drop (want = {} comes back nil, Session B).
+-- Returns the cleaned array and the number of jobs dropped.
+local function NormalizeVetJobs(list)
+	local out, dropped = {}, 0
+	for _, job in ipairs(list) do
+		if type(job) == "table" and type(job.p) == "number" and type(job.u) == "number"
+			and type(job.t) == "number" then
+			local want = {}
+			if type(job.want) == "table" then
+				for _, name in ipairs(job.want) do
+					if type(name) == "string" then
+						want[#want + 1] = name
+					end
+				end
+			end
+			job.want = want
+			job.got = tonumber(job.got) or 0
+			job.n = tonumber(job.n) or 0
+			job.xp = tonumber(job.xp) or 0
+			job.dmg = tonumber(job.dmg) or 0
+			out[#out + 1] = job
+		else
+			dropped = dropped + 1
+		end
+	end
+	return out, dropped
+end
+
+-- (t, p, u) order of veteran jobs.
+local function VetLess(a, b)
+	if a.t ~= b.t then
+		return a.t < b.t
+	end
+	if a.p ~= b.p then
+		return a.p < b.p
+	end
+	return a.u < b.u
+end
+
 local function MarkDirty(store, name)
 	if store.dirty == nil then
 		store.dirty = {}
@@ -305,7 +349,8 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_Records.Init()
 -- PLAN 1.7 step 3. Seeds every missing key (EFV_NextID = 1, EFV_RecordIDs =
--- {}, EFV_Records = {}, EFV_PendingExhaust = {}, EFV_Entrust = {}, EFV_Schema
+-- {}, EFV_Records = {}, EFV_PendingExhaust = {}, EFV_Entrust = {}, EFV_VetJobs =
+-- {} (0.7), EFV_Schema
 -- = EFV_Config.SCHEMA_VERSION, EFV_LastTurn = Game.GetCurrentGameTurn() - 1,
 -- EFV_Rev = 0) and sets EFV_Init = 1 last. When EFV_Init is already set, runs
 -- the schema migrations while EFV_Schema < EFV_Config.SCHEMA_VERSION. Caches
@@ -331,6 +376,7 @@ function EFV_Records.Init()
 		{ key = P.RECORDS,    make = function() return {} end, isTable = true },
 		{ key = P.PENDING,    make = function() return {} end, isTable = true },
 		{ key = P.ENTRUST,    make = function() return {} end, isTable = true },
+		{ key = P.VET,        make = function() return {} end, isTable = true },
 		{ key = P.LAST_TURN,  make = function() return CurrentTurn() - 1 end },
 		{ key = P.REV,        make = function() return 0 end },
 	}
@@ -403,7 +449,8 @@ end
 -- Params:  none.
 -- Returns: store table (never nil):
 --   { nextID = n, ids = {id...}, recs = { ["r"..id] = rec }, pending = {
---     {p=,u=,t=}... }, entrust = { ["p"..plotIndex] = snap }, lastTurn = n,
+--     {p=,u=,t=}... }, entrust = { ["p"..plotIndex] = snap }, vet = { job
+--     ... } (0.7; malformed jobs dropped, a missing want -> {}), lastTurn = n,
 --     rev = n, dirty = {} }
 -- PLAN 2.4. APIs: A06.
 -- ---------------------------------------------------------------------------
@@ -414,6 +461,7 @@ function EFV_Records.Load()
 		store.recs     = ReadTableProp(P.RECORDS)
 		store.pending  = ReadTableProp(P.PENDING)
 		store.entrust  = ReadTableProp(P.ENTRUST)
+		store.vet      = ReadTableProp(P.VET)
 		store.nextID   = ReadNumberProp(P.NEXT_ID, 1)
 		store.lastTurn = ReadNumberProp(P.LAST_TURN, -1)
 		store.rev      = ReadNumberProp(P.REV, 0)
@@ -481,13 +529,19 @@ function EFV_Records.Load()
 		end
 		store.pending = pending
 		NormalizeEntrust(store.entrust)
+		local vet, droppedVet = NormalizeVetJobs(store.vet)
+		store.vet = vet
+		if droppedVet > 0 then
+			EFV_Log(1, "Store", "load: dropped %d malformed veteran job(s)", droppedVet)
+			MarkDirty(store, "VET")
+		end
 
 		store.dirty = store.dirty or {}
 		return store
 	end)
 	if ok then
-		EFV_Log(3, "Store", "load rev=%d records=%d nextID=%d lastTurn=%d pending=%d",
-			result.rev, #result.ids, result.nextID, result.lastTurn, #result.pending)
+		EFV_Log(3, "Store", "load rev=%d records=%d nextID=%d lastTurn=%d pending=%d vet=%d",
+			result.rev, #result.ids, result.nextID, result.lastTurn, #result.pending, #result.vet)
 		return result
 	end
 	EFV_Log(1, "Store", "load failed: %s; returning a broken empty store (commit disabled)", tostring(result))
@@ -789,6 +843,85 @@ function EFV_Records.TakePending(store, pid)
 	return taken
 end
 
+-- ---------------------------------------------------------------------------
+-- EFV_Records.FindVetJob(store, pid, uid) -> job, index   (0.7, note 33)
+-- The veteran route B job of unit (pid, uid), or nil.
+-- Params:  store, pid owner player ID, uid unit ID.
+-- Returns: job table and its index in store.vet, or nil.
+-- ---------------------------------------------------------------------------
+function EFV_Records.FindVetJob(store, pid, uid)
+	if type(store) ~= "table" or type(store.vet) ~= "table" then
+		return nil
+	end
+	for i, job in ipairs(store.vet) do
+		if job.p == pid and job.u == uid then
+			return job, i
+		end
+	end
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Records.AddVetJob(store, job) -> job   (0.7, note 33)
+-- Adds a veteran job (EFV_Veteran shape) keeping store.vet sorted by
+-- (t, p, u); an existing job of the same (p, u) is replaced. Marks
+-- EFV_VetJobs dirty.
+-- Params:  store, job table (p, u, t numbers required).
+-- Returns: the stored job, or nil on bad arguments (logged).
+-- ---------------------------------------------------------------------------
+function EFV_Records.AddVetJob(store, job)
+	if type(store) ~= "table" or type(job) ~= "table" or type(job.p) ~= "number"
+		or type(job.u) ~= "number" or type(job.t) ~= "number" then
+		EFV_Log(1, "Store", "AddVetJob: bad args")
+		return nil
+	end
+	if type(store.vet) ~= "table" then
+		store.vet = {}
+	end
+	local out = {}
+	for _, j in ipairs(store.vet) do
+		if not (j.p == job.p and j.u == job.u) then
+			out[#out + 1] = j
+		end
+	end
+	local pos = #out + 1
+	for i, j in ipairs(out) do
+		if VetLess(job, j) then
+			pos = i
+			break
+		end
+	end
+	table.insert(out, pos, job)
+	store.vet = out
+	MarkDirty(store, "VET")
+	return job
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Records.RemoveVetJob(store, pid, uid) -> removed   (0.7, note 33)
+-- Removes the job of (pid, uid) (dense rebuild, order kept); marks
+-- EFV_VetJobs dirty when one was removed.
+-- Returns: true if a job was removed.
+-- ---------------------------------------------------------------------------
+function EFV_Records.RemoveVetJob(store, pid, uid)
+	if type(store) ~= "table" or type(store.vet) ~= "table" then
+		return false
+	end
+	local out, removed = {}, false
+	for _, j in ipairs(store.vet) do
+		if j.p == pid and j.u == uid then
+			removed = true
+		else
+			out[#out + 1] = j
+		end
+	end
+	if removed then
+		store.vet = out
+		MarkDirty(store, "VET")
+	end
+	return removed
+end
+
 -- ===========================================================================
 -- Serializer (spec S3 fallback). Encode is gameplay-side; Decode is pure
 -- string code and safe in the UI.
@@ -994,6 +1127,7 @@ end
 --   ids={...}
 --   r<id> {field=value,...}        one line per record, in ids order
 --   pending {...}
+--   vet {...}                      one line per veteran job (0.7)
 --   entrust p<idx> {...}           one line per snapshot, sorted keys
 --   end
 -- Two dumps of equal stores produce identical text.
@@ -1016,6 +1150,9 @@ function EFV_Records.Dump(store)
 			EFV_Log(2, "Dump", "r%s %s", tostring(id), SafeText(store.recs[RecKey(id)]))
 		end
 		EFV_Log(2, "Dump", "pending %s", SafeText(store.pending or {}))
+		for _, job in ipairs(store.vet or {}) do
+			EFV_Log(2, "Dump", "vet %s", SafeText(job))
+		end
 		for _, k in ipairs(entrustKeys) do
 			EFV_Log(2, "Dump", "entrust %s %s", tostring(k), SafeText(store.entrust[k]))
 		end

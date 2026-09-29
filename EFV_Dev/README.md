@@ -1,8 +1,8 @@
 # VEF Dev Tools (EFV_Dev)
 
-A separate mod with a developer panel for testing Volunteer & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
+A separate mod with a developer panel for testing Volunteers & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 0.6.1-dev.1, made for VEF 0.6.1-dev. Never enable it in a real game.
+Version 0.7.0-dev.1, made for VEF 0.7.0-dev. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -11,7 +11,7 @@ The internal prefix of the project is `EFV_`, so files, Lua names and log tags u
 | File | Context | What it does |
 |---|---|---|
 | `EFV_Dev.modinfo` | | Gameplay script and UI context (InGame), load order 14000, Gathering Storm only |
-| `Scripts/EFV_Dev_Gameplay.lua` | gameplay | handles `GameEvents.EFV_Dev(playerID, params)` by `params.cmd`, plus the final-session checks |
+| `Scripts/EFV_Dev_Gameplay.lua` | gameplay | handles `GameEvents.EFV_Dev(playerID, params)` by `params.cmd`, plus the test-session checks and the Screenshot scenes |
 | `UI/EFV_Dev_Panel.xml/.lua` | UI | the panel; sends flat `EXECUTE_SCRIPT` requests |
 
 The gameplay script changes VEF state only through VEF's own record API (`EFV_Records`: `Load`, `Get`, `FindByUnit`, `New`, `Touch`, `Commit`, `AddPending`, `Delete`, `Dump`) and `EFV_Units` (`Snapshot`, `ApplySnapshot`, `Remove`, `GetForRecord`). Everything goes through the Game properties, as INTERFACES.md sections 3.4 and 5 describe. The script runs in its own Lua state and includes VEF's modules itself. They keep no state of their own, so VEF sees every change on its next handler call.
@@ -19,12 +19,26 @@ The gameplay script changes VEF state only through VEF's own record API (`EFV_Re
 ## Install and open
 
 1. Close the game, then run `powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Dev -Watch`. It copies `EFV\` and `EFV_Dev\` into the Mods folder and follows `Lua.log`.
-2. In Additional Content enable Gathering Storm, Volunteer & Expeditionary Forces and VEF Dev Tools. Leave the old EFV Spike Test mod off: it also answers `EXECUTE_SCRIPT` requests.
+2. In Additional Content enable Gathering Storm, Volunteers & Expeditionary Forces and VEF Dev Tools. Leave the old EFV Spike Test mod off: it also answers `EXECUTE_SCRIPT` requests.
 3. Open the panel with Ctrl+Shift+D or the DEV button on the launch bar. Esc or Close hides it. The context loads hidden (INTERFACES note 19), so `Initialize` shows it and only toggles `Main`.
 
-## Final session buttons
+## Screenshots
 
-These are at the top of the panel. Each one sets up a whole test situation in one click. `EFV/TESTING_FINAL.md` walks through them in order, and `tools/summarize_efv_log.py` reads the results from `Lua.log` afterwards.
+The five buttons at the top of the panel build the scenes for the Steam Workshop pictures (plan and captions: `workshop/SCREENSHOTS.md`). Start a new game with at least 5 civs and 3 city-states, found your capital, End Turn once, then press any Shot button, in any order and as often as you like. Each one runs S0 itself if needed, removes what the previous Shot built, deselects your units and clears VEF's notifications, builds its scene, moves and zooms the camera, then closes the panel and hides the DEV button (Ctrl+Shift+D brings both back).
+
+| Button | cmd | Scene | Opened for you |
+|---|---|---|---|
+| Shot 1 Send picker | `shot1` | "Legio VEF" (Swordsman, full moves) next to your capital; B and F get a second city if they have one only; the next major becomes your friend without a common enemy, so its row is greyed | the Expeditionary destination list |
+| Shot 2 Arrival | `shot2` | your Expeditionary Swordsman (B's colours) and your Volunteer Swordsman (yours) next to B's capital, both just arrived, two "Unit Arrived" notifications | |
+| Shot 3 Tracker | `shot3` | six records: Grace (red, first), Deployed with F, Volunteers, a City-State unit Returning, an Outbound unit, one received from B; one Grace notification and the red banner | the VEF tracker (`LuaEvents.EFV_TrackerOpen`) |
+| Shot 4 Entrust | `shot4` | the S11 scene: a city of C at 1 HP with its walls down and three Tanks next to it | Tank 1 attacks the city; once the capture screen shows, the Entrust list is expanded (`LuaEvents.EFV_EntrustExpand`) |
+| Shot 5 Mutiny | `shot5` | your Expeditionary Swordsman (B's) in mutiny with 40 damage on neutral land near B's border, one Mutiny notification | |
+
+Each Shot writes one `[EFV][CHECK] SHOTn PASS|CHECK` line with what it built. Four things are not proven in game yet, so each has a fallback: the map zoom (`UI.SetMapZoom`; if it fails, zoom with the mouse wheel), the Tank attack from the panel (if it is refused, click the city with the selected Tank), whether the destination list leaves the unit panel visible (if not, take one picture with the list and one after Esc while hovering "Send as Expeditionary"), and the flag tags on units created by script (the panel looks at the scene again after 1 second; if a tag is still missing, press the Shot button again).
+
+## Test session buttons
+
+These sit under "Test sessions", below the Screenshot buttons. Each one sets up a whole test situation in one click. `EFV/TESTING_RETEST_0.7.md` (the short 0.7 re-test) and `EFV/TESTING_FINAL.md` (the full session) walk through them in order, and `tools/summarize_efv_log.py` (with `--retest` for the short one) reads the results from `Lua.log` afterwards.
 
 **Start the session from a brand-new game** (any map, Standard speed, at least 5 civs and 3 city-states; found your capital, End Turn once, press S0). Never from an old save: a Civ VI save locks the mod set it was made with, so the old `EFV_BASE` save (made with the spike harness) turns the EFV Spike Test mod back on and VEF and VEF Dev Tools off. If the old spike panel shows up, or there is no DEV button, that is what happened. After S0 the panel's first line names B, F, C and CS, and the Target is set to B.
 
@@ -32,18 +46,20 @@ These are at the top of the panel. Each one sets up a whole test situation in on
 |---|---|---|---|
 | S0 Setup session | `scn_setup` | from a new game: B, F, C = the three lowest-ID other majors with a city, CS = the lowest-ID city-state with a city. You meet them (and they meet each other), the land within 3 tiles of their cities is revealed to you, you, B, F and CS declare war on C, B becomes your declared friend and grants you open borders (VEF basis FRIEND for Expeditionary / Entrust, FRIEND_OB for Volunteers), F your friend; 2000 gold, 10 Iron, 3 Swordsmen with full moves next to your capital. The check asks VEF's own send rule (`EFV_EvaluateSend`) about B's capital and the city-state. Without a capital, or with fewer than 3 civs and 1 city-state with a city, it changes nothing and says what to do | `SETUP` (right away) |
 | S1 Arrive next turn | `scn_arrive` | every unit you sent, or that is coming home, arrives at the next turn start | `ARRIVE` (placement of every arrival), `HOME`, `RECALL` |
-| S2 Expire CS unit | `scn_expire_cs` | your newest deployed City-State unit ends its service next turn, standing in the city-state's land | `EXPIRE` |
+| S2 Expire CS unit (off its land) | `scn_expire_cs` | your newest deployed City-State unit is moved onto free neutral land within 6 tiles (else onto land owned by neither the city-state nor you) and ends its service next turn. Since 0.7 it must start home at once, wherever it is, with no grace | `EXPIRE` (CHECK if it went into grace) |
 | S3 Grace/mutiny step | `scn_grace` | your newest Expeditionary unit, one phase per press: onto neutral land with its service ending, then 1 grace turn left, then back onto the host's land | `GRACE`, `MUTINY`, `MUTINY_RETURN` |
 | S4 Lapse on/off | `scn_lapse` | ends your friendship with B (your Volunteers lapse, paused on valid land), or restores it (and B's open borders if needed) | `LAPSE`, `LAPSE_PAUSE`, `LAPSE_RESTORE` |
 | S5 Upgrade test | `scn_upgrade` | a Volunteer "VEF-UPGRADE" in your land whose upgrade is your civ's unique unit when there is one; the target's tech and civic, its resource and gold granted (works in a new game). You click Upgrade | `UPGRADE` |
 | S6 Veteran copies | `scn_vet` (+ `scn_vetb`, `scn_vetdone`) | three copies of the selected veteran: VEF-A (XP to the threshold, then SetPromotion), VEF-B (XP, then the game's PROMOTE command, sent by the panel), VEF-C (SetPromotion only, like the current restore) | `VET_A/B/C` (next-level XP), `VET_LEVEL_A/B/C` (UI level) |
 | S7 Killed unit | `scn_kill` | a damaged Warrior "VEF-KILL" of a one-city city-state (not CS), tracked as your City-State unit; you meet and are at war with that city-state; its city revealed, walls down and 1 HP left; 3 Tanks next to it | `KILLED` |
 | S8 Relink guard | `scn_guard` | a tracked City-State Warrior removed without combat, with two identical Warriors of that city-state next to its tile | `GUARD` |
-| S9 Crowded arrival | `scn_place` | rings 1 and 2 around B's capital full of B's Warriors, and your Swordsman arriving there next turn | `CROWDED` |
-| S10 Mutiny combat | `scn_t31` | "VEF-T31", B's Expeditionary unit hosted by you, in mutiny on neutral land next to 2 Barbarian Warriors | `T31_EVENT` (at the fight), `T31` |
+| S9 Crowded arrival | `scn_place` | one of B's Warriors on every free land tile of rings 1 and 2 around B's capital (water, impassable and occupied tiles are skipped), and your Swordsman arriving there next turn. The INFO line says which ring VEF's spawn search expects. PASS when the unit stands on the nearest ring that had a valid free tile (ring 2 is fine if one tile there was left), never on a city centre or closed or war land, alone on its tile | `CROWDED` |
+| S10 Mutiny combat | `scn_t31` | a Spearman (no custom name since 0.7), B's Expeditionary unit hosted by you, in mutiny on neutral land next to 2 Barbarian Warriors; the camera selects it. The Spearman and the Barbarians are removed when you end the turn of the verdict, never at the start of your turn (removing a selected unit then broke `SelectedUnit.lua:195`) | `T31_EVENT` (at the fight), `T31` |
 | S11 Entrust city | `scn_entrust` | a city of C that is not its last one: C's nearest non-capital city, else a small new city founded for C 5-10 tiles from your capital (so taking it does not eliminate C), else C's capital. Revealed, walls down, 1 HP left, 3 Tanks next to it; your partner basis with B renewed if it is off | `ENTRUST` |
+| S12 Veteran return | `scn_vetret` | a Volunteer record of yours coming home from B next turn: "VEF-VET", a Warrior at level 3 with two level-1 promotions, 50/90 XP and 30 damage. VEF recreates it and your UI takes the promotions back with the game's PROMOTE command. The panel then checks the UI level and presses Check now | `VET_RESTORE`, `VET_RESTORE_LEVEL` (UI) |
+| S13 Unit in B's land | `scn_inland` | a Spearman of yours with full moves on a free tile of B within 3 tiles of B's capital, selected. The first check asks VEF's own picker rule right away (B's rows open, every other row `WRONG_TERRITORY`); send it to B the same turn | `FROM_LAND_RULES` (right away), `FROM_LAND` |
 | Go to scenario | (UI) | moves the camera back to the current test and selects your test unit | |
-| Check now | `scn_check` | runs the checks that don't need a new turn (S7, S11) | |
+| Check now | `scn_check` | runs the checks that don't need a new turn (S7, S11, S12, S13) | |
 
 Notes:
 - Check lines look like `[EFV][CHECK] <ID> <PASS|CHECK|INFO> T<turn> <detail>`. The checks run at your `GameEvents.PlayerTurnStartComplete`, after VEF's turn pipeline.
@@ -51,6 +67,7 @@ Notes:
 - Units the AI would otherwise move are held in place: FinishMoves now, plus a pending entry in VEF's own list (`EFV_Records.AddPending`), so VEF repeats FinishMoves at that player's next turn start.
 - After a scenario button the panel moves the camera to the test once gameplay has answered (matched by a request stamp).
 - No gameplay call to upgrade a unit is known, so S5 needs your click. The PROMOTE command exists only in the UI, so route B of S6 runs from the panel.
+- `LAPSE_TEXT` (UI): the first time one of your Volunteers has a paused lapse in grace, the panel checks that the tracker reads "Lapse: Grace N (paused)" in full.
 - The older test scripts built an `EFV_BASE` save by hand. That save is retired (it locks the spike harness mod set); S0 builds everything from a new game.
 
 Why friendship and not an alliance: alliances need Civil Service (nobody has it at turn 1), and Session F T27 showed that `SetHasAllied(false)` is a no-op in game, so S4 could never end one. S0 uses the alliance flag only as the last resort, when friendship plus open borders give no Volunteer basis (the SETUP line then shows basis ALLIANCE, and S4's LAPSE line says CHECK if it cannot end it).
@@ -132,4 +149,4 @@ Forged requests go straight to VEF and skip its UI checks, to test the gameplay 
 
 ## Offline tests
 
-`tests/offline/test_dev_mod.lua` runs this mod in the offline fake engine: every command, every final-session scenario and its check line, and the panel (hidden start, hotkey, flat parameters, forged requests, scenario buttons, camera focus, session line, Target set to B). The final-session tests start from a fake brand-new game (nobody met, nothing revealed, no diplomacy) and run S0 first; S0 is also tested without a capital, without the reveal call (Scout fallback) and with a refused open-borders deal (alliance fallback). Run it with `python tests/offline/run_tests.py -k dev`.
+`tests/offline/test_dev_mod.lua` runs this mod in the offline fake engine: every command, every test-session scenario and its check line (S12 end to end with VEF's promotion context and the panel), every Shot scene from a fresh game and the panel's Shot steps, and the panel (hidden start, hotkey, flat parameters, forged requests, scenario buttons, camera focus, session line, Target set to B). The final-session tests start from a fake brand-new game (nobody met, nothing revealed, no diplomacy) and run S0 first; S0 is also tested without a capital, without the reveal call (Scout fallback) and with a refused open-borders deal (alliance fallback). Run it with `python tests/offline/run_tests.py -k dev`.

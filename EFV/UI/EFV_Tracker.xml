@@ -12,10 +12,17 @@
        red with a red AlertHighlight box (D9).
      * AlertBanner: top-centre D9 banner shown while any record of the local
        player is in GRACE or MUTINY; click cycles camera focus.
-     Everything starts hidden. Owner: WP2.2 (alerts), WP7.2 (full panel).
-     Column widths: Unit 170, Partner 150, Force 170, State 120, Turns 50,
-     Destination 150 (+ 6 left padding) = 816 = row width; the header
-     stack sits at the rows' text offset (16 + 6).
+     Everything starts hidden. Owner: WP2.2 (alerts), WP7.2 (full panel),
+     0.7 WP4 (look: FIXPLAN_0.7 items 5, 6).
+     Column widths (0.7): Unit 170, Partner 140, Force 200, State 200,
+     Turns 50, Destination 150 (+ 6 left padding) = 916 = row width, each
+     row label TruncateWidth = column width - 6 (State fits "Lapse: Grace 5
+     (paused)", Force fits "City-State Expeditionary"). Panel 960 wide
+     (fits the 1280 px minimum resolution). The header stack sits at the
+     rows' text offset (16 + 6). Header labels and TrackerSummary use
+     BodyTextDark14 (dark on the light WindowFrameTitle body); the summary
+     sits 30 px above the bottom edge, clear of the frame border
+     (TrackerScroll ends at 76 + 360 = 436).
      ====================================================================== -->
 <Context Name="EFV_Tracker">
 	<!-- D9 alert banner -->
@@ -26,35 +33,35 @@
 	</Container>
 
 	<!-- Tracker panel -->
-	<Container ID="TrackerPanel" Anchor="C,C" Size="860,500" Hidden="1" ConsumeMouse="1">
-		<Grid ID="TrackerWindow" Anchor="C,C" Size="860,500" Style="WindowFrameTitle">
+	<Container ID="TrackerPanel" Anchor="C,C" Size="960,500" Hidden="1" ConsumeMouse="1">
+		<Grid ID="TrackerWindow" Anchor="C,C" Size="960,500" Style="WindowFrameTitle">
 			<Label ID="TrackerTitle" Style="WindowHeader" Anchor="C,T" Offset="0,12" String="{LOC_EFV_TRACKER_TITLE:upper}"/>
 			<Button ID="TrackerCloseButton" Anchor="R,T" Style="CloseButtonLarge" Offset="-8,-5"/>
 			<Stack ID="TrackerHeader" Anchor="L,T" Offset="22,50" StackGrowth="Right">
-				<Container Size="170,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_UNIT"/></Container>
-				<Container Size="150,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_PARTNER"/></Container>
-				<Container Size="170,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_FORCE"/></Container>
-				<Container Size="120,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_STATE"/></Container>
-				<Container Size="50,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_TURNS"/></Container>
-				<Container Size="150,24"><Label Anchor="L,C" Style="FontNormal14" Color="200,200,200,255" String="LOC_EFV_TRACKER_COL_DEST"/></Container>
+				<Container Size="170,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_UNIT"/></Container>
+				<Container Size="140,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_PARTNER"/></Container>
+				<Container Size="200,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_FORCE"/></Container>
+				<Container Size="200,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/></Container>
+				<Container Size="50,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/></Container>
+				<Container Size="150,24"><Label Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_DEST"/></Container>
 			</Stack>
-			<ScrollPanel ID="TrackerScroll" Anchor="L,T" Offset="16,76" Size="830,380" Vertical="1" AutoScrollBar="1">
+			<ScrollPanel ID="TrackerScroll" Anchor="L,T" Offset="16,76" Size="930,360" Vertical="1" AutoScrollBar="1">
 				<Stack ID="TrackerStack" StackGrowth="Bottom" Padding="2"/>
 				<ScrollBar Anchor="R,T" Style="Slider_Light" Size="11,parent"/>
 			</ScrollPanel>
 			<Label ID="TrackerEmptyLabel" Anchor="C,C" Style="BodyTextDark16" String="LOC_EFV_TRACKER_EMPTY" Hidden="1"/>
-			<Label ID="TrackerSummary" Anchor="L,B" Offset="22,14" Style="FontNormal14" Color="200,200,200,255"/>
+			<Label ID="TrackerSummary" Anchor="L,B" Offset="22,30" Style="BodyTextDark14"/>
 		</Grid>
 	</Container>
 
 	<Instance Name="EFV_TrackerRowInstance">
-		<GridButton ID="RowButton" Size="816,30" Style="ButtonControl">
+		<GridButton ID="RowButton" Size="916,30" Style="ButtonControl">
 			<Box ID="AlertHighlight" Size="parent,parent" Color="170,30,30,90" Hidden="1"/>
 			<Stack StackGrowth="Right" Anchor="L,C" Offset="6,0">
 				<Container Size="170,24"><Label ID="UnitLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="164"/></Container>
-				<Container Size="150,24"><Label ID="PartnerLabel" Anchor="L,C" Style="FontNormal14" TruncateWidth="144"/></Container>
-				<Container Size="170,24"><Label ID="ForceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="164"/></Container>
-				<Container Size="120,24"><Label ID="StateLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="114"/></Container>
+				<Container Size="140,24"><Label ID="PartnerLabel" Anchor="L,C" Style="FontNormal14" TruncateWidth="134"/></Container>
+				<Container Size="200,24"><Label ID="ForceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="194"/></Container>
+				<Container Size="200,24"><Label ID="StateLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="194"/></Container>
 				<Container Size="50,24"><Label ID="TurnsLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="44"/></Container>
 				<Container Size="150,24"><Label ID="PlaceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="144"/></Container>
 			</Stack>

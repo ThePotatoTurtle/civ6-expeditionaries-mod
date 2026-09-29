@@ -29,8 +29,10 @@ Checks
             package = info).
             Displayed name (designer ruling 0.5.2): an en_US text VALUE (UpdateText rows, modinfo
             <LocalizedText>) or a literal modinfo Name / Teaser / Description / Authors that contains the
-            word "EFV" is an error: players see "VEF" (Volunteer & Expeditionary Forces); the internal
+            word "EFV" is an error: players see "VEF" (Volunteers & Expeditionary Forces); the internal
             EFV_ prefix of keys, types, files and log lines is unaffected ("EFV_" never matches).
+            No dashes (designer, 0.7): an en dash (U+2013) or em dash (U+2014) in any UpdateText text
+            or modinfo <LocalizedText> text is an error ("text-dash"); use a plain hyphen or reword.
   Icons     every EFV_NOTIF_* type has an ICON_<type> alias in an UpdateIcons file and a Notifications.Icon.
   Lua refs  "EFV_NOTIF_*" literals exist as notification types; Controls.X in a UI .lua exists as an ID in
             its paired .xml; InstanceManager:new("Name") has an <Instance Name="Name">.
@@ -59,6 +61,9 @@ LOC_PREFIX = re.compile(r"^LOC_[A-Z0-9_]*_$")
 # Designer ruling 0.5.2: displayed text says "VEF", never the internal "EFV"
 # (word match: "EFV_..." keys and identifiers do not match).
 DISPLAY_EFV_RE = re.compile(r"(?<![A-Za-z0-9_])EFV(?![A-Za-z0-9_])")
+# Designer (0.7): no en or em dashes in player-visible text.
+DASH_RE = re.compile("[–—]")
+DASH_MSG = "%s: the text contains an en or em dash; use a plain hyphen or reword (designer, 0.7)"
 
 ICON_STUB_SCHEMA = """
 CREATE TABLE IconTextureAtlases(Name TEXT NOT NULL, IconSize INTEGER NOT NULL DEFAULT 0, IconsPerRow INTEGER,
@@ -546,6 +551,8 @@ class Validator:
                     self._check_plurals(f, tag, txt or "")
                     if lang == "en_US" and DISPLAY_EFV_RE.search(txt or ""):
                         self.rep.error(f, 0, "text-display-name", "%s: the text shows \"EFV\"; displayed text must say \"VEF\" (designer ruling 0.5.2)" % tag)
+                    if DASH_RE.search(txt or ""):
+                        self.rep.error(f, 0, "text-dash", DASH_MSG % tag)
                     key = (lang, tag)
                     if key in self.text_defs and kind == "Row":
                         self.rep.error(f, 0, "text-duplicate", "duplicate Tag %s (%s); first defined in %s" % (
@@ -615,6 +622,8 @@ class Validator:
                         lang = L._local(c.tag)
                         if lang == "en_US" and DISPLAY_EFV_RE.search(c.text or ""):
                             self.rep.error(mi, 0, "text-display-name", "%s: the text shows \"EFV\"; displayed text must say \"VEF\" (designer ruling 0.5.2)" % tag)
+                        if DASH_RE.search(c.text or ""):
+                            self.rep.error(mi, 0, "text-dash", DASH_MSG % tag)
                         key = (lang, tag)
                         if key in self.text_defs:
                             self.rep.error(mi, 0, "text-duplicate", "duplicate Tag %s (%s); also defined in %s" % (

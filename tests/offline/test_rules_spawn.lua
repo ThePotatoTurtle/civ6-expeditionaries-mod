@@ -312,7 +312,11 @@ test("EFV_UnitSendReasons: each failing condition is reported", function()
 	H.loadEFV()
 	local store = EFV_Records.Load()
 	H.contains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", 11, 10, { damage = 10 }), 0, store), "DAMAGED")
-	H.contains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", 21, 10), 0, store), "NOT_OWN_TERRITORY", "in ally land")
+	-- 0.7 "Send from the recipient's land": ally land is no unit-level reason
+	-- (rows of other recipients get WRONG_TERRITORY); unowned land still is.
+	H.notContains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", 21, 10), 0, store), "NOT_OWN_TERRITORY", "in ally land")
+	local np = H.neutralPlot(11, 10)
+	H.contains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", np:GetX(), np:GetY()), 0, store), "NOT_OWN_TERRITORY", "on neutral land")
 	H.contains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", 11, 10, { moves = 0 }), 0, store), "NOT_FULL_MOVES")
 	H.contains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", 11, 10, { formation = 1 }), 0, store), "FORMATION")
 	H.contains(EFV_UnitSendReasons(H.unit(0, "UNIT_SWORDSMAN", 11, 10, { embarked = true }), 0, store), "EMBARKED")

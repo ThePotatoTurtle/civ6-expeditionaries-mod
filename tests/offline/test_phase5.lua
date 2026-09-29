@@ -662,7 +662,7 @@ test("UI: recipient selecting a lent EXP unit sees the status button with the EX
 	H.len(list, 1, "status only: no send buttons for a tracked unit")
 	local b = list[1].UnitActionButton
 	H.ok(not b.disabled)
-	H.eq(list[1].UnitActionIcon.icon, "ICON_UNITCOMMAND_FORM_CORPS")
+	H.eq(list[1].UnitActionIcon.icon, "ICON_UNITOPERATION_SPY_LISTENING_POST")
 	H.ok(Has(b.tooltip, "LOC_EFV_ACTION_STATUS"))
 	H.ok(Has(b.tooltip, "LOC_EFV_WARN_MERGE_HEADER"))
 	H.ok(Has(b.tooltip, "LOC_EFV_WARN_MERGE_EXPEDITIONARY"), b.tooltip)
@@ -698,7 +698,7 @@ test("UI: sender's Volunteer shows the VOL warning; a reused slot or a foreign v
 	local nu = H.unitInSlot(u, 0, "UNIT_ARCHER", x, y)
 	list = Buttons(actions, nu)
 	for _, inst in ipairs(list) do
-		H.ne(inst.UnitActionIcon.icon, "ICON_UNITCOMMAND_FORM_CORPS", "no status button on a reused slot")
+		H.ne(inst.UnitActionIcon.icon, "ICON_UNITOPERATION_SPY_LISTENING_POST", "no status button on a reused slot")
 	end
 	H.clean()
 end)

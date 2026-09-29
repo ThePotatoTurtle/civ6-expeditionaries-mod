@@ -32,6 +32,13 @@ local function RowIM()
 		if im.instName == "EFV_DestRowInstance" then return im end
 	end
 end
+-- Picker row whose one-line text (RowLabel, 0.7) names the city.
+local function RowFor(city)
+	local name = EFV_CityName(city)
+	for _, r in ipairs(RowIM().list) do
+		if string.find(r.RowLabel.text, " - " .. name .. " - ", 1, true) then return r end
+	end
+end
 
 -- Select a unit and run one UI frame (UnitSelectionChanged -> RequestRefresh -> handler).
 local function Select(ctx, u)
@@ -59,7 +66,7 @@ test("UI: eligible unit gets the EXP, VOL and CS send buttons; they attach to th
 	H.eq(im.list[2].UnitActionIcon.icon, "ICON_UNITOPERATION_DEPLOY", "VOL button second")
 	H.ok(string.find(im.list[2].UnitActionButton.tooltip, Locale.Lookup("LOC_EFV_ACTION_SEND_VOLUNTEER"), 1, true))
 	H.ok(not im.list[2].UnitActionButton.disabled, "ally B is an eligible Volunteer partner")
-	H.eq(im.list[3].UnitActionIcon.icon, "ICON_UNITOPERATION_MOVE_TO", "CS button third")
+	H.eq(im.list[3].UnitActionIcon.icon, "ICON_UNITOPERATION_TELEPORT_TO_CITY", "CS button third")
 	H.ok(string.find(im.list[3].UnitActionButton.tooltip, Locale.Lookup("LOC_EFV_ACTION_SEND_CS"), 1, true))
 	local b = im.list[1]
 	H.eq(b.UnitActionIcon.icon, "ICON_UNITCOMMAND_GIFT")
@@ -100,11 +107,9 @@ test("UI: picker lists partner cities with fee/transit; disabled rows explain (n
 	H.ok(not ctx.picker.Controls.PickerRoot:IsHidden(), "picker opened via LuaEvents.EFV_OpenDestinationPicker")
 	local rows = RowIM().list
 	H.len(rows, 3, "B's two cities + F's city")
-	local byCity = {}
-	for _, r in ipairs(rows) do byCity[r.CityLabel.text] = r end
-	local rb = byCity[EFV_CityName(S.c1)]
+	local rb = RowFor(S.c1)
 	H.notnil(rb, "B's capital row")
-	H.eq(rb.FeeLabel.text, "36[ICON_Gold]"); H.eq(rb.TransitLabel.text, "2"); H.eq(rb.DistanceLabel.text, "12")
+	H.eq(rb.RowLabel.text, EFV_UI_PlayerName(1) .. " - " .. EFV_CityName(S.c1) .. " - 12 tiles - 2 turns - 36 [ICON_Gold] - 20 turns")
 	H.ok(not rb.RowButton.disabled)
 	-- Not enough gold: rows disabled, tooltip shows the fee.
 	H.setGold(0, 20)
@@ -113,8 +118,9 @@ test("UI: picker lists partner cities with fee/transit; disabled rows explain (n
 	LuaEvents.EFV_OpenDestinationPicker(0, u:GetID(), "EXPEDITIONARY")
 	for _, r in ipairs(RowIM().list) do
 		-- 0.5.2 fee ruling: a band-1 row is free and stays enabled with 20 gold.
-		H.eq(r.RowButton.disabled, r.FeeLabel.text ~= Locale.Lookup("LOC_EFV_FEE_FREE"), r.CityLabel.text)
-		if r.CityLabel.text == EFV_CityName(S.c1) then
+		local free = string.find(r.RowLabel.text, " - " .. Locale.Lookup("LOC_EFV_FEE_FREE") .. " - ", 1, true) ~= nil
+		H.eq(r.RowButton.disabled, not free, r.RowLabel.text)
+		if r == RowFor(S.c1) then
 			H.ok(r.RowButton.disabled)
 			H.ok(string.find(r.RowButton.tooltip, "36", 1, true), "GOLD reason shows the fee: " .. r.RowButton.tooltip)
 		end
@@ -123,12 +129,9 @@ test("UI: picker lists partner cities with fee/transit; disabled rows explain (n
 	H.setGold(0, 1000)
 	H.peace(1, 3)
 	LuaEvents.EFV_OpenDestinationPicker(0, u:GetID(), "EXPEDITIONARY")
-	for _, r in ipairs(RowIM().list) do
-		if r.CityLabel.text == EFV_CityName(S.c1) then
-			H.ok(r.RowButton.disabled)
-			H.ok(string.find(r.RowButton.tooltip, EFV_UI_PlayerName(1), 1, true), "names the recipient: " .. r.RowButton.tooltip)
-		end
-	end
+	local r1 = RowFor(S.c1)
+	H.ok(r1.RowButton.disabled)
+	H.ok(string.find(r1.RowButton.tooltip, EFV_UI_PlayerName(1), 1, true), "names the recipient: " .. r1.RowButton.tooltip)
 	H.clean()
 end)
 
@@ -137,10 +140,7 @@ test("UI -> gameplay: confirm sends a flat EFV_Send (expectedFee = shown fee) th
 	local u = H.unit(0, "UNIT_SWORDSMAN", 11, 10)
 	Select(ctx, u)
 	ActionIM().list[1].UnitActionButton:Click()
-	local row
-	for _, r in ipairs(RowIM().list) do
-		if r.CityLabel.text == EFV_CityName(S.c1) then row = r end
-	end
+	local row = RowFor(S.c1)
 	row.RowButton:Click()
 	local popup = FAKE_UI.popups[#FAKE_UI.popups]
 	H.notnil(popup, "confirm dialog")
@@ -186,7 +186,7 @@ test("UI: tracked unit shows no send button; UIShared queries and texts on real 
 	FAKE.localPlayer = 1
 	Select(ctx, Players[1]:GetUnits():FindID(rec.onMapUnitID))
 	H.len(ActionIM().list, 1)
-	H.eq(ActionIM().list[1].UnitActionIcon.icon, "ICON_UNITCOMMAND_FORM_CORPS", "status button, not a send button")
+	H.eq(ActionIM().list[1].UnitActionIcon.icon, "ICON_UNITOPERATION_SPY_LISTENING_POST", "status button, not a send button")
 	-- Lapsed Volunteer / mutiny texts (records built by hand).
 	H.ok(string.find(EFV_UI_StateText({ state = "GRACE", graceTurnsLeft = 3, forceType = "VOLUNTEER",
 		lapsed = 1, lapseReason = "PARTNER" }, 5), Locale.Lookup("LOC_EFV_LAPSE_PARTNER"), 1, true))

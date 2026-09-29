@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""summarize_efv_log.py - one PASS/CHECK line per step of the final in-game session.
+"""summarize_efv_log.py - one PASS/CHECK line per step of an in-game test session.
 
 Usage:
-    python tools/summarize_efv_log.py [--log PATH] [--db PATH] [-v]
+    python tools/summarize_efv_log.py [--retest] [--log PATH] [--db PATH] [-v]
 
 Reads Lua.log of the last game run (default: %LOCALAPPDATA%\\Firaxis Games\\Sid Meier's
 Civilization VI\\Logs\\Lua.log, or EFV_CIV6_LOGS) and prints the result of every step of
-EFV/TESTING_FINAL.md:
+EFV/TESTING_FINAL.md, or with --retest of the 6-step 0.7 re-test EFV/TESTING_RETEST_0.7.md:
 
     Step  3  PASS   Send Expeditionary: fee 36 (band 2, expected 36)
     Step  7  CHECK  Grace (S3): record 2 state=DEPLOYED grace=nil (expected GRACE with 5 turns)
     Step 12  -      Recall and friendship restored: not run
 
 Sources: the "[EFV][CHECK] <ID> <PASS|CHECK|INFO> T<turn> <detail>" lines written by the
-EFV_Dev scenario buttons (EFV_Dev 0.6.1-dev.1) and a few of EFV's own log lines (version,
+EFV_Dev scenario buttons (EFV_Dev 0.7.0-dev.1) and a few of EFV's own log lines (version,
 [Send] ok, [Entrust] ok, loads). Lua.log is buffered while the game runs: quit to the
 desktop (or the main menu) before running this. -v also prints every CHECK line.
 Exit code 0 when every step that ran passed, 1 otherwise.
@@ -30,8 +30,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import efvlib as L  # noqa: E402
 
-EFV_VERSION = "0.6.1-dev"
-DEV_VERSION = "0.6.1-dev.1"
+EFV_VERSION = "0.7.0-dev"
+DEV_VERSION = "0.7.0-dev.1"
 
 CHECK_RE = re.compile(r"\[EFV\]\[CHECK\] (\S+) (PASS|CHECK|INFO) T(-?\d+) (.*)$")
 EFV_RE = re.compile(r"\[EFV\]\[T(-?\d+)\]\[([A-Za-z]+)\] (.*)$")
@@ -258,6 +258,57 @@ def arrival_step(log, ctx):
     return "PASS", "%d arrival(s) placed correctly (%s)" % (len(rows), ", ".join(forces))
 
 
+def combine(*evs):
+    """Step verdict from several evaluators: PASS only when every part ran and passed."""
+    def ev(log, ctx):
+        parts, ran, bad = [], 0, False
+        for part in evs:
+            v, d = part(log, ctx)
+            if v is None:
+                bad = True
+                parts.append(d if d and d != "not run" else "part not run")
+                continue
+            ran += 1
+            bad = bad or v != "PASS"
+            parts.append(d)
+        if ran == 0:
+            return None, "not run"
+        return ("CHECK" if bad else "PASS"), "; ".join(parts)
+    return ev
+
+
+def arrivals_step(minimum):
+    """At least `minimum` ARRIVE checks, every one PASS (re-test step 3)."""
+    def ev(log, ctx):
+        v, d = arrival_step(log, ctx)
+        if v is None:
+            return v, d
+        n = len(log.checks_of("ARRIVE"))
+        if n < minimum:
+            return "CHECK", "%s; expected at least %d arrivals" % (d, minimum)
+        return v, d
+    return ev
+
+
+def no_errors_step(log, ctx):
+    errs = error_lines(log)
+    if errs:
+        return "CHECK", "%d error line(s), first: %s" % (len(errs), short(errs[0], 120))
+    return "PASS", "no errors"
+
+
+# The 0.7 re-test (EFV/TESTING_RETEST_0.7.md, FIXPLAN_0.7 section 4).
+RETEST_STEPS = [
+    (1, "Install, new game and setup (S0)", combine(version_step, ids_step("SETUP"))),
+    (2, "Sends, and a send from B's land (S13)", combine(send_step("EXPEDITIONARY", "VOLUNTEER", "CS_EXPEDITIONARY"),
+                                                         ids_step("FROM_LAND_RULES", "FROM_LAND"))),
+    (3, "Arrivals (S1)", arrivals_step(4)),
+    (4, "City-State recall from neutral land, lapse text (S2, S4)", ids_step("EXPIRE", "LAPSE", "LAPSE_PAUSE", "LAPSE_TEXT")),
+    (5, "Veteran level restored (S12)", ids_step("VET_RESTORE", "VET_RESTORE_LEVEL")),
+    (6, "Mutiny combat, no errors (S10)", combine(ids_step("T31_EVENT", "T31"), no_errors_step)),
+]
+
+
 def error_lines(log):
     out = []
     for i, ln in enumerate(log.lines):
@@ -273,6 +324,7 @@ def main(argv=None):
     ap.add_argument("--log", default=os.path.join(L.LOGS_DIR, "Lua.log"))
     ap.add_argument("--db", default=L.GAMEPLAY_DB)
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--retest", action="store_true", help="the 6-step 0.7 re-test (EFV/TESTING_RETEST_0.7.md)")
     a = ap.parse_args(argv)
     if not os.path.exists(a.log):
         print("Lua.log not found: %s" % a.log)
@@ -284,9 +336,10 @@ def main(argv=None):
         m = SPEED_RE.search(ln)
         if m:
             ctx["pm"], ctx["speed"] = int(m.group(1)), int(m.group(2))
-    print("VEF final session summary (%s, %d VEF lines, %d check lines)" % (a.log, len(log.efv), len(log.checks)))
+    title = "VEF 0.7 re-test summary" if a.retest else "VEF final session summary"
+    print("%s (%s, %d VEF lines, %d check lines)" % (title, a.log, len(log.efv), len(log.checks)))
     failed = 0
-    for num, title, ev in STEPS:
+    for num, title, ev in (RETEST_STEPS if a.retest else STEPS):
         if ev is None:
             ev = arrival_step
         try:

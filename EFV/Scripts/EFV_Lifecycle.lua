@@ -67,9 +67,13 @@ EFV_Lifecycle = {}
 --     TurnBoundaryPass / OnTurnBoundary (S9 snapshots, S8 mutiny floor,
 --     merge check, DV16 war check) at every per-player start hook and at
 --     GameEvents.OnGameTurnEnded (Session E).
---   Phase 4 (WP4.2): CS branches need no own timer code (duration 10 is
---     frozen in rec.durationTurns; valid return territory = the city-state's
---     or the sender's tiles via EFV_ValidReturnTerritory). Added for CS: the
+--   Phase 4 (WP4.2): CS timer: duration 10 is frozen in rec.durationTurns.
+--     Since 0.7 (DECISIONS "City-State units never mutiny", FIXPLAN item 3)
+--     a CS record never enters GRACE / MUTINY: at expiry it is recalled from
+--     wherever the unit stands (TimerDeployed; also while levied), a legacy
+--     CS GRACE / MUTINY record from a 0.6.x save is recalled at the next
+--     turn start (TimerGrace / TimerMutiny, mutiny floored first), and the
+--     sender's EXPIRY_SOON uses the _CS text. Added for CS: the
 --     suzerain-levy relink in RefreshTrackedUnits (RelinkLevied), and WP5.1
 --     landed early because city-states join their suzerain's wars and are
 --     often conquered: ReconcilePlayers (sender / recipient eliminated),
@@ -185,19 +189,21 @@ end
 local SENDER_KEY_SUFFIX = "_SENDER"
 
 -- ---------------------------------------------------------------------------
--- QueueAlert(rec, typeName, recipientArgs, senderArgs)
+-- QueueAlert(rec, typeName, recipientArgs, senderArgs, senderSuffix)
 -- D9 alert notifications (EXPIRY_SOON, GRACE, MUTINY, MUTINY_DEATH) for a
 -- record, located at rec.lastX / lastY, extra = { recordID, kind = type }.
 -- EXP / CS: recipient (owner of the unit) with LOC_<type>, then the sender
 -- with LOC_<type>_SENDER (senderArgs) or LOC_<type> (senderArgs nil). VOL
 -- (lapsed, owned by the sender): sender only, with LOC_<type>_VOLUNTEER
 -- (senderArgs; same argument order as _SENDER; the text says "recall it",
--- Volunteers never return by themselves). Non-human players are skipped by
--- EFV_Notify.Queue.
+-- Volunteers never return by themselves). senderSuffix (optional, 0.7)
+-- replaces the sender suffix, e.g. "_CS" for the City-State EXPIRY_SOON
+-- ("it then comes home by itself, wherever it is"). Non-human players are
+-- skipped by EFV_Notify.Queue.
 -- ---------------------------------------------------------------------------
 local VOLUNTEER_KEY_SUFFIX = "_VOLUNTEER"
 
-local function QueueAlert(rec, typeName, recipientArgs, senderArgs)
+local function QueueAlert(rec, typeName, recipientArgs, senderArgs, senderSuffix)
 	local key = "LOC_" .. typeName
 	local kind = string.gsub(typeName, "^EFV_NOTIF_", "")
 	local isVol = (rec.forceType == EFV_Config.FT_VOL)
@@ -205,7 +211,7 @@ local function QueueAlert(rec, typeName, recipientArgs, senderArgs)
 		EFV_Notify.Queue(rec.recipientID, typeName, key, recipientArgs, rec.lastX, rec.lastY, Extra(rec, kind))
 	end
 	if senderArgs ~= nil then
-		local suffix = isVol and VOLUNTEER_KEY_SUFFIX or SENDER_KEY_SUFFIX
+		local suffix = senderSuffix or (isVol and VOLUNTEER_KEY_SUFFIX or SENDER_KEY_SUFFIX)
 		EFV_Notify.Queue(rec.senderID, typeName, key .. suffix, senderArgs, rec.lastX, rec.lastY, Extra(rec, kind))
 	else
 		EFV_Notify.Queue(rec.senderID, typeName, key, recipientArgs, rec.lastX, rec.lastY, Extra(rec, kind))
@@ -226,11 +232,16 @@ local function NotifyMutiny(rec, turnsLeft)
 		{ unit, turnsLeft, PlayerName(rec.recipientID) })
 end
 
+-- City-State sender text (0.7, DECISIONS "City-State units never mutiny"):
+-- LOC_EFV_NOTIF_EXPIRY_SOON_CS_*, same argument order as _SENDER.
+local CS_KEY_SUFFIX = "_CS"
+
 local function NotifyExpirySoon(rec, left)
 	local unit = UnitName(rec)
 	QueueAlert(rec, EFV_Config.NOTIF.EXPIRY_SOON,
 		{ unit, left, PlayerName(rec.senderID) },
-		{ unit, left, PlayerName(rec.recipientID) })
+		{ unit, left, PlayerName(rec.recipientID) },
+		(rec.forceType == EFV_Config.FT_CS) and CS_KEY_SUFFIX or nil)
 end
 
 -- Current position of the record's unit (updates rec.lastX / lastY) and
@@ -624,7 +635,8 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_Lifecycle.RevertToSender(store, rec, pUnit, turn) -> reverted
--- Snapshot, remove, create for the sender on the same tile if it is now
+-- EFV_Veteran.Settle (0.7, open route B job finished first), snapshot,
+-- remove, create for the sender on the same tile if it is now
 -- empty (EFV_SpawnValid with opts.ignoreWarOwner) else EFV_Spawn.Pick(lastX,
 -- lastY, domain, senderID, "rev" .. id); none -> StartReturn (DV15). Delete
 -- the record on success; queue EFV_NOTIF_REVERTED to both.
@@ -640,6 +652,12 @@ function EFV_Lifecycle.RevertToSender(store, rec, pUnit, turn)
 	end
 	local x, y = rec.lastX, rec.lastY
 	if pUnit ~= nil then
+		-- 0.7 (route B): finish any open veteran restore job of this unit
+		-- before the snapshot, so it is never reverted half-restored.
+		local okV, errV = pcall(EFV_Veteran.Settle, store, pUnit)
+		if not okV then
+			EFV_Log(1, "War", "revert id=%d: veteran settle failed: %s", rec.id, tostring(errV))
+		end
 		local snap = EFV_Units.Snapshot(pUnit)
 		if snap ~= nil then
 			EFV_Units.ApplySnapshot(rec, snap, turn)
@@ -1120,18 +1138,23 @@ end
 -- EFV_Lifecycle.ProcessTimers(store, turn)
 -- Pipeline step 3 (spec 9.1, 9.3, 14.3; D9; DV7). Implemented in WP2.1.
 -- EXP/CS in DEPLOYED: left = durationTurns - (turn - deployedTurn); left in
--- EXPIRY_WARN_AT -> EFV_NOTIF_EXPIRY_SOON (recipient and sender; never for
--- VOL, designer answer Q4); left <= 0 (expiry turn E) -> valid return
--- territory ? StartReturn(.., "EXPIRED") : EnterGrace (GRACE, graceTurnsLeft
--- = GRACE_TURNS, EFV_NOTIF_GRACE N = 5).
+-- EXPIRY_WARN_AT -> EFV_NOTIF_EXPIRY_SOON (recipient and sender, CS sender
+-- with the _CS text; never for VOL, designer answer Q4); left <= 0 (expiry
+-- turn E) -> CS: StartReturn(.., "EXPIRED") wherever the unit is (0.7, log
+-- "cs=recall-anywhere"); EXP: valid return territory ? StartReturn(..,
+-- "EXPIRED") : EnterGrace (GRACE, graceTurnsLeft = GRACE_TURNS,
+-- EFV_NOTIF_GRACE N = 5).
+-- Legacy CS in GRACE / MUTINY (0.6.x save): StartReturn(.., "EXPIRED") at
+-- once, MUTINY floored first; no GRACE / MUTINY notification ("[Timer]
+-- legacy CS").
 -- Lapsed VOL in GRACE / MUTINY: FIRST, if EFV_VolunteerLapseReason(sender,
 -- recipient) == nil -> CancelVolunteerLapse and skip the rest (designer
 -- answer Q2).
--- GRACE (EXP, CS): valid territory -> StartReturn(.., "GRACE_RETURN");
+-- GRACE (EXP): valid territory -> StartReturn(.., "GRACE_RETURN");
 -- else graceTurnsLeft - 1; > 0 -> EFV_NOTIF_GRACE (N, re-sent every turn,
 -- D9); == 0 -> state MUTINY, lastDamage = GetDamage(), and the mutiny step
 -- runs at once.
--- MUTINY (EXP, CS): heal floor first (S8), then valid territory ->
+-- MUTINY (EXP): heal floor first (S8), then valid territory ->
 -- StartReturn(.., "MUTINY_RETURN") (the returned unit keeps its floored
 -- damage); else the mutiny step: d + MUTINY_DAMAGE_PER_TURN >=
 -- GetMaxDamage() -> remove, delete, EFV_NOTIF_MUTINY_DEATH; else
@@ -1168,6 +1191,16 @@ end
 -- Returns: nil.
 -- ---------------------------------------------------------------------------
 function EFV_Lifecycle.EnterGrace(store, rec, turn, cause, silent)
+	if rec.forceType == EFV_Config.FT_CS then
+		-- 0.7: City-State records never enter grace (defensive; no caller
+		-- should get here). Recall instead, from wherever the unit is.
+		EFV_Log(1, "Grace", "id=%d City-State record must not enter grace (cause=%s) -> recall", rec.id, tostring(cause))
+		local pUnit = EFV_Units.GetForRecord(rec)
+		if pUnit ~= nil then
+			EFV_Transit.StartReturn(store, rec, pUnit, "EXPIRED", turn)
+		end
+		return nil
+	end
 	rec.state = EFV_Config.ST_GRACE
 	rec.graceTurnsLeft = EFV_Config.GRACE_TURNS
 	rec.lastDamage = nil
@@ -1208,6 +1241,15 @@ local function TimerDeployed(store, rec, turn)
 		return
 	end
 	local valid, x, y, owner = UnitPosition(store, rec, pUnit)
+	if rec.forceType == EFV_Config.FT_CS then
+		-- 0.7 (DECISIONS "City-State units never mutiny"): no grace, no mutiny;
+		-- recalled from wherever it stands (also from the suzerain while
+		-- levied: StartReturn removes the suzerain's copy).
+		EFV_Log(2, "Timer", "expiry id=%d left=%d at=%d,%d owner=%s valid=%s cs=recall-anywhere",
+			rec.id, left, x, y, tostring(owner), tostring(valid))
+		EFV_Transit.StartReturn(store, rec, pUnit, "EXPIRED", turn)
+		return
+	end
 	EFV_Log(2, "Timer", "expiry id=%d left=%d at=%d,%d owner=%s valid=%s",
 		rec.id, left, x, y, tostring(owner), tostring(valid))
 	if valid then
@@ -1269,6 +1311,13 @@ local function TimerGrace(store, rec, turn)
 		return
 	end
 	local valid, x, y = UnitPosition(store, rec, pUnit)
+	if rec.forceType == EFV_Config.FT_CS then
+		-- 0.7: a City-State record in GRACE can only come from a 0.6.x save.
+		-- Recall it now, wherever it is, without a GRACE notification.
+		EFV_Log(2, "Timer", "legacy CS id=%d state=%s -> recall at=%d,%d", rec.id, tostring(rec.state), x, y)
+		EFV_Transit.StartReturn(store, rec, pUnit, "EXPIRED", turn)
+		return
+	end
 	if rec.forceType == EFV_Config.FT_VOL then
 		-- Designer ruling (note 29): a lapsed Volunteer never returns by
 		-- itself. On valid land the countdown is paused (recall it there);
@@ -1329,6 +1378,14 @@ local function TimerMutiny(store, rec, turn)
 	-- already (Session E), so this finds nothing to restore.
 	FloorMutiny(store, rec, pUnit, "OnGameTurnStarted")
 	local valid, x, y = UnitPosition(store, rec, pUnit)
+	if rec.forceType == EFV_Config.FT_CS then
+		-- 0.7: legacy City-State MUTINY record (0.6.x save): floored above, so
+		-- it comes home with the damage it had, and no further mutiny step.
+		EFV_Log(2, "Timer", "legacy CS id=%d state=%s -> recall at=%d,%d dmg=%s", rec.id, tostring(rec.state), x, y,
+			tostring(pUnit:GetDamage()))
+		EFV_Transit.StartReturn(store, rec, pUnit, "EXPIRED", turn)
+		return
+	end
 	if valid then
 		EFV_Log(2, "Mutiny", "return id=%d at=%d,%d dmg=%s", rec.id, x, y, tostring(pUnit:GetDamage()))
 		EFV_Transit.StartReturn(store, rec, pUnit, "MUTINY_RETURN", turn)
@@ -1608,7 +1665,10 @@ end
 -- Then, unless opts.skipWar, HandleSenderRecipientWar for every non-RETURNING
 -- record whose sender and recipient are at war (DV16: the revert happens at
 -- the first boundary after the declaration, i.e. at the end of the
--- declarer's turn). Idempotent: a second call with no game change writes
+-- declarer's turn). Since 0.7 (FIXPLAN item 10) the war check skips records
+-- whose unit belongs to pid when hook == "PlayerTurnStartComplete" (log
+-- "[War] ... deferred at the owner's PTSC"): no unit is removed at its
+-- owner's PTSC; the next boundary handles it. Idempotent: a second call with no game change writes
 -- nothing (snapshot-if-changed; floor restores only a real decrease; the war
 -- handler converts the record so it is not seen again).
 -- Params:  store; turn number; hook string (log: "PlayerTurnStarted",
@@ -1634,7 +1694,15 @@ function EFV_Lifecycle.TurnBoundaryPass(store, turn, hook, pid, opts)
 			local rec = EFV_Records.Get(store, id)
 			if rec ~= nil and rec.state ~= EFV_Config.ST_RETURNING
 				and AtWar(rec.senderID, rec.recipientID) then
-				ForRecord("War", rec, EFV_Lifecycle.HandleSenderRecipientWar, store, rec, turn)
+				if hook == "PlayerTurnStartComplete" and rec.onMapPlayerID ~= nil and rec.onMapPlayerID == pid then
+					-- 0.7 (FIXPLAN item 10): never remove a unit of pid at pid's own
+					-- PTSC (the engine may re-select it there; base SelectedUnit.lua
+					-- then indexes a nil unit). Nothing happens between PTS(pid) and
+					-- PTSC(pid) (note 23), so the next boundary handles it.
+					EFV_Log(3, "War", "id=%d deferred at the owner's PTSC pid=%s", rec.id, tostring(pid))
+				else
+					ForRecord("War", rec, EFV_Lifecycle.HandleSenderRecipientWar, store, rec, turn)
+				end
 			end
 		end
 	end

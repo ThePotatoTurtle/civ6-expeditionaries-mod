@@ -28,6 +28,11 @@
 --      the per-player passes never see the round heal, only mid-turn changes.
 --      OnPlayerTurnEnded stays registered as a harmless extra boundary (the
 --      pass is idempotent);
+--   4c. 0.7 (INTERFACES note 33): veteran route B. EFV_Veteran.OnBoundary
+--      runs after the boundary pass at PlayerTurnStarted,
+--      PlayerTurnStartComplete and OnGameTurnEnded; pipeline step 0e syncs
+--      the jobs with the deadline; GameEvents.EFV_VetStep ->
+--      EFV_Veteran.OnRequestStep;
 --   5. thin hook wrappers: pcall + log + delegate to the module function.
 --      Module functions with engine-shaped signatures (no store parameter)
 --      own their load / commit / flush; wrappers that pass a store
@@ -47,6 +52,7 @@ include("EFV_Rules")
 include("EFV_Records")
 include("EFV_Notify")
 include("EFV_Units")
+include("EFV_Veteran")   -- 0.7 (note 33); already included by EFV_Units
 include("EFV_Spawn")
 include("EFV_Transit")
 include("EFV_Lifecycle")
@@ -89,6 +95,8 @@ end
 --   0d  EFV_Lifecycle.TurnBoundaryPass (safety net after OnGameTurnEnded,
 --       which normally already floored the round heal: S9 snapshot, S8
 --       floor, merge check; war check is 0b's)
+--   0e  EFV_Veteran.ProcessJobs(store, turn, "OnGameTurnStarted", true)
+--       (0.7, note 33: veteran route B sync + the VET_JOB_TURNS deadline)
 --   1   EFV_Transit.ChargeTransitMaintenance
 --   2   EFV_Transit.ProcessArrivals
 --   3   EFV_Lifecycle.ProcessTimers (also cancels reversible Volunteer lapses)
@@ -118,6 +126,7 @@ function EFV_Gameplay.RunTurnStart(turn)
 	RunStep("0b", EFV_Lifecycle.ReconcilePlayers, store, turn)
 	RunStep("0c", EFV_Lifecycle.RefreshTrackedUnits, store, turn)
 	RunStep("0d", EFV_Lifecycle.TurnBoundaryPass, store, turn, "OnGameTurnStarted", -1, { skipWar = true })
+	RunStep("0e", EFV_Veteran.ProcessJobs, store, turn, "OnGameTurnStarted", true)
 	RunStep("1", EFV_Transit.ChargeTransitMaintenance, store, turn)
 	RunStep("2", EFV_Transit.ProcessArrivals, store, turn)
 	RunStep("3", EFV_Lifecycle.ProcessTimers, store, turn)
@@ -169,6 +178,7 @@ end
 -- ---------------------------------------------------------------------------
 function EFV_Gameplay.OnPlayerTurnStarted(pid)
 	SafeCall("Hook", "PlayerTurnStarted", EFV_Lifecycle.OnTurnBoundary, "PlayerTurnStarted", pid)
+	SafeCall("Vet", "OnBoundary", EFV_Veteran.OnBoundary, "PlayerTurnStarted", pid)
 	return nil
 end
 
@@ -194,6 +204,7 @@ function EFV_Gameplay.OnPlayerTurnStartComplete(pid)
 		EFV_Records.Commit(store)
 	end)
 	SafeCall("Hook", "PlayerTurnStartComplete", EFV_Lifecycle.OnTurnBoundary, "PlayerTurnStartComplete", pid)
+	SafeCall("Vet", "OnBoundary", EFV_Veteran.OnBoundary, "PlayerTurnStartComplete", pid)
 	return nil
 end
 
@@ -218,6 +229,7 @@ function EFV_Gameplay.OnGameTurnEnded(eventTurn)
 		EFV_Log(3, "Hook", "OnGameTurnEnded eventTurn=%s currentTurn=%s", tostring(eventTurn), tostring(turn))
 	end
 	SafeCall("Hook", "OnGameTurnEnded", EFV_Lifecycle.OnTurnBoundary, "OnGameTurnEnded", -1)
+	SafeCall("Vet", "OnBoundary", EFV_Veteran.OnBoundary, "OnGameTurnEnded", -1)
 	return nil
 end
 
@@ -299,6 +311,19 @@ function EFV_Gameplay.OnRequestEntrust(playerID, params)
 end
 
 -- ---------------------------------------------------------------------------
+-- EFV_Gameplay.OnRequestVetStep(playerID, params)   (0.7, note 33)
+-- GameEvents.EFV_VetStep (A05) -> EFV_Veteran.OnRequestStep: the owner's UI
+-- reports a promotion taken for a veteran route B job.
+-- Params:  playerID requesting player (authoritative), params (unitID, have).
+-- Returns: nil.
+-- ---------------------------------------------------------------------------
+function EFV_Gameplay.OnRequestVetStep(playerID, params)
+	EFV_Log(2, "Vet", "step request from player=%s", tostring(playerID))
+	SafeCall("Vet", "OnRequestStep", EFV_Veteran.OnRequestStep, playerID, params)
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_Gameplay.OnPlayerDefeat(pid, defeatType, eventID)
 -- Events.PlayerDefeat (A55, async hint, DV13). Registered unconditionally;
 -- acts only when EFV_Config.FLAG_DEFEAT_HINT -> EFV_Lifecycle.
@@ -350,6 +375,9 @@ EFV_Log(2, "Init", "registered %s", "GameEvents.EFV_Recall")
 
 GameEvents.EFV_Entrust.Add(EFV_Gameplay.OnRequestEntrust)
 EFV_Log(2, "Init", "registered %s", "GameEvents.EFV_Entrust")
+
+GameEvents.EFV_VetStep.Add(EFV_Gameplay.OnRequestVetStep)
+EFV_Log(2, "Init", "registered %s", "GameEvents.EFV_VetStep")
 
 Events.PlayerDefeat.Add(EFV_Gameplay.OnPlayerDefeat)
 EFV_Log(2, "Init", "registered %s", "Events.PlayerDefeat")

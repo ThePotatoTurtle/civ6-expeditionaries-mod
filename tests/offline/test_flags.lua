@@ -7,6 +7,10 @@
 -- Subscribe / Unsubscribe (:1987, :2031) and Initialize. Records are real
 -- (sent by the gameplay side); state changes are written to the store the
 -- way gameplay commits do (records + EFV_Rev bump).
+-- 0.7 (FIXPLAN_0.7 item 4): the badge icon is the sender's civ emblem
+-- ("ICON_" .. civ type; ICON_CIVILIZATION_UNKNOWN when the local player has
+-- not met the sender), tinted by force type; SetIcon returning false walks
+-- the fallback chain.
 
 local BASE = {}   -- stand-in state: calls, flags, handler
 
@@ -92,6 +96,9 @@ local function EditRecord(id, fn)
 	end)
 end
 
+local GOLD, GREEN, LIGHT_BLUE = 0xFF3CC8FF, 0xFF4BE810, 0xFFFFC878
+local function Emblem(pid) return "ICON_" .. PlayerConfigurations[pid]:GetCivilizationTypeName() end
+
 local function Tip(flag) return flag.m_Instance.ReligionIconBacking.tooltip or "" end
 local function Has(s, sub) return string.find(s, sub, 1, true) ~= nil end
 local function Poll() Events.UnitSelectionChanged(0, 0, 0, 0, 0, true, false) end
@@ -103,8 +110,9 @@ test("flags: tracked EXP unit gets the badge and the 5-arg tooltip; an untracked
 	local f = FlagFor(rec)
 	local inst = f.m_Instance
 	H.ok(not inst.ReligionIconBacking:IsHidden(), "badge shown")
-	H.eq(inst.ReligionIcon.icon, "ICON_DIPLOACTION_JOINT_WAR")
-	H.eq(inst.ReligionIcon.color, 0xFFFFFFFF)
+	H.eq(inst.ReligionIcon.icon, Emblem(0), "the sender's emblem")
+	H.ok(Emblem(0) ~= Emblem(1))
+	H.eq(inst.ReligionIcon.color, GOLD, "EXP tint")
 	local tt = Tip(f)
 	H.ok(Has(tt, "[" .. Locale.Lookup("LOC_EFV_BADGE_EXP") .. "]"), tt)
 	H.ok(Has(tt, "Brutus1"), "unit name: " .. tt)
@@ -130,12 +138,14 @@ test("flags: EFV_Rev refresh -> Grace N, lapsed VOL, CS, Mutiny N; ended record 
 	H.ok(Has(Tip(f), Locale.Lookup("LOC_EFV_STATE_GRACE", 3)), Tip(f))
 	EditRecord(rec.id, function(r) r.forceType = "VOLUNTEER"; r.lapsed = 1; r.lapseReason = "WAR" end)
 	Poll()
-	H.eq(f.m_Instance.ReligionIcon.icon, "ICON_DIPLOACTION_DECLARE_FRIENDSHIP")
+	H.eq(f.m_Instance.ReligionIcon.icon, Emblem(0))
+	H.eq(f.m_Instance.ReligionIcon.color, GREEN, "VOL tint")
 	H.ok(Has(Tip(f), "[" .. Locale.Lookup("LOC_EFV_BADGE_VOL") .. "]"), Tip(f))
 	H.ok(Has(Tip(f), Locale.Lookup("LOC_EFV_LAPSE_WAR")), "volunteer lapse: " .. Tip(f))
 	EditRecord(rec.id, function(r) r.forceType = "CS_EXPEDITIONARY"; r.lapsed = nil; r.state = "MUTINY"; r.lastDamage = 40 end)
 	Poll()
-	H.eq(f.m_Instance.ReligionIcon.icon, "ICON_CITYSTATE_MILITARISTIC")
+	H.eq(f.m_Instance.ReligionIcon.icon, Emblem(0))
+	H.eq(f.m_Instance.ReligionIcon.color, LIGHT_BLUE, "CS tint")
 	H.ok(Has(Tip(f), "[" .. Locale.Lookup("LOC_EFV_BADGE_CS") .. "]"), Tip(f))
 	H.ok(Has(Tip(f), Locale.Lookup("LOC_EFV_STATE_MUTINY", 3)), Tip(f))
 	EditRecord(rec.id, function(r) r.state = "RETURNING"; r.arrivalTurn = FAKE.turn + 2 end)
@@ -193,3 +203,49 @@ test("flags: an EFV error restores the base look of every badged flag and stops 
 	H.ok(f1.m_Instance.ReligionIconBacking:IsHidden(), "off for the session")
 	H.len(H.lines("badges off for this session"), 1, "logged once")
 end, { allowErrors = true })
+
+test("flags: unmet sender -> unknown emblem; the sender and a player who met it see the emblem", function()
+	local S = Boot()
+	local rec = Deploy(S, 1)[1]
+	local f = FlagFor(rec)
+	FAKE.localPlayer = 2
+	FAKE.PairSet(FAKE.diplo.met, 2, 0, false)
+	UnitFlag.UpdateReligion(f)
+	H.ok(not f.m_Instance.ReligionIconBacking:IsHidden(), "badge still shown")
+	H.eq(f.m_Instance.ReligionIcon.icon, "ICON_CIVILIZATION_UNKNOWN")
+	H.eq(f.m_Instance.ReligionIcon.color, GOLD)
+	FAKE.PairSet(FAKE.diplo.met, 2, 0, true)
+	UnitFlag.UpdateReligion(f)
+	H.eq(f.m_Instance.ReligionIcon.icon, Emblem(0), "met: emblem")
+	FAKE.localPlayer = 0
+	FAKE.PairSet(FAKE.diplo.met, 0, 0, false)
+	UnitFlag.UpdateReligion(f)
+	H.eq(f.m_Instance.ReligionIcon.icon, Emblem(0), "the sender always sees its own emblem")
+	H.clean()
+end)
+
+test("flags: SetIcon returning false walks the fallback chain (unknown emblem, then the city-state glyph)", function()
+	local S = Boot()
+	local rec = Deploy(S, 1)[1]
+	local f = FlagFor(rec)
+	local icon = f.m_Instance.ReligionIcon
+	local missing = { [Emblem(0)] = true }
+	local tried = {}
+	icon.SetIcon = function(c, name)
+		tried[#tried + 1] = name
+		if missing[name] then return false end
+		c.icon = name
+		return true
+	end
+	UnitFlag.UpdateReligion(f)
+	H.deq(tried, { Emblem(0), "ICON_CIVILIZATION_UNKNOWN" })
+	H.eq(icon.icon, "ICON_CIVILIZATION_UNKNOWN")
+	missing["ICON_CIVILIZATION_UNKNOWN"] = true
+	tried = {}
+	UnitFlag.UpdateReligion(f)
+	H.deq(tried, { Emblem(0), "ICON_CIVILIZATION_UNKNOWN", "ICON_CITYSTATE_MILITARISTIC" })
+	H.eq(icon.icon, "ICON_CITYSTATE_MILITARISTIC")
+	H.eq(icon.color, GOLD, "tint kept")
+	H.ok(not f.m_Instance.ReligionIconBacking:IsHidden())
+	H.clean()
+end)

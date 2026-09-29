@@ -13,6 +13,8 @@
 		<Row Tag="LOC_EFV_BAD_PLURAL" Language="en_US"><Text>in {1_Num : plural one?turn; many?turns;}</Text></Row>
 		<!-- WP7.3: fixed noun after a number -> text-plural (warn) -->
 		<Row Tag="LOC_EFV_FIXED_NOUN" Language="en_US"><Text>in {1_Num} turns</Text></Row>
+		<!-- 0.7: em dash in player-visible text -> text-dash (error) -->
+		<Row Tag="LOC_EFV_REASON_DAMAGED" Language="de_DE"><Text>Schaden — Einheit</Text></Row>
 		<!-- never referenced -> text-unused (warn) -->
 		<Row Tag="LOC_EFV_NEVER_USED" Language="en_US"><Text>unused</Text></Row>
 	</LocalizedText>

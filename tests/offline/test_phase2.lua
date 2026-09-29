@@ -154,11 +154,13 @@ test("P2.1: AI recipient gets nothing; CS recipient (city-state) too; sender alw
 	H.loadEFV()
 	local p = H.neutralPlot(30, 5)
 	Deploy(S, { elapsed = 19, x = p:GetX(), y = p:GetY() })
-	Deploy(S, { forceType = "CS_EXPEDITIONARY", recipient = 4, dest = S.c4, basis = "CITY_STATE",
+	local idCS = Deploy(S, { forceType = "CS_EXPEDITIONARY", recipient = 4, dest = S.c4, basis = "CITY_STATE",
 		elapsed = 9, x = p:GetX() + 1, y = p:GetY() })
 	H.endTurn()
-	H.len(Sent(0, "GRACE", FAKE.turn), 2, "sender: one GRACE per record")
+	H.len(Sent(0, "GRACE", FAKE.turn), 1, "sender: GRACE for the Expeditionary record only")
 	H.len(Sent(1, "GRACE"), 0); H.len(Sent(4, "GRACE"), 0)
+	-- 0.7: a City-State record never enters grace; recalled from neutral land.
+	H.eq(Rec(idCS).state, "RETURNING"); H.eq(Rec(idCS).returnReason, "EXPIRED")
 	H.clean()
 end)
 
@@ -504,7 +506,7 @@ test("turn boundary: registration lines; PlayerTurnStarted is hooked, OnPlayerTu
 	H.ok(string.find(all, "GameEvents.PlayerTurnStartComplete", 1, true) ~= nil)
 	H.ok(string.find(all, "GameEvents.OnPlayerTurnEnded", 1, true) ~= nil)
 	H.ok(string.find(all, "GameEvents.OnGameTurnEnded", 1, true) ~= nil, "Session E")
-	H.len(lines, 11, "11 hooks")
+	H.len(lines, 12, "12 hooks (0.7: EFV_VetStep)")
 end)
 
 -- ===========================================================================

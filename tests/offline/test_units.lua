@@ -153,3 +153,56 @@ test("PlayerTurnStartComplete hook exhausts units created by the pipeline", func
 	H.len(EFV_Records.Load().pending, 0, "entry consumed and committed")
 	H.clean()
 end)
+
+-- 0.7 (FIXPLAN_0.7 item 9 hardening): the veteran name is set right after
+-- Create, before promotions, XP, damage and FinishMoves, so later changes
+-- carry it to the UI copy of the unit.
+test("Recreate sets the veteran name first (before promotions, XP, damage, moves)", function()
+	H.world{ turn = 5 }
+	H.loadEFV{ flags = { FLAG_CREATE_API = "INITUNIT" } }
+	local calls = {}
+	local initUnit = UnitManager.InitUnit
+	UnitManager.InitUnit = function(...)
+		local u = initUnit(...)
+		local exp = u:GetExperience()
+		u.exp = setmetatable({}, { __index = function(_, k)
+			local f = exp[k]
+			if type(f) ~= "function" then return f end
+			return function(_, ...) calls[#calls + 1] = k; return f(exp, ...) end
+		end })
+		local setDamage = u.SetDamage
+		u.SetDamage = function(self, d) calls[#calls + 1] = "SetDamage"; return setDamage(self, d) end
+		return u
+	end
+	local finish = UnitManager.FinishMoves
+	UnitManager.FinishMoves = function(u) calls[#calls + 1] = "FinishMoves"; return finish(u) end
+	local rec = { id = 3 }
+	EFV_Units.ApplySnapshot(rec, EFV_Units.Snapshot(Veteran(0, 5, 6)), 5)
+	local u = EFV_Units.Recreate(EFV_Records.Load(), 1, rec, H.plot(20, 20), 5)
+	H.notnil(u)
+	local first = {}
+	for i, name in ipairs(calls) do
+		if first[name] == nil then first[name] = i end
+	end
+	H.notnil(first.SetVeteranName, "name set")
+	for _, later in ipairs({ "SetPromotion", "ChangeExperience", "SetDamage", "FinishMoves" }) do
+		H.notnil(first[later], later .. " called")
+		H.ok(first.SetVeteranName < first[later], "SetVeteranName before " .. later)
+	end
+	H.eq(u:GetExperience():GetVeteranName(), "Brutus")
+	H.clean()
+end)
+
+test("RestoreXPClamped: target below the threshold kept; above it capped then clamped to next - 1", function()
+	H.world{}
+	H.loadEFV()
+	local u = H.unit(0, "UNIT_WARRIOR", 3, 3)
+	local xp, nxt, clamped = EFV_Units.RestoreXPClamped(u, 9)
+	H.eq(xp, 9); H.eq(nxt, 15); H.eq(clamped, 0)
+	xp, nxt, clamped = EFV_Units.RestoreXPClamped(u, 50)
+	H.eq(xp, 14); H.eq(nxt, 15); H.eq(clamped, 1)
+	H.eq(u:GetExperience():GetExperiencePoints(), 14)
+	EFV_Config.FLAG_XP_CLAMP = false
+	xp, nxt, clamped = EFV_Units.RestoreXPClamped(u, 50)
+	H.eq(xp, 15, "engine cap only"); H.eq(clamped, 0)
+end)

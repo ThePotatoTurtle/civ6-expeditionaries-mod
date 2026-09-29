@@ -2,23 +2,27 @@
 -- EFV_DestinationPicker.lua
 -- Context:  UI, context of EFV_DestinationPicker.xml (AddUserInterfaces
 --           InGame). Controls: PickerRoot, PickerWindow, PickerTitle,
---           CloseButton, HeaderRow (+ Header* labels), RowScroll, RowStack,
---           EmptyLabel; instance EFV_DestRowInstance (RowButton,
---           RecipientLabel, CityLabel, DistanceLabel, TransitLabel, FeeLabel,
---           DurationLabel).
+--           CloseButton, HeaderLabel, LandNote, RowScroll, RowStack,
+--           EmptyLabel; instance EFV_DestRowInstance (RowButton, RowLabel).
 -- Owner:    WP1.5 (VOL rows WP3.3, CS rows WP4.1: rows come from EFV_Rules,
 --           so this file needs no change for them).
 --
 -- Responsibility (PLAN 3.3; spec 14.2): modal destination picker opened by
 -- LuaEvents.EFV_OpenDestinationPicker(playerID, unitID, forceType). Rows from
--- EFV_DestinationRows; disabled rows show their reasons as tooltip; a row
+-- EFV_DestinationRows, one line each (EFV_UI_PickerRowText, 0.7); header
+-- EFV_UI_PickerHeaderText; LandNote (LOC_EFV_PICKER_FROM_LAND) when the unit
+-- stands on another player's land (EFV_SendLandOwner: only that player's
+-- rows can be enabled, the others say WRONG_TERRITORY); disabled rows show
+-- their reasons as tooltip; a row
 -- click opens a confirm dialog repeating unit, city, recipient, fee, transit
 -- and duration, then sends EFV_UI_Request("EFV_Send", { unitID, recipientID,
 -- destX, destY, forceType, expectedFee = row.calc.fee }) and closes
 -- (DV1, DV5). Closes on ESC, CloseButton, LocalPlayerTurnEnd and
 -- DiplomacyActionView_HideIngameUI.
 --
--- Text keys: LOC_EFV_PICKER_TITLE, LOC_EFV_COL_*, LOC_EFV_SEND_NO_RECIPIENTS
+-- Text keys: LOC_EFV_PICKER_TITLE, LOC_EFV_PICKER_HEADER / _HEADER_CS,
+-- LOC_EFV_PICKER_TILES, LOC_EFV_PICKER_FEE, LOC_EFV_PICKER_FROM_LAND {1_Name},
+-- LOC_EFV_SEND_NO_RECIPIENTS
 -- (empty list), LOC_EFV_ACTION_SEND_* (confirm title), LOC_EFV_CONFIRM_SEND
 -- {1_Unit} {2_City} {3_Recipient} {4_Fee} {5_Transit} {6_Duration} {7_Force},
 -- LOC_YES / LOC_NO (base game).
@@ -179,8 +183,9 @@ end
 -- ---------------------------------------------------------------------------
 -- Populate() -> bool
 -- m_RowIM:ResetInstances(); for each row of EFV_DestinationRows(
--- m_Ctx.playerID, pUnit, m_Ctx.forceType, EFV_UI_ReadStore()): fill the
--- labels, SetDisabled(not row.ok), tooltip EFV_UI_ReasonsText(row.reasons,
+-- m_Ctx.playerID, pUnit, m_Ctx.forceType, EFV_UI_ReadStore()): RowLabel =
+-- EFV_UI_PickerRowText(row), SetDisabled(not row.ok), tooltip
+-- EFV_UI_ReasonsText(row.reasons,
 -- EFV_UI_RowReasonCtx(row)) for disabled rows, click -> ConfirmRow(row).
 -- EmptyLabel when there are no rows. CalculateSize of RowStack / RowScroll.
 -- Params:  none (uses m_Ctx).
@@ -202,19 +207,7 @@ local function Populate()
 	for _, row in ipairs(rows) do
 		local inst = m_RowIM:GetInstance()
 		local calc = row.calc
-		inst.RecipientLabel:SetText(EFV_UI_PlayerName(row.recipientID))
-		inst.CityLabel:SetText(EFV_UI_CityName(row.recipientID, row.cityID, row.destX, row.destY))
-		if calc ~= nil then
-			inst.DistanceLabel:SetText(tostring(calc.distance or "-"))
-			inst.TransitLabel:SetText(tostring(calc.transit or "-"))
-			inst.FeeLabel:SetText(EFV_UI_FeeCell(calc.fee))
-			inst.DurationLabel:SetText(EFV_UI_DurationText(calc.duration))
-		else
-			inst.DistanceLabel:SetText("-")
-			inst.TransitLabel:SetText("-")
-			inst.FeeLabel:SetText("-")
-			inst.DurationLabel:SetText(EFV_UI_DurationText(EFV_Duration(m_Ctx.forceType)))
-		end
+		inst.RowLabel:SetText(EFV_UI_PickerRowText(row, m_Ctx.forceType))
 		local enabled = (row.ok == true) and calc ~= nil
 		inst.RowButton:SetDisabled(not enabled)
 		inst.RowButton:SetAlpha((enabled and 1) or 0.6)
@@ -250,7 +243,8 @@ end
 -- ---------------------------------------------------------------------------
 -- Open(playerID, unitID, forceType)
 -- Handler of LuaEvents.EFV_OpenDestinationPicker (U21): m_Ctx = { playerID,
--- unitID, forceType }; Populate(); ContextPtr:SetHide(false) (a dequeued
+-- unitID, forceType }; header text; land note (0.7); Populate();
+-- ContextPtr:SetHide(false) (a dequeued
 -- popup may have been hidden by UIManager); Controls.PickerRoot:SetHide(
 -- false); QueuePopup(ContextPtr, PopupPriority.Medium) if not already
 -- queued (sound "UI_Screen_Open").
@@ -264,6 +258,19 @@ local function Open(playerID, unitID, forceType)
 		return nil
 	end
 	m_Ctx = { playerID = playerID, unitID = unitID, forceType = forceType }
+	Controls.HeaderLabel:SetText(EFV_UI_PickerHeaderText(forceType))
+	-- Send from the recipient's land (0.7): say whose land it is.
+	local landOwner = nil
+	pcall(function()
+		landOwner = EFV_SendLandOwner(CtxUnit(m_Ctx), playerID)
+	end)
+	if type(landOwner) == "number" and landOwner >= 0 then
+		Controls.LandNote:SetText(Locale.Lookup("LOC_EFV_PICKER_FROM_LAND", EFV_UI_PlayerName(landOwner)))
+		Controls.LandNote:SetHide(false)
+	else
+		Controls.LandNote:SetText("")
+		Controls.LandNote:SetHide(true)
+	end
 	local ok, populated = pcall(Populate)
 	if not ok or not populated then
 		EFV_Log(1, LOG_TAG, "open failed unit=%s: %s", tostring(unitID), tostring(populated))

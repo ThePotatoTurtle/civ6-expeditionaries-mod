@@ -23,7 +23,7 @@ include("InstanceManager")
 -- must keep working even if EFV's UI module fails to load.
 local m_UIShared = pcall(include, "EFV_UIShared")
 include("EFV_Config")
--- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText
+-- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText EFV_UI_TrackerState EFV_SortedKeys
 
 local PREFIX = "[EFV][Dev][UI]"
 local m_ButtonIM = InstanceManager:new("DevButtonInstance", "Button", Controls.ButtonStack)
@@ -456,6 +456,197 @@ local function VetStep()
 	m_Vet = nil
 end
 
+-- ---------------------------------------------------------------------------
+-- Workshop Shot buttons, UI side (workshop/SCREENSHOTS.md B3 / B4). Gameplay
+-- writes st.focus with open / ft / zoom / tx / ty; after the camera move the
+-- panel zooms (pcall: not proven from a mod context, the designer can use
+-- the mouse wheel), closes itself, hides the DEV launch button (back with
+-- Ctrl+Shift+D) and runs the open action:
+--   PICKER   one tick later LuaEvents.EFV_OpenDestinationPicker(local, unit, ft)
+--            (the call EFV_UnitActions makes)
+--   TRACKER  LuaEvents.EFV_TrackerOpen() (0.7 hook; a no-op without it)
+--   CAPTURE  Tank 1 attacks (x, y) like the base RequestMoveOperation
+--            (Civ6Common.lua:147-163); when /InGame/RazeCity shows (up to
+--            SHOT_WAIT s) LuaEvents.EFV_EntrustExpand() (0.7 hook)
+-- Every shot also looks at the plot again after 1 s (flag badges of units
+-- created and recorded in the same gameplay call, not proven yet).
+-- ---------------------------------------------------------------------------
+local SHOT_WAIT = 8
+local m_Shot = nil          -- { cmd, id, f, phase, nextAt, relookAt, untilClock }
+local SetOpen               -- forward (defined with the show / hide code below)
+
+local function HideLaunch(hide)
+	pcall(function() m_LaunchInst.LaunchItemButton:SetHide(hide) end)
+end
+
+-- Dismisses the local player's VEF notifications (every EFV_Config.NOTIF
+-- type; the EFV_Tracker SweepStale pattern). Returns the number dismissed.
+local function DismissVefNotifications()
+	local localID = LocalID()
+	local hashes = {}
+	local notif = EFV_Config.NOTIF or {}
+	for _, key in ipairs(EFV_SortedKeys(notif)) do
+		local typeName = notif[key]
+		if type(typeName) == "string" then
+			local ok, h = pcall(function() return GameInfo.Types[typeName].Hash end)
+			if ok and h ~= nil then hashes[h] = true end
+		end
+	end
+	local okL, list = pcall(function() return NotificationManager.GetList(localID) end)
+	if not okL or type(list) ~= "table" then return 0 end
+	local n = 0
+	for _, nid in ipairs(list) do
+		pcall(function()
+			local pN = NotificationManager.Find(localID, nid)
+			if pN ~= nil and hashes[pN:GetType()] then
+				NotificationManager.Dismiss(localID, nid)
+				n = n + 1
+			end
+		end)
+	end
+	return n
+end
+
+local function ShotID(cmd)
+	return "SHOT" .. string.sub(Str(cmd), 5)
+end
+
+local function StartShot(cmd, f)
+	if type(f.zoom) == "number" then
+		local okG, before = pcall(function() return UI.GetMapZoom() end)
+		local ok, err = pcall(function() UI.SetMapZoom(f.zoom, 0.0, 0.0) end)
+		Log(cmd .. " zoom " .. (okG and Str(before) or "?") .. " -> " .. f.zoom .. " ok=" .. tostring(ok) ..
+			(ok and "" or (" err=" .. Str(err) .. " (use the mouse wheel)")))
+	end
+	m_Shot = { cmd = cmd, id = ShotID(cmd), f = f, phase = f.open or "DONE", nextAt = m_Clock + 0.3, relookAt = m_Clock + 1.0 }
+	SetOpen(false)
+	HideLaunch(true)
+end
+
+local function ShotAttack(s)
+	local f = s.f
+	local tank = OwnUnit(f.o, f.u)
+	if tank == nil or f.tx == nil or f.ty == nil then return false, "Tank 1 not found" end
+	local ok, res = pcall(function()
+		local t = {}
+		t[UnitOperationTypes.PARAM_X] = f.tx
+		t[UnitOperationTypes.PARAM_Y] = f.ty
+		t[UnitOperationTypes.PARAM_MODIFIERS] = UnitOperationMoveModifiers.ATTACK + UnitOperationMoveModifiers.MOVE_IGNORE_UNEXPLORED_DESTINATION
+		if UnitManager.CanStartOperation(tank, UnitOperationTypes.MOVE_TO, nil, t) then
+			UnitManager.RequestOperation(tank, UnitOperationTypes.MOVE_TO, t)
+			return true
+		end
+		return false
+	end)
+	if not ok then return false, "error " .. Str(res) end
+	if res ~= true then return false, "CanStartOperation refused (no moves?)" end
+	return true, nil
+end
+
+local function RazeCityShown()
+	local ok, shown = pcall(function()
+		local c = ContextPtr:LookUpControl("/InGame/RazeCity")
+		return c ~= nil and not c:IsHidden()
+	end)
+	return ok and shown == true
+end
+
+local function ShotStep()
+	local s = m_Shot
+	if m_Clock < s.nextAt then return end
+	s.nextAt = m_Clock + 0.3
+	if s.relookAt ~= nil and m_Clock >= s.relookAt then
+		s.relookAt = nil
+		pcall(function() UI.LookAtPlot(s.f.x, s.f.y) end)
+	end
+	if s.phase == "PICKER" then
+		local ok, err = pcall(function() LuaEvents.EFV_OpenDestinationPicker(LocalID(), s.f.u, s.f.ft) end)
+		UICheck(s.id, ok and "INFO" or "CHECK", "destination picker opened=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) ..
+			"; if it hides the unit panel, take frame 1b after Esc while hovering Send as Expeditionary")
+		s.phase = "DONE"
+	elseif s.phase == "TRACKER" then
+		local ok, err = pcall(function() LuaEvents.EFV_TrackerOpen() end)
+		UICheck(s.id, ok and "INFO" or "CHECK", "tracker open hook sent ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) ..
+			"; if the panel is closed, click the VEF button once")
+		s.phase = "DONE"
+	elseif s.phase == "CAPTURE" then
+		local sent, why = ShotAttack(s)
+		UICheck(s.id, "INFO", sent and "attack on the city requested; waiting for the capture screen" or
+			("attack not sent (" .. Str(why) .. "): click the city with the selected Tank"))
+		s.phase = "WAIT_RAZE"
+		s.untilClock = m_Clock + SHOT_WAIT
+	elseif s.phase == "WAIT_RAZE" then
+		local shown = RazeCityShown()
+		if shown or m_Clock > s.untilClock then
+			local ok = pcall(function() LuaEvents.EFV_EntrustExpand() end)
+			UICheck(s.id, "INFO", shown and ("capture screen open; Entrust list expand sent ok=" .. tostring(ok)) or
+				("no capture screen within " .. SHOT_WAIT .. " s: take the city, then click Entrust... once"))
+			s.phase = "DONE"
+		end
+	end
+	if s.phase == "DONE" and s.relookAt == nil then m_Shot = nil end
+end
+
+-- ---------------------------------------------------------------------------
+-- 0.7 re-test UI checks (EFV/TESTING_RETEST_0.7.md), polled every 0.5 s:
+--   VET_RESTORE_LEVEL  S12: once gameplay named VEF-VET's unit (st.s12.uid)
+--                      and its route B job is gone from the store: level 3
+--                      (GetLevel is UI only), XP 50/90, damage 30, the unit
+--                      panel name logged; then Check now for VET_RESTORE
+--   LAPSE_TEXT         the first paused lapse of a local Volunteer record in
+--                      GRACE: the tracker state reads "Lapse: Grace N (paused)"
+-- ---------------------------------------------------------------------------
+local m_CheckAt = 0
+local m_VetLevelDone = {}
+local m_LapseSeen = {}
+
+local function VetLevelCheck()
+	local st = ScnState()
+	local s = st and st.s12
+	if type(s) ~= "table" or s.uid == nil or st.me ~= LocalID() or m_VetLevelDone[s.uid] then return end
+	local ok, store = pcall(EFV_UI_ReadStore)
+	if not ok or type(store) ~= "table" then return end
+	for _, j in ipairs(store.vet or {}) do
+		if j.p == st.me and j.u == s.uid then return end
+	end
+	m_VetLevelDone[s.uid] = true
+	local u = OwnUnit(st.me, s.uid)
+	if u == nil then
+		UICheck("VET_RESTORE_LEVEL", "CHECK", "VEF-VET (unit " .. Str(s.uid) .. ") not found")
+	else
+		local lvl = Level(u)
+		local xp, nxt, dmg, name = -1, -1, -1, "?"
+		pcall(function()
+			local e = u:GetExperience()
+			xp, nxt = e:GetExperiencePoints(), e:GetExperienceForNextLevel()
+		end)
+		pcall(function() dmg = u:GetDamage() end)
+		pcall(function() name = Locale.Lookup(u:GetName()) end)
+		local pass = lvl == 3 and xp == 50 and nxt == 90 and dmg == 30
+		UICheck("VET_RESTORE_LEVEL", pass and "PASS" or "CHECK", "level " .. Str(lvl) .. " (expected 3), XP " .. Str(xp) .. "/" .. Str(nxt) ..
+			", damage " .. Str(dmg) .. "; unit panel name '" .. Str(name) .. "'")
+	end
+	Send(BaseParams("scn_check"))
+end
+
+local function LapseTextCheck()
+	local ok, store = pcall(EFV_UI_ReadStore)
+	if not ok or type(store) ~= "table" then return end
+	local me = LocalID()
+	for _, id in ipairs(store.ids or {}) do
+		local r = store.recs and store.recs["r" .. id]
+		if r ~= nil and not m_LapseSeen[id] and r.senderID == me and r.forceType == EFV_Config.FT_VOL and r.lapsed == 1
+				and r.lapsePaused == 1 and r.state == EFV_Config.ST_GRACE then
+			m_LapseSeen[id] = true
+			local okT, text = pcall(EFV_UI_TrackerState, r)
+			if okT then text = string.gsub(Str(text), "%[COLOR[^%]]*%]", "") else text = "error " .. Str(text) end
+			local expect = "Lapse: Grace " .. Str(r.graceTurnsLeft) .. " (paused)"
+			UICheck("LAPSE_TEXT", text == expect and "PASS" or "CHECK", "tracker state of Volunteer record " .. id .. ": '" .. text ..
+				"' (expected '" .. expect .. "')")
+		end
+	end
+end
+
 local function OnUpdate(dt)
 	m_Clock = m_Clock + (tonumber(dt) or 0)
 	if m_FocusWait ~= nil and m_Clock >= m_FocusWait.nextAt then
@@ -465,10 +656,24 @@ local function OnUpdate(dt)
 		if type(f) == "table" and f.stamp == m_FocusWait.stamp then
 			LookAt(f)
 			if m_FocusWait.cmd == "scn_setup" and st.ally ~= nil then TargetTo(st.ally) end
+			if m_FocusWait.shot then StartShot(m_FocusWait.cmd, f) end
 			m_FocusWait = nil
 		elseif m_Clock > m_FocusWait.untilClock then
+			if m_FocusWait.shot then UICheck(ShotID(m_FocusWait.cmd), "CHECK", "no answer from gameplay within " .. SHOT_WAIT .. " s") end
 			m_FocusWait = nil
 		end
+	end
+	if m_Shot ~= nil then
+		local ok, err = pcall(ShotStep)
+		if not ok then
+			Log("shot error: " .. Str(err))
+			m_Shot = nil
+		end
+	end
+	if m_Clock >= m_CheckAt then
+		m_CheckAt = m_Clock + 0.5
+		pcall(VetLevelCheck)
+		pcall(LapseTextCheck)
 	end
 	if m_Vet ~= nil then
 		local ok, err = pcall(VetStep)
@@ -487,6 +692,20 @@ local function Scenario(cmd)
 	Send(p)
 end
 
+-- Workshop Shot buttons (EFV_Dev 0.7.0-dev.1; workshop/SCREENSHOTS.md B3):
+-- deselect (a unit removed while selected broke SelectedUnit.lua:195 in the
+-- final session), dismiss the local player's VEF notifications, send the
+-- stamped request and wait up to SHOT_WAIT s for the scene.
+local function Shot(cmd)
+	pcall(function() UI.DeselectAllUnits() end)
+	local n = DismissVefNotifications()
+	local p = BaseParams(cmd)
+	m_Shot = nil
+	m_FocusWait = { stamp = p.stamp, nextAt = m_Clock + 0.3, untilClock = m_Clock + SHOT_WAIT, cmd = cmd, shot = true }
+	Log(cmd .. ": units deselected, " .. n .. " VEF notification(s) dismissed")
+	Send(p)
+end
+
 -- ---------------------------------------------------------------------------
 -- Buttons: cmd = gameplay command (EFV_Dev_Gameplay.lua), ui = local function
 -- ---------------------------------------------------------------------------
@@ -494,10 +713,16 @@ local UIFN = { ForgeSend = ForgeSend, ForgeRecall = ForgeRecall, ForgeEntrust = 
 	VetStart = VetStart, GoTo = GoTo }
 
 local BUTTONS = {
-	{ header = "Final session (EFV/TESTING_FINAL.md): start a NEW game; one click sets up each step" },
+	{ header = "Screenshots (VEF 0.7+, new game after one End Turn)" },
+	{ label = "Shot 1 Send picker",     shot = "shot1" },
+	{ label = "Shot 2 Arrival",         shot = "shot2" },
+	{ label = "Shot 3 Tracker",         shot = "shot3" },
+	{ label = "Shot 4 Entrust",         shot = "shot4" },
+	{ label = "Shot 5 Mutiny",          shot = "shot5" },
+	{ header = "Test sessions (EFV/TESTING_RETEST_0.7.md, TESTING_FINAL.md): start a NEW game; one click sets up each step" },
 	{ label = "S0 Setup session",       scn = "scn_setup" },
 	{ label = "S1 Arrive next turn",    scn = "scn_arrive" },
-	{ label = "S2 Expire CS unit",      scn = "scn_expire_cs" },
+	{ label = "S2 Expire CS unit (off its land)", scn = "scn_expire_cs" },
 	{ label = "S3 Grace/mutiny step",   scn = "scn_grace" },
 	{ label = "S4 Lapse on/off",        scn = "scn_lapse" },
 	{ label = "S5 Upgrade test",        scn = "scn_upgrade" },
@@ -507,6 +732,8 @@ local BUTTONS = {
 	{ label = "S9 Crowded arrival",     scn = "scn_place" },
 	{ label = "S10 Mutiny combat",      scn = "scn_t31" },
 	{ label = "S11 Entrust city",       scn = "scn_entrust" },
+	{ label = "S12 Veteran return",     scn = "scn_vetret" },
+	{ label = "S13 Unit in B's land",   scn = "scn_inland" },
 	{ label = "Go to scenario",         ui = "GoTo" },
 	{ label = "Check now",              cmd = "scn_check" },
 	{ header = "Units (selected unit, or extra rec=<id>; Type/Amount fields)" },
@@ -552,6 +779,8 @@ local function OnButton(def)
 	if def.ui ~= nil then
 		local ok, err = pcall(UIFN[def.ui])
 		if not ok then Log(def.label .. " threw: " .. Str(err)) end
+	elseif def.shot ~= nil then
+		Shot(def.shot)
 	elseif def.scn ~= nil then
 		Scenario(def.scn)
 	else
@@ -579,10 +808,11 @@ end
 -- ---------------------------------------------------------------------------
 -- Show / hide, hotkey, launch bar
 -- ---------------------------------------------------------------------------
-local function SetOpen(open)
+SetOpen = function(open)
 	m_Open = open and true or false
 	if ContextPtr:IsHidden() then ContextPtr:SetHide(false) end
 	if m_Open then
+		HideLaunch(false)
 		RebuildTargets()
 		RefreshInfo()
 	end

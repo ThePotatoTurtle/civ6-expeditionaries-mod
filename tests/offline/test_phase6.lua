@@ -436,7 +436,7 @@ test("heal gate UI: picker row tooltip and confirm warn when the recipient has n
 	end
 	local row
 	for _, r in ipairs(rowIM.list) do
-		if r.CityLabel.text == EFV_CityName(S.c1) then row = r end
+		if string.find(r.RowLabel.text, " - " .. EFV_CityName(S.c1) .. " - ", 1, true) then row = r end
 	end
 	H.notnil(row)
 	H.ok(string.find(row.RowButton.tooltip, warn, 1, true), "row tooltip: " .. tostring(row.RowButton.tooltip))
@@ -447,7 +447,7 @@ test("heal gate UI: picker row tooltip and confirm warn when the recipient has n
 	H.setRes(1, "RESOURCE_IRON", 3)
 	actIM.list[1].UnitActionButton:Click()
 	for _, r in ipairs(rowIM.list) do
-		if r.CityLabel.text == EFV_CityName(S.c1) then row = r end
+		if string.find(r.RowLabel.text, " - " .. EFV_CityName(S.c1) .. " - ", 1, true) then row = r end
 	end
 	H.ok(not string.find(row.RowButton.tooltip or "", "LOC_EFV_WARN", 1, true))
 	H.eq(row.RowButton.tooltip, "")

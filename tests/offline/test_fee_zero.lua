@@ -90,10 +90,11 @@ test("fee 0 in the UI: picker shows Free, the confirm dialog reads 'Fee: Free', 
 	end
 	local row
 	for _, r in ipairs(rowIM.list) do
-		if r.CityLabel.text == EFV_CityName(S.near) then row = r end
+		if string.find(r.RowLabel.text, " - " .. EFV_CityName(S.near) .. " - ", 1, true) then row = r end
 	end
 	H.notnil(row, "band-1 row listed")
-	H.eq(row.FeeLabel.text, Locale.Lookup("LOC_EFV_FEE_FREE"))
+	H.ok(string.find(row.RowLabel.text, " - " .. Locale.Lookup("LOC_EFV_FEE_FREE") .. " - ", 1, true), row.RowLabel.text)
+	H.ok(not string.find(row.RowLabel.text, "[ICON_Gold]", 1, true), row.RowLabel.text)
 	H.eq(Locale.Lookup("LOC_EFV_FEE_FREE"), "Free")
 	H.ok(not row.RowButton.disabled, "free row enabled with 0 gold")
 	row.RowButton:Click()
@@ -112,14 +113,15 @@ test("fee 0 in the UI: picker shows Free, the confirm dialog reads 'Fee: Free', 
 	H.clean()
 end)
 
-test("fee texts: EFV_UI_FeeText / EFV_UI_FeeCell for 0, n and nil", function()
+test("fee texts: EFV_UI_FeeText for 0, n and nil (EFV_UI_FeeCell removed in 0.7)", function()
 	Scenario()
 	H.loadEFV()
 	include("fake_ui")
 	FAKE_UI.Enable()
 	FAKE_UI.LoadContext("EFV/UI/EFV_DestinationPicker.lua")
-	H.eq(EFV_UI_FeeText(0), "Free"); H.eq(EFV_UI_FeeCell(0), "Free")
-	H.eq(EFV_UI_FeeText(36), Locale.Lookup("LOC_EFV_FEE_GOLD", 36)); H.eq(EFV_UI_FeeCell(36), "36[ICON_Gold]")
-	H.eq(EFV_UI_FeeText(nil), "-"); H.eq(EFV_UI_FeeCell(nil), "-")
+	H.eq(EFV_UI_FeeText(0), "Free")
+	H.eq(EFV_UI_FeeText(36), Locale.Lookup("LOC_EFV_FEE_GOLD", 36))
+	H.eq(EFV_UI_FeeText(nil), "-")
+	H.isnil(EFV_UI_FeeCell, "EFV_UI_FeeCell removed (picker rows use EFV_UI_PickerRowText)")
 	H.clean()
 end)

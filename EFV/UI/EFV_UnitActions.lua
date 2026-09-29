@@ -54,11 +54,14 @@ local function Released(key)
 end
 
 -- Send buttons in display order: force type, action text key, icon.
--- Icons are existing atlas entries (UnitActions atlas); Phase 7 may replace.
+-- Icons are existing ICON_ATLAS_UNIT_ACTIONS entries (38 px) that the base
+-- game never shows on land or naval combat units, so no VEF button looks
+-- like a base button (0.7, FIXPLAN item 2): Gift, aircraft Deploy, the
+-- trader's Teleport to City (was Move To, which every combat unit has).
 local SEND_BUTTONS = {
 	{ ft = EFV_Config.FT_EXP, key = "LOC_EFV_ACTION_SEND_EXPEDITIONARY", tt = "LOC_EFV_ACTION_SEND_EXPEDITIONARY_TT", icon = "ICON_UNITCOMMAND_GIFT" },
 	{ ft = EFV_Config.FT_VOL, key = "LOC_EFV_ACTION_SEND_VOLUNTEER",     tt = "LOC_EFV_ACTION_SEND_VOLUNTEER_TT",     icon = "ICON_UNITOPERATION_DEPLOY" },
-	{ ft = EFV_Config.FT_CS,  key = "LOC_EFV_ACTION_SEND_CS",            tt = "LOC_EFV_ACTION_SEND_CS_TT",            icon = "ICON_UNITOPERATION_MOVE_TO" },
+	{ ft = EFV_Config.FT_CS,  key = "LOC_EFV_ACTION_SEND_CS",            tt = "LOC_EFV_ACTION_SEND_CS_TT",            icon = "ICON_UNITOPERATION_TELEPORT_TO_CITY" },
 }
 local RECALL_ICON = "ICON_UNITOPERATION_REBASE"
 
@@ -155,7 +158,8 @@ end
 
 -- Destination summary for a send button: nil when some row is enabled,
 -- else the text listing why no destination is available (distinct row
--- reasons that are not already listed as unit reasons).
+-- reasons that are not already listed as unit reasons). WRONG_TERRITORY
+-- names the land owner (row.landOwnerID, the same for every row; 0.7).
 local function DestinationSummary(rows, unitCodes, localID)
 	if #rows == 0 then
 		return "[NEWLINE][COLOR:Red]" .. Locale.Lookup("LOC_EFV_SEND_NO_RECIPIENTS") .. "[ENDCOLOR]"
@@ -166,6 +170,7 @@ local function DestinationSummary(rows, unitCodes, localID)
 	end
 	local codes, names, seenName = {}, {}, {}
 	local minFee = nil
+	local landOwnerID = nil
 	for _, row in ipairs(rows) do
 		if row.ok then
 			return nil
@@ -180,6 +185,9 @@ local function DestinationSummary(rows, unitCodes, localID)
 				if EFV_UIShared.NAME_REASONS[code] and not seenName[code][row.recipientID] then
 					seenName[code][row.recipientID] = true
 					names[code][#names[code] + 1] = EFV_UI_PlayerName(row.recipientID)
+				end
+				if code == "WRONG_TERRITORY" and landOwnerID == nil then
+					landOwnerID = row.landOwnerID
 				end
 				if code == "GOLD" and row.calc ~= nil and row.calc.fee ~= nil then
 					if minFee == nil or row.calc.fee < minFee then
@@ -199,6 +207,7 @@ local function DestinationSummary(rows, unitCodes, localID)
 		end
 	end
 	ctx.GOLD = { minFee or 0 }
+	ctx.WRONG_TERRITORY = { EFV_UI_PlayerName(landOwnerID) }
 	return "[NEWLINE][NEWLINE]" .. Locale.Lookup("LOC_EFV_SEND_NO_DESTINATION") .. EFV_UI_ReasonsText(codes, ctx)
 end
 
@@ -313,7 +322,9 @@ end
 -- Returns: nil.
 -- PLAN 3.2; D3 ruling; D8. APIs: U07, U17.
 -- ---------------------------------------------------------------------------
-local STATUS_ICON = "ICON_UNITCOMMAND_FORM_CORPS"
+-- Spy-only Listening Post icon (0.7, FIXPLAN item 2): Form Corps sat next to
+-- the real Form Corps button whenever a merge was possible.
+local STATUS_ICON = "ICON_UNITOPERATION_SPY_LISTENING_POST"
 
 local function AddStatusButton(pUnit, rec)
 	local localID = Game.GetLocalPlayer()

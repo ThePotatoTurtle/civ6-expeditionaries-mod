@@ -76,14 +76,14 @@ end
 -- ---------------------------------------------------------------------------
 -- Release and eligibility (D2, "D2 reconfirmed"; war overrides everything)
 -- ---------------------------------------------------------------------------
-test("release: Volunteers and Recall are released (FLAG_RELEASED), version 0.6.1-dev", function()
+test("release: Volunteers and Recall are released (FLAG_RELEASED), version 0.7.0-dev", function()
 	H.baseScenario()
 	H.loadEFV()
 	H.eq(EFV_Config.FLAG_RELEASED.VOLUNTEER, true)
 	H.eq(EFV_Config.FLAG_RELEASED.RECALL, true)
-	H.eq(EFV_Config.VERSION, "0.6.1-dev")
+	H.eq(EFV_Config.VERSION, "0.7.0-dev")
 	local mi = __py_read("EFV/EFV.modinfo")
-	H.ok(string.find(mi, "<en_US>Volunteer &amp; Expeditionary Forces v0.6.1-dev</en_US>", 1, true) ~= nil,
+	H.ok(string.find(mi, "<en_US>Volunteers &amp; Expeditionary Forces v0.7.0-dev</en_US>", 1, true) ~= nil,
 		"mod title = the designer's name")
 end)
 
@@ -801,7 +801,7 @@ test("UI: Recall button lists failing conditions, turns until the minimum and th
 	end
 	local list = Buttons()
 	H.len(list, 2, "Recall + status (tracked unit: no send buttons; WP5.4 status button)")
-	H.eq(list[2].UnitActionIcon.icon, "ICON_UNITCOMMAND_FORM_CORPS")
+	H.eq(list[2].UnitActionIcon.icon, "ICON_UNITOPERATION_SPY_LISTENING_POST")
 	H.ok(Has(list[2].UnitActionButton.tooltip, "LOC_EFV_WARN_MERGE_VOLUNTEER"), "status button carries the D3 warning")
 	local b = list[1].UnitActionButton
 	H.ok(b.disabled)

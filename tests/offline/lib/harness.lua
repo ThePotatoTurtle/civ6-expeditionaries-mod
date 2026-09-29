@@ -342,10 +342,16 @@ end
 -- then runs Scripts/EFV_Gameplay.lua exactly like the engine's
 -- AddGameplayScripts. Marks the log position where the test body starts, so
 -- the runner only counts "[Stub]" lines emitted by the test itself.
+-- 0.7 (FIXPLAN_0.7 WP3): EFV_Config.FLAG_VET_ROUTE_B is set to false unless
+-- opts.routeB (the legacy suites assert the XP-clamp restore for human-owned
+-- units); route B tests opt in (test_070_vet reads the shipped default from
+-- EFV_Config.lua). opts.flags still wins over both.
 function H.loadEFV(opts)
 	opts = opts or {}
 	include("EFV_Config")
 	EFV_Config.LOG_LEVEL = opts.logLevel or 3
+	H.routeB = opts.routeB and true or false
+	EFV_Config.FLAG_VET_ROUTE_B = H.routeB
 	for k, v in pairs(opts.flags or {}) do
 		EFV_Config[k] = v
 	end
@@ -363,7 +369,7 @@ end
 -- properties and the world survive, EFV_Gameplay.lua runs again.
 function H.reloadEFV()
 	for _, name in ipairs({ "EFV_Config", "EFV_Util", "EFV_Rules", "EFV_Records", "EFV_Notify", "EFV_Units",
-		"EFV_Spawn", "EFV_Transit", "EFV_Lifecycle", "EFV_Entrust", "EFV_Gameplay" }) do
+		"EFV_Veteran", "EFV_Spawn", "EFV_Transit", "EFV_Lifecycle", "EFV_Entrust", "EFV_Gameplay" }) do
 		_G[name] = nil
 	end
 	for _, ns in ipairs({ GameEvents, Events, LuaEvents }) do
@@ -374,6 +380,7 @@ function H.reloadEFV()
 	local level = 3
 	include("EFV_Config")
 	EFV_Config.LOG_LEVEL = level
+	EFV_Config.FLAG_VET_ROUTE_B = H.routeB and true or false   -- as H.loadEFV set it
 	FAKE.dofile("EFV/Scripts/EFV_Gameplay.lua")
 end
 

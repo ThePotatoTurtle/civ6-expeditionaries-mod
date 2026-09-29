@@ -153,6 +153,7 @@ read_globals = {
   "UnitCommandTypes",
   "UnitFlag",
   "UnitManager",
+  "UnitOperationMoveModifiers",
   "UnitOperationResults",
   "UnitOperationTypes",
   "Units",

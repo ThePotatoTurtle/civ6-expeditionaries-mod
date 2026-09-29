@@ -12,8 +12,10 @@
 --
 -- Responsibility (PLAN 3.5; D8; R4 4.3): thin wrapper around the active
 -- UnitFlagManager. Re-uses the religion-tag slot (ReligionIcon /
--- ReligionIconBacking, always empty on military units) for an EXP / VOL / CS
--- badge with the EFV_UI_StatusTooltip tooltip. No XML, no other overrides.
+-- ReligionIconBacking, always empty on military units) for a badge: the
+-- sender's civ emblem tinted gold (EXP) / green (VOL) / light blue (CS),
+-- with the EFV_UI_StatusTooltip tooltip (0.7, FIXPLAN_0.7 item 4). No XML,
+-- no other overrides.
 -- Base code always runs first and outside EFV's pcalls; the first EFV error
 -- restores the base look of every badged flag and turns badges off for the
 -- session. EFV_Config.FLAG_FLAG_BADGES = false (and dropping the
@@ -63,16 +65,28 @@ include("EFV_UIShared")
 
 local LOG_TAG = "UIFlags"
 
--- Badge per force type. ReligionIcon has IconSize 22, so only atlases with a
--- 22 px size work (Icons_DiploActions, Icons_CityStates, Icons_Stats). The
--- text label (LOC_EFV_BADGE_*) heads the tooltip.
+-- Badge per force type (0.7, FIXPLAN_0.7 item 4). The icon is the LENDING
+-- civ's emblem ("ICON_" .. its civilization type, the base pattern of
+-- Instances/CivilizationIcon.lua:56): the 22 px civ emblems are white glyphs
+-- tinted in code (Icons_Civilizations.xml:4; EspionageOverview.lua:784-787),
+-- like the base religion icons in this slot (UnitFlagManager.lua:806-807).
+-- 0.6 used ICON_ATLAS_DIPLOACTIONS, a baked-colour set drawn untinted
+-- (DiplomacyActionView.xml:56): a dark glyph on the near-black religion tag
+-- (UnitFlagReligionTag), so the tester saw only a black bar. The tint (ABGR,
+-- format of Colors.lua:6-8) tells the force type: EXP gold, VOL green, CS
+-- light blue. A sender the local player has not met shows
+-- ICON_CIVILIZATION_UNKNOWN (CivilizationIcon.lua:47-57). SetIcon returning
+-- false (a modded civ without a 22 px emblem) walks FALLBACK_ICONS
+-- (Icons_Civilizations.xml:28; Icons_CityStates.xml:4,19). ReligionIcon has
+-- IconSize 22, so only atlases with a 22 px size work. The text label
+-- (LOC_EFV_BADGE_*) heads the tooltip.
 local BADGES = {
-	EXPEDITIONARY    = { icon = "ICON_DIPLOACTION_JOINT_WAR",          label = "LOC_EFV_BADGE_EXP" },
-	VOLUNTEER        = { icon = "ICON_DIPLOACTION_DECLARE_FRIENDSHIP", label = "LOC_EFV_BADGE_VOL" },
-	CS_EXPEDITIONARY = { icon = "ICON_CITYSTATE_MILITARISTIC",         label = "LOC_EFV_BADGE_CS" },
+	EXPEDITIONARY    = { color = 0xFF3CC8FF, label = "LOC_EFV_BADGE_EXP" },   -- gold
+	VOLUNTEER        = { color = 0xFF4BE810, label = "LOC_EFV_BADGE_VOL" },   -- green
+	CS_EXPEDITIONARY = { color = 0xFFFFC878, label = "LOC_EFV_BADGE_CS" },    -- light blue
 }
-local FALLBACK_ICON = "ICON_STRENGTH"   -- used if SetIcon reports a missing icon
-local BADGE_COLOR = 0xFFFFFFFF          -- undo a religion colour on a reused instance
+local UNKNOWN_ICON = "ICON_CIVILIZATION_UNKNOWN"
+local FALLBACK_ICONS = { UNKNOWN_ICON, "ICON_CITYSTATE_MILITARISTIC" }
 local BADGE_STATES = { DEPLOYED = true, GRACE = true, MUTINY = true }
 local POLL_EVENTS = { "PlayerTurnActivated", "UnitAddedToMap", "UnitRemovedFromMap",
 	"UnitSelectionChanged", "UnitMoveComplete", "LocalPlayerChanged" }
@@ -108,12 +122,37 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_ApplyBadge(flag)
 -- After the base UpdateReligion: if the flag's unit has a record in DEPLOYED
--- / GRACE / MUTINY, put the force-type icon into the religion tag with the
--- tooltip "[EXP] " .. EFV_UI_StatusTooltip(rec) (LOC_EFV_FLAG_TT: force,
--- unit, sender, recipient, state with remaining turns) and show it. Otherwise
--- the base result stands (the base hid or set the tag).
--- PLAN 3.5; spec 14.4; UnitFlagManager.lua:216, :796. APIs: U14, U07.
+-- / GRACE / MUTINY, put the sender's emblem (EmblemIcon) into the religion
+-- tag, tinted by force type, with the tooltip "[EXP] " ..
+-- EFV_UI_StatusTooltip(rec) (LOC_EFV_FLAG_TT: force, unit, sender,
+-- recipient, state with remaining turns) and show it. Otherwise the base
+-- result stands (the base hid or set the tag).
+-- PLAN 3.5; spec 14.4; FIXPLAN_0.7 item 4; UnitFlagManager.lua:216, :796.
+-- APIs: U14, U07, A62.
 -- ---------------------------------------------------------------------------
+
+-- Emblem of the sender as the local player may see it: "ICON_<civ type>",
+-- or ICON_CIVILIZATION_UNKNOWN when the local player (not the sender) has
+-- not met the sender or the civ type is unreadable.
+local function EmblemIcon(senderID)
+	local localID = Game.GetLocalPlayer()
+	if type(senderID) ~= "number" or senderID < 0 then
+		return UNKNOWN_ICON
+	end
+	if localID ~= nil and localID >= 0 and localID ~= senderID then
+		local pLocal = Players[localID]
+		if pLocal ~= nil and not pLocal:GetDiplomacy():HasMet(senderID) then
+			return UNKNOWN_ICON
+		end
+	end
+	local cfg = PlayerConfigurations[senderID]
+	local civType = (cfg ~= nil) and cfg:GetCivilizationTypeName() or nil
+	if type(civType) ~= "string" or civType == "" then
+		return UNKNOWN_ICON
+	end
+	return "ICON_" .. civType
+end
+
 local function EFV_ApplyBadge(flag)
 	local pUnit = flag:GetUnit()
 	local inst = flag.m_Instance
@@ -127,10 +166,15 @@ local function EFV_ApplyBadge(flag)
 		m_Badged[Key(pid, uid)] = nil
 		return
 	end
-	if inst.ReligionIcon:SetIcon(badge.icon) == false then
-		inst.ReligionIcon:SetIcon(FALLBACK_ICON)
+	local icon = EmblemIcon(rec.senderID)
+	if inst.ReligionIcon:SetIcon(icon) == false then
+		for _, fb in ipairs(FALLBACK_ICONS) do
+			if fb ~= icon and inst.ReligionIcon:SetIcon(fb) ~= false then
+				break
+			end
+		end
 	end
-	inst.ReligionIcon:SetColor(BADGE_COLOR)
+	inst.ReligionIcon:SetColor(badge.color)
 	inst.ReligionIconBacking:SetToolTipString("[" .. Locale.Lookup(badge.label) .. "] " .. EFV_UI_StatusTooltip(rec))
 	inst.ReligionIconBacking:SetHide(false)
 	m_Badged[Key(pid, uid)] = { pid, uid }

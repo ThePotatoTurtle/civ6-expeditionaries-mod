@@ -48,6 +48,8 @@
 --     never verified in the same call;
 --   * map focus on the unit: gameplay sends GRACE / MUTINY / MUTINY_DEATH
 --     with AlwaysAutoActivate and a LOCATION (EFV_Notify).
+--   * dev hook (0.7): LuaEvents.EFV_TrackerOpen() opens the panel (never
+--     toggles; EFV_Dev Shot 3); nothing fires it in normal play.
 -- ===========================================================================
 
 include("InstanceManager")
@@ -635,6 +637,13 @@ local function Initialize()
 	Events.UnitRemovedFromMap.Add(OnRefreshTrigger)
 	Events.LocalPlayerChanged.Add(OnRefreshTrigger)
 	Events.NotificationAdded.Add(OnNotificationAdded)
+	-- Dev hook (0.7, FIXPLAN_0.7 item 13; used by EFV_Dev's Shot buttons):
+	-- opens the panel, never toggles. Nobody fires it in normal play.
+	LuaEvents.EFV_TrackerOpen.Add(function()
+		if not m_PanelOpen then
+			OpenPanel()
+		end
+	end)
 	EFV_Log(2, LOG_TAG, "initialized")
 end
 

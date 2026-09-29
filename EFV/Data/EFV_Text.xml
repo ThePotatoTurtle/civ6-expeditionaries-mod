@@ -26,7 +26,10 @@
          (EXPIRY_SOON, GRACE, MUTINY) with the same argument order, but the
          civ argument is the RECIPIENT civ. Lapsed Volunteers (owned by the
          sender, Phase 3) get only the _SENDER texts.
-       RETURNING        1 Unit, 2 City (return city), 3 N transit turns
+         City-State units (0.7, note 33): the sender gets
+         LOC_EFV_NOTIF_EXPIRY_SOON_CS_MESSAGE / _SUMMARY instead of _SENDER
+         (same arguments; QueueAlert senderSuffix "_CS").
+       RETURNING       1 Unit, 2 City (return city), 3 N transit turns
        RETURNED         1 Unit, 2 City
        REROUTED         1 City (lost), 2 Unit, 3 NewCity
        VOLUNTEER_LAPSE  1 Recipient civ, 2 N grace turns
@@ -53,6 +56,14 @@
                                         1 recipient name(s) (EFV_UIShared
                                           NAME_REASON_LIST; comma-joined list
                                           in the Send-button summary)
+       LOC_EFV_REASON_WRONG_TERRITORY   1 land owner name (the player whose
+                                          territory the unit stands on, not
+                                          the row's recipient; 0.7)
+       LOC_EFV_PICKER_HEADER / _HEADER_CS none (EFV_UI_PickerHeaderText, 0.7)
+       LOC_EFV_PICKER_TILES             1 N distance in tiles (0.7)
+       LOC_EFV_PICKER_FEE               1 fee (> 0; a fee of 0 uses
+                                          LOC_EFV_FEE_FREE; 0.7)
+       LOC_EFV_PICKER_FROM_LAND         1 land owner name (0.7)
        LOC_EFV_STATE_*                  1 N (turns; see each row); _BLOCKED,
                                           _DEPLOYED_EXPIRED, _DEPLOYED_VOLUNTEER_READY
                                           take none
@@ -97,19 +108,19 @@
 			<Text>Send as Expeditionary</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_EXPEDITIONARY_TT" Language="en_US">
-			<Text>Lend this unit to an ally, teammate or declared friend who shares one of your wars. The unit travels off-map, then serves under their control for 20 turns and returns to you. It keeps its promotions; experience is kept only up to its next promotion. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
+			<Text>Lend this unit to an ally, teammate or declared friend who shares one of your wars. It can leave from your territory or from theirs. It travels off-map, serves under their control for 20 turns and comes back to you with its promotions and level. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_VOLUNTEER" Language="en_US">
 			<Text>Send as Volunteers</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_VOLUNTEER_TT" Language="en_US">
-			<Text>Send this unit to fight alongside an ally, teammate, or declared friend who grants you open borders, while you share a war. You keep control and pay its upkeep. It serves with no time limit and can be recalled after 10 turns. Costs a one-time [ICON_Gold] Gold fee (higher for farther destinations) plus normal maintenance while in transit.</Text>
+			<Text>Send this unit to fight alongside an ally, teammate, or declared friend who grants you open borders, while you share a war. It can leave from your territory or from theirs. You keep control and pay its upkeep. It serves with no time limit and can be recalled after 10 turns. Costs a one-time [ICON_Gold] Gold fee (higher for farther destinations) plus normal maintenance while in transit.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_CS" Language="en_US">
 			<Text>Send to City-State</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_CS_TT" Language="en_US">
-			<Text>Lend this unit to a city-state you have met that is at war with one of your enemies. The city-state controls it for 10 turns, then it returns to you. It keeps its promotions; experience is kept only up to its next promotion. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
+			<Text>Lend this unit to a city-state you have met that is at war with one of your enemies. It can leave from your territory or from the city-state's. The city-state controls it for 10 turns, then it comes home by itself, wherever it is, with its promotions and level. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_RECALL" Language="en_US">
 			<Text>Recall Volunteers</Text>
@@ -121,7 +132,7 @@
 			<Text>Lent Unit</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_STATUS_TT" Language="en_US">
-			<Text>This unit is serving abroad under a Volunteer &amp; Expeditionary Forces agreement.</Text>
+			<Text>This unit is serving abroad under a Volunteers &amp; Expeditionary Forces agreement.</Text>
 		</Row>
 		<!-- Send-button tooltip (EFV_UnitActions.lua): heading of the destination
 		     summary, followed by the distinct row reasons; and the line shown when
@@ -177,7 +188,7 @@
 			<Text>The unit is not at full health.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_REASON_NOT_OWN_TERRITORY" Language="en_US">
-			<Text>The unit must be in your own territory.</Text>
+			<Text>The unit must stand in your territory, or in the territory of the partner or city-state you send it to.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_REASON_EMBARKED" Language="en_US">
 			<Text>The unit is embarked.</Text>
@@ -224,6 +235,11 @@
 		</Row>
 		<Row Tag="LOC_EFV_REASON_REQ_STALE" Language="en_US">
 			<Text>The unit or city is no longer available.</Text>
+		</Row>
+		<!-- 0.7 (designer ruling "Send from the recipient's land", INTERFACES
+		     note 33): {1_Name} = the owner of the land the unit stands on. -->
+		<Row Tag="LOC_EFV_REASON_WRONG_TERRITORY" Language="en_US">
+			<Text>Standing in {1_Name}'s territory, the unit can only be sent to {1_Name}.</Text>
 		</Row>
 		<!-- recall -->
 		<Row Tag="LOC_EFV_REASON_RECALL_MIN_TURNS" Language="en_US">
@@ -331,23 +347,22 @@
 		<Row Tag="LOC_EFV_PICKER_TITLE" Language="en_US">
 			<Text>Choose Destination</Text>
 		</Row>
-		<Row Tag="LOC_EFV_COL_RECIPIENT" Language="en_US">
-			<Text>Recipient</Text>
+		<!-- 0.7 picker line format (INTERFACES note 33): EFV_UI_PickerHeaderText
+		     and EFV_UI_PickerRowText join the parts with " - ". -->
+		<Row Tag="LOC_EFV_PICKER_HEADER" Language="en_US">
+			<Text>Partner - City - Distance - Travel time - Fee - Service</Text>
 		</Row>
-		<Row Tag="LOC_EFV_COL_CITY" Language="en_US">
-			<Text>City</Text>
+		<Row Tag="LOC_EFV_PICKER_HEADER_CS" Language="en_US">
+			<Text>City-state - Distance - Travel time - Fee - Service</Text>
 		</Row>
-		<Row Tag="LOC_EFV_COL_DISTANCE" Language="en_US">
-			<Text>Distance</Text>
+		<Row Tag="LOC_EFV_PICKER_TILES" Language="en_US">
+			<Text>{1_Num} {1_Num : plural 1?tile; other?tiles;}</Text>
 		</Row>
-		<Row Tag="LOC_EFV_COL_TRANSIT" Language="en_US">
-			<Text>Transit</Text>
+		<Row Tag="LOC_EFV_PICKER_FEE" Language="en_US">
+			<Text>{1_Num} [ICON_Gold]</Text>
 		</Row>
-		<Row Tag="LOC_EFV_COL_FEE" Language="en_US">
-			<Text>Fee</Text>
-		</Row>
-		<Row Tag="LOC_EFV_COL_DURATION" Language="en_US">
-			<Text>Duration</Text>
+		<Row Tag="LOC_EFV_PICKER_FROM_LAND" Language="en_US">
+			<Text>This unit stands in {1_Name}'s territory, so it can only be sent to {1_Name}.</Text>
 		</Row>
 		<!-- 0.5.2 fee ruling: band 1 is free for Expeditionary and City-State
 		     Expeditionary; EFV_UI_FeeText shows "Free" for a fee of 0. -->
@@ -408,7 +423,7 @@
 		     Tracker, alert banner, unit flag (spec 14.4, 14.5; D9)
 		     ============================================================ -->
 		<Row Tag="LOC_EFV_TRACKER_TITLE" Language="en_US">
-			<Text>Volunteer &amp; Expeditionary Forces</Text>
+			<Text>Volunteers &amp; Expeditionary Forces</Text>
 		</Row>
 		<Row Tag="LOC_EFV_TRACKER_COL_UNIT" Language="en_US">
 			<Text>Unit</Text>
@@ -565,6 +580,15 @@
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_SENDER_SUMMARY" Language="en_US">
 			<Text>The service of your {1_Unit} with {3_Recipient} ends in {2_Num} {2_Num : plural 1?turn; other?turns;}. It returns home by itself if it is inside {3_Recipient}'s or your territory then; otherwise a grace period starts, after which it mutinies.</Text>
+		</Row>
+		<!-- City-State sender text (0.7, designer ruling "City-State units never
+		     mutiny", INTERFACES note 33): the _SENDER arguments (1 Unit, 2 N
+		     turns left, 3 Recipient = the city-state). -->
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_CS_MESSAGE" Language="en_US">
+			<Text>Service Ending Soon</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_EXPIRY_SOON_CS_SUMMARY" Language="en_US">
+			<Text>The service of your {1_Unit} with {3_Recipient} ends in {2_Num} {2_Num : plural 1?turn; other?turns;}. It then comes home by itself, wherever it is.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_GRACE_MESSAGE" Language="en_US">
 			<Text>WARNING: Unit Must Return</Text>

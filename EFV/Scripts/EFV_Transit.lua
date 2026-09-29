@@ -28,6 +28,12 @@
 --   REQUEST_FAILED {1 reason text (LOC_EFV_REASON_<CODE>)}
 -- extra = { recordID = rec.id, kind = <EFV_Config.NOTIF key> }.
 --
+-- 0.7 (INTERFACES note 33): a unit may be sent from the recipient's land
+-- (WRONG_TERRITORY names the land owner in REQUEST_FAILED), and a unit is
+-- settled (EFV_Veteran.Settle: an open veteran-restore job is finished)
+-- before it is validated and snapshotted for a send, and before StartReturn
+-- snapshots it, so no unit leaves the map half-restored.
+--
 -- MP rules (PLAN 1.6): records iterated by EFV_Records.IDs (sorted copy), no
 -- pairs(), no math.random (spawn RNG via EFV_Spawn.Pick), every request is
 -- re-validated in gameplay; playerID is the only authority on who asked.
@@ -89,12 +95,15 @@ end
 
 -- Localized reason text for EFV_NOTIF_REQUEST_FAILED (LOC_EFV_REASON_<CODE>).
 -- Argument contract (EFV_Text.xml): GOLD / FEE_CHANGED {1_Num} = fee;
--- NAME_REASONS {1_Name} = recipient civ name; all others none.
-local function ReasonText(code, fee, recipientID)
+-- NAME_REASONS {1_Name} = recipient civ name; WRONG_TERRITORY {1_Name} = the
+-- land owner's civ name (0.7); all others none.
+local function ReasonText(code, fee, recipientID, landOwnerID)
 	local key = "LOC_EFV_REASON_" .. tostring(code)
 	local arg = nil
 	if code == "GOLD" or code == "FEE_CHANGED" then
 		arg = fee or 0
+	elseif code == "WRONG_TERRITORY" then
+		arg = PlayerName(landOwnerID)
 	elseif NAME_REASONS[code] then
 		arg = PlayerName(recipientID)
 	end
@@ -207,12 +216,26 @@ VALID_FORCE[EFV_Config.FT_CS]  = true
 
 -- Rejects a send: logs every reason, notifies the requester with the first
 -- (fee = argument of GOLD / FEE_CHANGED; recipientID names the civ for the
--- recipient-level reasons).
-local function RejectSend(playerID, reasons, fee, recipientID)
+-- recipient-level reasons; landOwnerID names the land owner for
+-- WRONG_TERRITORY).
+local function RejectSend(playerID, reasons, fee, recipientID, landOwnerID)
 	EFV_Log(2, "Send", "rejected player=%s reasons=%s", tostring(playerID), table.concat(reasons, ","))
 	local first = reasons[1] or "REQ_STALE"
 	EFV_Notify.Queue(playerID, EFV_Config.NOTIF.REQUEST_FAILED, "LOC_" .. EFV_Config.NOTIF.REQUEST_FAILED,
-		{ ReasonText(first, fee, recipientID) }, nil, nil, { kind = "REQUEST_FAILED" })
+		{ ReasonText(first, fee, recipientID, landOwnerID) }, nil, nil, { kind = "REQUEST_FAILED" })
+end
+
+-- Finishes an open veteran-restore job of the unit (route B, item 7 step 5)
+-- before a removal snapshot. A failure is logged; the send / return goes on
+-- with the unit as it is.
+local function Settle(store, pUnit, tag)
+	if pUnit == nil or EFV_Veteran == nil or EFV_Veteran.Settle == nil then
+		return
+	end
+	local ok, err = pcall(EFV_Veteran.Settle, store, pUnit)
+	if not ok then
+		EFV_Log(1, tag, "veteran settle failed unit=%s: %s", tostring(pUnit:GetID()), tostring(err))
+	end
 end
 
 -- Body of OnRequestSend (spec 7.1). Mutations happen only after every check
@@ -243,13 +266,21 @@ local function SendBody(playerID, params, store)
 		return
 	end
 
+	-- 1b. Settle a pending veteran restore first (route B, 0.7), so the checks
+	--     and the snapshot below see the finished unit.
+	Settle(store, pUnit, "Send")
+
 	-- 2. Full re-validation with the shared rules (G adapters).
 	local ok, reasons, calc = EFV_EvaluateSend(playerID, pUnit, recipientID, pCity, forceType, store)
 	if not ok then
 		if reasons == nil or #reasons == 0 then
 			reasons = { "REQ_STALE" }
 		end
-		RejectSend(playerID, reasons, calc and calc.fee, recipientID)
+		local landOwnerID = EFV_SendLandOwner(pUnit, playerID)
+		if landOwnerID == -1 then
+			landOwnerID = nil
+		end
+		RejectSend(playerID, reasons, calc and calc.fee, recipientID, landOwnerID)
 		return
 	end
 	if calc == nil or calc.origin == nil or calc.fee == nil or calc.transit == nil then
@@ -344,6 +375,8 @@ end
 -- params.forceType, store); also reject if calc.fee > params.expectedFee
 -- (FEE_CHANGED, DV5); on failure queue EFV_NOTIF_REQUEST_FAILED to playerID
 -- with the first reason and log "[Send] rejected reasons=..."; else
+-- EFV_Veteran.Settle(store, pUnit) runs before the re-validation (0.7).
+-- WRONG_TERRITORY names the land owner (EFV_SendLandOwner). Then
 -- snapshot, EFV_Records.New (state OUTBOUND, sentTurn, arrivalTurn = turn +
 -- calc.transit, origin from calc.origin, dest, accessBasis = calc.basis,
 -- durationTurns, feePaid, snapshot fields), EFV_Units.Remove,
@@ -752,7 +785,8 @@ end
 -- (if pUnit), remove, state = "RETURNING", arrivalTurn = turn + band(city,
 -- destX, destY), returnCityID/X/Y, returnReason = reason, clear
 -- onMapPlayerID/onMapUnitID, graceTurnsLeft, lastDamage, lapse fields; queue
--- EFV_NOTIF_RETURNING (sender). If the unit cannot be removed the record is
+-- EFV_NOTIF_RETURNING (sender). A given pUnit is settled first
+-- (EFV_Veteran.Settle, 0.7). If the unit cannot be removed the record is
 -- left unchanged (logged; retried by the caller next turn) and false is
 -- returned. Logs "[Return] start reason=...".
 -- Params:  store; rec record; pUnit unit object or nil (then the stored
@@ -765,6 +799,8 @@ function EFV_Transit.StartReturn(store, rec, pUnit, reason, turn)
 	if turn == nil then
 		turn = CurrentTurn()
 	end
+	-- Route B (0.7): finish an open veteran-restore job before any snapshot.
+	Settle(store, pUnit, "Return")
 	local pCity = EFV_Transit.ResolveReturnCity(rec)
 	if pCity == nil then
 		if pUnit ~= nil then

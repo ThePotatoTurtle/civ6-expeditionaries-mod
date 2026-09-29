@@ -30,6 +30,9 @@
 -- engine's capture notification and end-turn blocker in place; the
 -- notification reopens RazeCity and this context rebuilds (armed state and
 -- picker reset on every open). The AI never sees this popup.
+--
+-- Dev hook (0.7): LuaEvents.EFV_EntrustExpand() expands the picker like a
+-- click on "Entrust..." (EFV_Dev Shot 5); nothing fires it in normal play.
 -- ===========================================================================
 
 include("InstanceManager")
@@ -332,6 +335,15 @@ local function Initialize()
 	ContextPtr:SetHide(false)
 	Controls.EntrustMainButton:RegisterCallback(Mouse.eLClick, OnMainButton)
 	LuaEvents.NotificationPanel_OpenRazeCityChooser.Add(OnOpenRazeCityChooser)
+	-- Dev hook (0.7, FIXPLAN_0.7 item 13; used by EFV_Dev's Shot buttons):
+	-- expands the recipient picker of the open capture popup once; no-op
+	-- when already expanded, before any capture popup, or (OnMainButton)
+	-- when the button is disabled or sent. Nobody fires it in normal play.
+	LuaEvents.EFV_EntrustExpand.Add(function()
+		if not m_Expanded and m_X ~= nil then
+			OnMainButton()
+		end
+	end)
 	EFV_Log(2, LOG_TAG, "initialized")
 end
 

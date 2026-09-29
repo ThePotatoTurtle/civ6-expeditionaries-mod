@@ -13,7 +13,9 @@
   "Sessions D/E integration (2026-09-28): GameEvents.OnGameTurnEnded (G C, Session E T26: once per round, after the engine heal; EFV's mutiny-floor boundary), notes on GameEvents.PlayerTurnStarted / PlayerTurnStartComplete (every living player incl. the human), Events.PlayerDefeat / PlayerDestroyed (G C, after the units are gone), GameEvents.PlayerDefeat (L, never fired), deal items GetDuration / GetEnactedTurn (G C), FindItemByType / GetFromPlayerID confirmed by behaviour (Session D T09/T19), HasAllied / HasDeclaredFriendship G only (nil/err in UI, Session E), city GetGold nil in G (Session D T09). Not added for rules: Events.PlayerTurnDeactivated, Events.TurnEnd (fire in G but are asynchronous UI events).",
   "Session F integration (0.5.2, 2026-09-28): GameInfo.UnitReplaces / CivilizationTraits / LeaderTraits (upgrade into a civilization's unique unit, T30), PlayerConfigurations :GetCivilizationTypeName / :GetLeaderTypeName (owner of the unique unit), Events.UnitUpgraded (G, async: carries the NEW unit ID; not used for rules), UnitManager.PlaceUnit G confirmed (T29; EFV_Dev only).",
   "EFV_Dev 0.6.0-dev.1 final-session scenarios (2026-09-28): :GetTechs / :SetTech (G, grant the upgrade target's tech, S5), GameInfo.Technologies, and the UI promotion command UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the S6 veteran route B. EFV_Dev only.",
-  "EFV_Dev 0.6.1-dev.1 (2026-09-28): the final session starts from a brand-new game, so S0 (and S5/S7/S11) build what a new game lacks: PlayersVisibility :ChangeVisibilityCount (reveal), :GetCulture / :SetCivic (Early Empire for open borders, S5 target civic), the scripted open-borders deal (DealManager working deal, DealDirection.OUTGOING, :AddItemOfType / :SetSubType / :SetDuration / :SetLocked / :Validate), CityManager.GetDistrictAt + DefenseTypes (city HP / walls for S7 / S11), UnitManager.RestoreMovementToFormation (created unit without moves), GameInfo.Civics. EFV_Dev only; evidence in refs."
+  "EFV_Dev 0.6.1-dev.1 (2026-09-28): the final session starts from a brand-new game, so S0 (and S5/S7/S11) build what a new game lacks: PlayersVisibility :ChangeVisibilityCount (reveal), :GetCulture / :SetCivic (Early Empire for open borders, S5 target civic), the scripted open-borders deal (DealManager working deal, DealDirection.OUTGOING, :AddItemOfType / :SetSubType / :SetDuration / :SetLocked / :Validate), CityManager.GetDistrictAt + DefenseTypes (city HP / walls for S7 / S11), UnitManager.RestoreMovementToFormation (created unit without moves), GameInfo.Civics. EFV_Dev only; evidence in refs.",
+  "0.7.0-dev WP3 (2026-09-28, INTERFACES note 33): veteran route B. EFV/UI/EFV_VetRestore.lua may issue UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the local player's own unit, and reads UnitManager.CanStartCommand / UnitCommandResults.PROMOTIONS (base UnitPromotionPopup pattern). Gameplay owns the job state (EFV_Veteran).",
+  "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons (2026-09-29, workshop/SCREENSHOTS.md B5, FIXPLAN_0.7 item 13): the panel's map zoom (UI.GetMapZoom / UI.SetMapZoom, base WorldInput.lua) and Shot 4's Tank attack, the base RequestMoveOperation call (UnitManager.CanStartOperation / RequestOperation with UnitOperationTypes.MOVE_TO, PARAM_X / PARAM_Y / PARAM_MODIFIERS and UnitOperationMoveModifiers.ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, Civ6Common.lua:147-163). EFV_Dev only; all pcall-guarded and not yet run from a mod context (level L until the screenshot session)."
  ],
  "globals": {
   "include": {
@@ -91,6 +93,18 @@
     "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1342 (gameplay)"
    ],
    "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationMoveModifiers": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
    "only_paths": [
     "EFV_Dev/"
    ]
@@ -542,11 +556,13 @@
    },
    "refs": [
     "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:70-72 (the human promotion route)",
-    "spike/EFV_SpikeTest/UI/EFV_SpikeTest_Panel.lua T08G (Session G plan)"
+    "spike/EFV_SpikeTest/UI/EFV_SpikeTest_Panel.lua T08G (Session G plan)",
+    "research/final_session/TESTING_FINAL_results.md step 14 (S6: route B keeps the level); EFV_Dev/UI/EFV_Dev_Panel.lua:432-434"
    ],
-   "note": "EFV_Dev S6 route B only (PROMOTE); EFV itself never issues unit commands",
+   "note": "PROMOTE only: EFV_Dev S6 and the 0.7 veteran route B (EFV_VetRestore, the owner's own unit, INTERFACES note 33; designer ruling, precedent Entrust's KEEP). EFV issues no other unit command.",
    "only_paths": [
-    "EFV_Dev/"
+    "EFV_Dev/",
+    "EFV/UI/EFV_VetRestore.lua"
    ]
   },
   "UnitCommandTypes.PROMOTE": {
@@ -557,7 +573,8 @@
     "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:72, :81"
    ],
    "only_paths": [
-    "EFV_Dev/"
+    "EFV_Dev/",
+    "EFV/UI/EFV_VetRestore.lua"
    ]
   },
   "UnitCommandTypes.PARAM_PROMOTION_TYPE": {
@@ -568,8 +585,29 @@
     "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:71"
    ],
    "only_paths": [
-    "EFV_Dev/"
+    "EFV_Dev/",
+    "EFV/UI/EFV_VetRestore.lua"
    ]
+  },
+  "UnitManager.CanStartCommand": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:81-82, 285-290 (CanStartCommand(pUnit, UnitCommandTypes.PROMOTE, true, true) -> bCanStart, tResults)",
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:437-440"
+   ],
+   "note": "0.7 veteran route B (EFV_VetRestore): which promotions the engine offers now (INTERFACES note 33)."
+  },
+  "UnitCommandResults.PROMOTIONS": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Popups/UnitPromotionPopup.lua:285-290 (tResults[UnitCommandResults.PROMOTIONS] = GameInfo.UnitPromotions indexes)",
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:437-440"
+   ],
+   "note": "0.7 veteran route B (EFV_VetRestore, INTERFACES note 33)."
   },
   "DealManager.ClearWorkingDeal": {
    "ctx": {
@@ -681,6 +719,126 @@
     "GAME/DLC/BlackDeathScenario/Scripts/BlackDeathScenario_UnitCommands.lua:281 (after UnitManager.RestoreUnitAttacks; gameplay: same function spends faith with GetReligion():ChangeFaithBalance)"
    ],
    "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game; only when a created Swordsman lacks full moves",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UI.GetMapZoom": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:346, 356 (touch zoom), :1202-1206 (keyboard zoom), :1457-1464 (mouse wheel)"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UI.SetMapZoom": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:346, 356 (touch zoom), :1202-1206 (keyboard zoom), :1457-1464 (mouse wheel)"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitManager.CanStartOperation": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitManager.RequestOperation": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationTypes.MOVE_TO": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationTypes.PARAM_X": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationTypes.PARAM_Y": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationTypes.PARAM_MODIFIERS": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationMoveModifiers.ATTACK": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationMoveModifiers.MOVE_IGNORE_UNEXPLORED_DESTINATION": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
+   ],
+   "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
    "only_paths": [
     "EFV_Dev/"
    ]

@@ -22,7 +22,10 @@
 -- WP7.2 (tracker panel): EFV_UI_TrackerRows, EFV_UI_TrackerState,
 -- EFV_UI_TrackerTurns, EFV_UI_TrackerPlace, EFV_UI_TrackerCounts (pure
 -- functions over the UI store; the panel only renders their rows).
--- 0.5.2 (fee ruling, band 1 free): EFV_UI_FeeText, EFV_UI_FeeCell.
+-- 0.5.2 (fee ruling, band 1 free): EFV_UI_FeeText.
+-- 0.7 (INTERFACES note 33): EFV_UI_PickerRowText, EFV_UI_PickerHeaderText
+-- (one formatted line per picker row; EFV_UI_FeeCell removed);
+-- EFV_UI_RowReasonCtx names the land owner for WRONG_TERRITORY.
 -- Phase 6 (Entrust, WP6.2): EFV_UI_EntrustState, EFV_UI_EntrustReasonsText
 -- (the capture popup's buttons, from the gameplay snapshot and the shared
 -- Entrust rules).
@@ -38,8 +41,11 @@
 --   LOC_EFV_REASON_GOLD / _FEE_CHANGED {1_Num} = fee; LOC_EFV_REASON_NOT_PARTNER /
 --     _VOL_NEEDS_ACCESS / _CS_NOT_MET / _AT_WAR_WITH_RECIPIENT /
 --     _NO_COMMON_WAR {1_Name} (one civ name or a comma list);
+--     LOC_EFV_REASON_WRONG_TERRITORY {1_Name} = land owner (row.landOwnerID);
 --     LOC_EFV_REASON_RECALL_MIN_TURNS {1_Num}; LOC_EFV_REASON_ENTRUST_NO_PARTNER
 --     {1_Name} = former owner; all other reasons: none.
+--   LOC_EFV_PICKER_HEADER / _HEADER_CS none; LOC_EFV_PICKER_TILES {1_Num};
+--     LOC_EFV_PICKER_FEE {1_Num} (fee > 0; 0 -> LOC_EFV_FEE_FREE).
 --   LOC_EFV_ENTRUST_NOT_AT_WAR {1_List} partners {2_Name} former owner;
 --     LOC_EFV_ENTRUST_NO_PARTNERS none.
 --   LOC_EFV_TRACKER_ST_* none; LOC_EFV_TRACKER_ST_LAPSE {1_State};
@@ -134,13 +140,14 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_UI_ReadStore() -> uiStore
--- Reads EFV_RecordIDs, EFV_Records, EFV_Entrust, EFV_Rev with
+-- Reads EFV_RecordIDs, EFV_Records, EFV_Entrust, EFV_VetJobs (0.7), EFV_Rev with
 -- Game:GetProperty (A06 UI), decoding with EFV_Records.Decode when the value
 -- is a string (FLAG_PERSIST_AS_STRING). Missing keys -> empty tables / 0.
 -- Cached per (EFV_Rev, turn); the result is shared and read-only.
 -- Params:  none.
 -- Returns: { ids = {..}, recs = { ["r"..id] = rec }, entrust = { ["p"..idx] =
---          snap }, rev = n } (never nil).
+--          snap }, vet = { job.. } (0.7, INTERFACES note 33; missing -> {}),
+--          rev = n } (never nil).
 -- PLAN 3.1, 1.3. APIs: A06, A04.
 -- ---------------------------------------------------------------------------
 function EFV_UI_ReadStore()
@@ -156,11 +163,13 @@ function EFV_UI_ReadStore()
 	local ids = ReadProp(EFV_Config.PROP.RECORD_IDS)
 	local recs = ReadProp(EFV_Config.PROP.RECORDS)
 	local entrust = ReadProp(EFV_Config.PROP.ENTRUST)
+	local vet = ReadProp(EFV_Config.PROP.VET)
 	if type(ids) ~= "table" then ids = {} end
 	if type(recs) ~= "table" then recs = {} end
 	if type(entrust) ~= "table" then entrust = {} end
+	if type(vet) ~= "table" then vet = {} end
 
-	local store = { ids = ids, recs = recs, entrust = entrust, rev = rev }
+	local store = { ids = ids, recs = recs, entrust = entrust, vet = vet, rev = rev }
 	m_Cache = { rev = rev, turn = turn, store = store, byUnit = nil }
 	EFV_Log(3, "UIShared", "store read rev=%d ids=%d", rev, #ids)
 	return store
@@ -345,24 +354,65 @@ function EFV_UI_FeeText(fee)
 end
 
 -- ---------------------------------------------------------------------------
--- EFV_UI_FeeCell(fee) -> text   (added 0.5.2)
--- The picker's fee column: 0 -> LOC_EFV_FEE_FREE, n -> "n[ICON_Gold]", nil
--- -> "-".
+-- EFV_UI_PickerRowText(row, forceType) -> text   (added 0.7, note 33)
+-- One destination row as a single line, parts joined with " - ":
+-- recipient name; the city name unless it equals the recipient name (a
+-- city-state's city usually does); then, with row.calc: distance
+-- (LOC_EFV_PICKER_TILES), travel time (EFV_UI_DurationText(transit)), fee
+-- (0 -> LOC_EFV_FEE_FREE, else LOC_EFV_PICKER_FEE) and service
+-- (EFV_UI_DurationText(duration)); without calc only the service of the
+-- force type (EFV_Duration). E.g. "Rome - Roma - 34 tiles - 4 turns -
+-- 108 [ICON_Gold] - 20 turns".
+-- Params:  row destination row, forceType EFV_Config.FT_*.
+-- Returns: string.
+-- APIs: U17 (+ name helpers).
 -- ---------------------------------------------------------------------------
-function EFV_UI_FeeCell(fee)
-	if type(fee) ~= "number" then
-		return "-"
+function EFV_UI_PickerRowText(row, forceType)
+	if type(row) ~= "table" then
+		return ""
 	end
-	if fee <= 0 then
-		return SafeLookup("LOC_EFV_FEE_FREE")
+	local name = EFV_UI_PlayerName(row.recipientID)
+	local parts = { name }
+	local city = EFV_UI_CityName(row.recipientID, row.cityID, row.destX, row.destY)
+	if city ~= name then
+		parts[#parts + 1] = city
 	end
-	return tostring(fee) .. "[ICON_Gold]"
+	local calc = row.calc
+	if type(calc) == "table" then
+		parts[#parts + 1] = SafeLookup("LOC_EFV_PICKER_TILES", calc.distance or 0)
+		parts[#parts + 1] = EFV_UI_DurationText(calc.transit or 0)
+		if type(calc.fee) ~= "number" then
+			parts[#parts + 1] = "-"
+		elseif calc.fee <= 0 then
+			parts[#parts + 1] = SafeLookup("LOC_EFV_FEE_FREE")
+		else
+			parts[#parts + 1] = SafeLookup("LOC_EFV_PICKER_FEE", calc.fee)
+		end
+		parts[#parts + 1] = EFV_UI_DurationText(calc.duration)
+	else
+		local okD, d = pcall(EFV_Duration, forceType)
+		parts[#parts + 1] = EFV_UI_DurationText(okD and d or nil)
+	end
+	return table.concat(parts, " - ")
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_PickerHeaderText(forceType) -> text   (added 0.7, note 33)
+-- The picker's header line: LOC_EFV_PICKER_HEADER_CS for City-State sends
+-- (no separate city part), else LOC_EFV_PICKER_HEADER.
+-- ---------------------------------------------------------------------------
+function EFV_UI_PickerHeaderText(forceType)
+	if forceType == EFV_Config.FT_CS then
+		return SafeLookup("LOC_EFV_PICKER_HEADER_CS")
+	end
+	return SafeLookup("LOC_EFV_PICKER_HEADER")
 end
 
 -- ---------------------------------------------------------------------------
 -- EFV_UI_RowReasonCtx(row, senderID) -> ctx   (added helper)
 -- Lookup arguments for the reason codes of one destination row:
--- GOLD / FEE_CHANGED = { fee }, recipient-named codes = { civ name }.
+-- GOLD / FEE_CHANGED = { fee }, recipient-named codes = { civ name },
+-- WRONG_TERRITORY = { land owner's name } (row.landOwnerID, 0.7).
 -- APIs: none (senderID kept for signature compatibility).
 -- ---------------------------------------------------------------------------
 function EFV_UI_RowReasonCtx(row, senderID)
@@ -377,6 +427,7 @@ function EFV_UI_RowReasonCtx(row, senderID)
 	local fee = (row.calc ~= nil) and row.calc.fee or nil
 	ctx.GOLD = { fee or 0 }
 	ctx.FEE_CHANGED = { fee or 0 }
+	ctx.WRONG_TERRITORY = { EFV_UI_PlayerName(row.landOwnerID) }
 	return ctx
 end
 

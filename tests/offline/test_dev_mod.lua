@@ -260,7 +260,7 @@ end
 -- civ has founded its capital) plus city-states 5 and 6, but nobody has met
 -- anybody, there is no war, friendship, alliance or open borders, and
 -- player 0 has revealed only the land around its own cities.
-local function FreshBoot()
+local function FreshBoot(opts)
 	H.world({ turn = 2 })
 	local S = {}
 	S.c0 = H.city(0, 10, 10, { capital = true, name = "LOC_CITY_A" })
@@ -277,14 +277,14 @@ local function FreshBoot()
 		local p = Map.GetPlotByIndex(i)
 		if H.dist(p, S.c0) > 3 and H.dist(p, S.c0b) > 3 then FAKE.unrevealed[0][i] = true end
 	end
-	H.loadEFV()
+	H.loadEFV(opts)
 	FAKE.dofile("EFV_Dev/Scripts/EFV_Dev_Gameplay.lua")
 	H.markBody()
 	return S
 end
 
-local function Setup()
-	local S = FreshBoot()
+local function Setup(opts)
+	local S = FreshBoot(opts)
 	Dev("scn_setup", { stamp = 1 })
 	H.ok(CheckLine("SETUP", "PASS"), "S0 setup passes")
 	return S
@@ -588,8 +588,10 @@ end)
 test("final S10: combat during mutiny: damage seen at the event, kept through the heal, +20 next turn", function()
 	Setup()
 	Dev("scn_t31")
-	local u = Named(0, "VEF-T31")
-	H.notnil(u)
+	H.len(H.unitsOf(0, "UNIT_SPEARMAN"), 1)
+	local u = H.unitsOf(0, "UNIT_SPEARMAN")[1]
+	H.eq(u.vetName or "", "", "0.7 (item 9): no custom name, the unit panel and the tracker both say Spearman")
+	H.ok(H.hasLine("the UNIT_SPEARMAN in mutiny (the camera selects it)"))
 	local barb = H.unitsOf(63, "UNIT_WARRIOR")
 	H.len(barb, 2)
 	H.combat(u, barb[1], 30, 25)
@@ -597,7 +599,36 @@ test("final S10: combat during mutiny: damage seen at the event, kept through th
 	H.endTurn({ heal = 10 })
 	H.ok(CheckLine("T31", "PASS"))
 	H.ok(H.hasLine("damage 45"))
-	H.len(H.records(), 0, "cleaned up")
+	H.len(H.records(), 0, "record closed")
+	H.clean()
+end)
+
+test("final S10 (0.7 item 10): the test units are removed at OnGameTurnEnded, never at your PlayerTurnStartComplete", function()
+	Setup()
+	Dev("scn_t31")
+	local u = H.unitsOf(0, "UNIT_SPEARMAN")[1]
+	H.combat(u, H.unitsOf(63, "UNIT_WARRIOR")[1], 30, 25)
+	local removedAt = {}
+	local hook = nil
+	GameEvents.PlayerTurnStartComplete.Add(function(pid) hook = nil end)
+	GameEvents.PlayerTurnStarted.Add(function(pid) hook = "PTS" .. pid end)
+	local realRemove = FAKE.RemoveUnit
+	FAKE.RemoveUnit = function(unit, why)
+		removedAt[#removedAt + 1] = { owner = unit.owner, hook = hook, turn = FAKE.turn }
+		return realRemove(unit, why)
+	end
+	H.endTurn()
+	H.ok(CheckLine("T31", "PASS"))
+	H.ok(H.unitAlive(u), "the Spearman is still there after the verdict (removing it at PTSC broke SelectedUnit.lua:195)")
+	H.len(H.unitsOf(63, "UNIT_WARRIOR"), 2, "Barbarians too")
+	H.len(removedAt, 0, "nothing removed during the turn start")
+	H.ok(H.hasLine("removed when you end this turn"))
+	H.endTurn()
+	FAKE.RemoveUnit = realRemove
+	H.ok(not H.unitAlive(u), "removed at the end of that turn")
+	H.len(H.unitsOf(63, "UNIT_WARRIOR"), 0)
+	H.ok(H.hasLine("removed 3 of 3 test unit(s)"))
+	H.isnil(H.prop("EFV_DEV_SCN").cleanup, "list cleared")
 	H.clean()
 end)
 
@@ -605,7 +636,7 @@ test("final S10: damage applied after the combat event -> T31_EVENT CHECK", func
 	Setup()
 	FAKE.combatDamageBeforeEvent = false
 	Dev("scn_t31")
-	local u = Named(0, "VEF-T31")
+	local u = H.unitsOf(0, "UNIT_SPEARMAN")[1]
 	H.combat(u, H.unitsOf(63, "UNIT_WARRIOR")[1], 30, 25)
 	H.ok(CheckLine("T31_EVENT", "CHECK"))
 end)
@@ -616,8 +647,8 @@ test("final S11: C has only its capital -> a new small city is founded for C, we
 	Dev("scn_entrust")
 	H.ok(CheckLine("ENTRUST", "INFO"))
 	H.ok(H.hasLine("new city founded for"))
-	local s12 = H.prop("EFV_DEV_SCN").s12
-	local city = CityManager.GetCityAt(s12.cx, s12.cy)
+	local s11 = H.prop("EFV_DEV_SCN").s11
+	local city = CityManager.GetCityAt(s11.cx, s11.cy)
 	H.notnil(city)
 	H.eq(city:GetOwner(), 3); H.ne(city.id, S.c3.id, "not C's capital (taking it would eliminate C)")
 	local d = H.dist(city, S.c0)
@@ -639,8 +670,8 @@ test("final S11: C already has a second city -> that one (nearest non-capital), 
 	Setup()
 	local c3b = H.city(3, 30, 40, { name = "LOC_CITY_C2" })
 	Dev("scn_entrust")
-	local s12 = H.prop("EFV_DEV_SCN").s12
-	H.eq(s12.cx, c3b.x); H.eq(s12.cy, c3b.y)
+	local s11 = H.prop("EFV_DEV_SCN").s11
+	H.eq(s11.cx, c3b.x); H.eq(s11.cy, c3b.y)
 	H.ok(not H.hasLine("new city founded"))
 	H.len(FAKE.CitiesOf(3), 2)
 end)
@@ -652,9 +683,10 @@ test("final panel: scenario buttons send stamped requests; Go to scenario looks 
 	local p = FAKE_UI.requests[#FAKE_UI.requests].params
 	H.eq(p.cmd, "scn_setup")
 	H.ok(type(p.stamp) == "number" and p.stamp > 0, "stamp")
-	for _, label in ipairs({ "S1 Arrive next turn", "S2 Expire CS unit", "S3 Grace/mutiny step", "S4 Lapse on/off", "S5 Upgrade test",
-		"S6 Veteran copies", "S7 Killed unit", "S8 Relink guard", "S9 Crowded arrival", "S10 Mutiny combat", "S11 Entrust city",
-		"Go to scenario", "Check now" }) do
+	for _, label in ipairs({ "S1 Arrive next turn", "S2 Expire CS unit (off its land)", "S3 Grace/mutiny step", "S4 Lapse on/off",
+		"S5 Upgrade test", "S6 Veteran copies", "S7 Killed unit", "S8 Relink guard", "S9 Crowded arrival", "S10 Mutiny combat",
+		"S11 Entrust city", "S12 Veteran return", "S13 Unit in B's land", "Go to scenario", "Check now",
+		"Shot 1 Send picker", "Shot 2 Arrival", "Shot 3 Tracker", "Shot 4 Entrust", "Shot 5 Mutiny" }) do
 		H.notnil(FAKE_UI.FindButton(label), label)
 	end
 	H.ok(string.find(Controls.InfoLabel:GetText(), "start a NEW game, then press S0", 1, true) ~= nil, "no session yet")
@@ -671,4 +703,400 @@ test("final panel: scenario buttons send stamped requests; Go to scenario looks 
 	looked = nil
 	FAKE_UI.FindButton("Go to scenario"):Click()
 	H.deq(looked, { S.c1.x, S.c1.y })
+end)
+
+-- ---------------------------------------------------------------------------
+-- 0.7 re-test scenarios (EFV/TESTING_RETEST_0.7.md; FIXPLAN_0.7 WP5):
+-- S2 off the city-state's land, S9 ruling, S12 veteran return (route B, UI
+-- checks), S13 unit in B's land, LAPSE_TEXT.
+-- ---------------------------------------------------------------------------
+local function IsNeutral(u) return Map.GetPlot(u:GetX(), u:GetY()):GetOwner() < 0 end
+
+test("0.7 S2: the City-State unit is moved onto neutral land and comes home at once, without grace", function()
+	local S = Setup()
+	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 4, S.c4, "CS_EXPEDITIONARY", 999)
+	Arrive()
+	local r = H.records()[1]
+	Dev("scn_expire_cs")
+	local u = Players[4]:GetUnits():FindID(r.onMapUnitID)
+	H.ok(IsNeutral(u), "moved off the city-state's land")
+	H.ok(H.dist(u, S.c4) <= 7)
+	H.ok(H.hasLine("stands on neutral land"))
+	H.clearNotifs()
+	H.endTurn()
+	H.ok(CheckLine("EXPIRE", "PASS"))
+	H.ok(H.hasLine("going home without grace"))
+	H.eq(H.records()[1].state, "RETURNING")
+	H.len(H.notifs(0, EFV_Config.NOTIF.GRACE), 0, "no grace notification")
+	H.clean()
+end)
+
+test("0.7 S9: one free ring-2 tile left -> placed there, PASS (ruling: crowded arrival accepted)", function()
+	local S = Setup()
+	Dev("scn_place")
+	H.ok(H.hasLine("Warriors fill the free land tiles of rings 1-2"))
+	H.ok(H.hasLine("expected ring"), "DryRun logged as info")
+	local st = H.prop("EFV_DEV_SCN")
+	local freed = nil
+	for _, id in ipairs(st.s9.fill) do
+		local w = FAKE.units[id]
+		if freed == nil and w ~= nil and H.dist(w, S.c1) == 2 then freed = { x = w.x, y = w.y }; H.killUnit(w) end
+	end
+	H.notnil(freed, "a ring-2 filler removed")
+	H.endTurn()
+	H.ok(CheckLine("CROWDED", "PASS"))
+	H.ok(H.hasLine("placed at ring 2 plot=" .. freed.x .. "," .. freed.y))
+	H.ok(H.hasLine("the nearest ring with a free valid tile"))
+	H.clean()
+end)
+
+test("0.7 S9: an inner valid tile skipped -> CHECK", function()
+	local S = Setup()
+	Dev("scn_place")
+	local st = H.prop("EFV_DEV_SCN")
+	-- After the arrival (turn start pipeline), before the check at the human's
+	-- PlayerTurnStartComplete: a ring-1 tile becomes free.
+	GameEvents.PlayerTurnStarted.Add(function(pid)
+		if pid ~= 0 then return end
+		for _, id in ipairs(st.s9.fill) do
+			local w = FAKE.units[id]
+			if w ~= nil and H.dist(w, S.c1) == 1 then H.killUnit(w); return end
+		end
+	end)
+	H.endTurn()
+	H.ok(CheckLine("CROWDED", "CHECK"))
+	H.ok(H.hasLine("ring 1 still has a valid free tile"))
+end)
+
+-- Pumps UI contexts (FAKE_UI) and delivers their requests to gameplay like
+-- EXECUTE_SCRIPT (the test_070_vet pattern).
+local function Pump(envs, n)
+	for _ = 1, n do
+		for _, env in ipairs(envs) do FAKE_UI.Update(env, 0.3) end
+		local reqs = FAKE_UI.requests
+		FAKE_UI.requests = {}
+		for _, r in ipairs(reqs) do
+			FAKE_UI.AsGameplay(function() H.request(r.pid, r.params) end)
+		end
+	end
+end
+
+local function PanelUI()
+	include("fake_ui")
+	FAKE_UI.Enable()
+	return FAKE_UI.LoadContext("EFV_Dev/UI/EFV_Dev_Panel.lua")
+end
+
+test("0.7 S12: veteran return, route B end to end: level 3, two promotions, 50/90 XP, 30 damage (VET_RESTORE, VET_RESTORE_LEVEL)", function()
+	local S = Setup({ routeB = true })
+	Dev("scn_vetret", { stamp = 12 })
+	H.ok(CheckLine("VET_RESTORE", "INFO"))
+	local r = H.records()[1]
+	H.eq(r.state, "RETURNING"); H.eq(r.forceType, "VOLUNTEER"); H.eq(r.recipientID, 1); H.eq(r.arrivalTurn, FAKE.turn + 1)
+	H.eq(r.level, 3); H.eq(r.experience, 50); H.eq(r.xpNext, 90); H.eq(r.damage, 30); H.eq(r.veteranName, "VEF-VET")
+	H.len(r.promotions, 2)
+	for _, name in ipairs(r.promotions) do
+		local row = GameInfo.UnitPromotions[name]
+		H.eq(row.PromotionClass, GameInfo.Units["UNIT_WARRIOR"].PromotionClass); H.eq(row.Level, 1)
+	end
+	H.endTurn()
+	H.len(H.records(), 0, "arrived")
+	H.ok(H.hasLine("is home (unit"), "the job is named at the turn start")
+	local st = H.prop("EFV_DEV_SCN")
+	H.notnil(st.s12.uid)
+	local u = FAKE.units[st.s12.uid]
+	H.eq(u.vetName, "VEF-VET")
+	H.ok(H.dist(u, S.c0) <= 5, "next to your capital")
+	H.ok(not H.hasLine("[EFV][CHECK] VET_RESTORE PASS"), "no verdict while the job is open")
+	include("fake_ui")
+	FAKE_UI.Enable()
+	local vet = FAKE_UI.LoadContext("EFV/UI/EFV_VetRestore.lua")
+	local panel = FAKE_UI.LoadContext("EFV_Dev/UI/EFV_Dev_Panel.lua")
+	Pump({ vet, panel }, 12)
+	H.eq(u:GetExperience():GetLevel(), 3)
+	H.ok(CheckLine("VET_RESTORE_LEVEL", "PASS"), "UI level check")
+	H.ok(H.hasLine("level 3 (expected 3), XP 50/90, damage 30"))
+	H.ok(H.hasLine("unit panel name"), "the UI-side name is logged (item 9 evidence)")
+	H.ok(CheckLine("VET_RESTORE", "PASS"), "gameplay verdict after the panel's Check now")
+	H.ok(H.hasLine("XP 50/90 (expected 50/90), promotions 2/2, damage 30"))
+	H.len(H.lines("[EFV][CHECK] VET_RESTORE_LEVEL"), 1, "once")
+	H.clean()
+end)
+
+test("0.7 S12: route B off -> the clamp path is reported as CHECK", function()
+	Setup()
+	Dev("scn_vetret")
+	H.endTurn()
+	H.ok(CheckLine("VET_RESTORE", "CHECK"), "no job: verdict at once from the named unit")
+	H.ok(H.hasLine("expected 50/90"))
+end)
+
+test("0.7 S13: a Spearman in B's land: B's rows open, others WRONG_TERRITORY; sent to B -> FROM_LAND PASS", function()
+	local S = Setup()
+	Dev("scn_inland", { stamp = 13 })
+	local sp = H.unitsOf(0, "UNIT_SPEARMAN")
+	H.len(sp, 1)
+	local u = sp[1]
+	H.eq(u.vetName or "", "", "no custom name")
+	H.eq(Map.GetPlot(u.x, u.y):GetOwner(), 1, "on B's land")
+	H.ok(H.dist(u, S.c1) <= 3)
+	H.eq(u:GetMovesRemaining(), u:GetMaxMoves(), "full moves")
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.o, 0); H.eq(st.focus.u, u.id, "the camera selects it"); H.eq(st.focus.stamp, 13)
+	H.ok(CheckLine("FROM_LAND_RULES", "PASS"))
+	H.ok(H.hasLine("other row(s) WRONG_TERRITORY"))
+	H.send(0, u, 1, S.c1, "EXPEDITIONARY", 999)
+	local r = H.records()[1]
+	H.notnil(r, "the send from B's land is accepted")
+	H.eq(r.recipientID, 1)
+	H.endTurn()
+	H.ok(CheckLine("FROM_LAND", "PASS"))
+	H.clean()
+end)
+
+test("0.7 S13: not sent -> FROM_LAND CHECK at the next turn start", function()
+	Setup()
+	Dev("scn_inland")
+	H.endTurn()
+	H.ok(CheckLine("FROM_LAND", "CHECK"))
+end)
+
+test("0.7 LAPSE_TEXT: the panel reads the paused lapse text from the tracker's state function", function()
+	local S = Setup()
+	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1, "VOLUNTEER", 999)
+	Arrive()
+	Dev("scn_lapse")
+	H.endTurn()
+	H.ok(CheckLine("LAPSE", "PASS"))
+	local panel = PanelUI()
+	Pump({ panel }, 3)
+	H.ok(CheckLine("LAPSE_TEXT", "PASS"))
+	H.ok(H.hasLine("'Lapse: Grace 5 (paused)'"))
+	Pump({ panel }, 3)
+	H.len(H.lines("[EFV][CHECK] LAPSE_TEXT"), 1, "once per record")
+end)
+
+-- ---------------------------------------------------------------------------
+-- Workshop Shot buttons (WP6; workshop/SCREENSHOTS.md Part B). Gameplay:
+-- each Shot runs from a fresh game (S0 inside), removes the previous shot's
+-- records and units, and writes st.focus for the panel.
+-- ---------------------------------------------------------------------------
+local function Recs(pred)
+	local out = {}
+	for _, r in ipairs(H.records()) do if pred == nil or pred(r) then out[#out + 1] = r end end
+	return out
+end
+
+test("shot1: from a fresh game (S0 inside): 'Legio VEF' next to your capital, B and F get a second city, D greyed, focus PICKER", function()
+	local S = FreshBoot()
+	FAKE.NewPlayer(7, { gold = 0 })
+	local c7 = H.city(7, 60, 10, { capital = true, name = "LOC_CITY_D" })
+	Dev("shot1", { stamp = 21 })
+	H.ok(CheckLine("SETUP", "PASS"), "S0 ran inside the Shot")
+	H.ok(CheckLine("SHOT1", "PASS"))
+	local swords = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(swords, 1, "S0's three Swordsmen were removed; only Legio VEF")
+	local u = swords[1]
+	H.eq(u.vetName, "Legio VEF")
+	H.ok(H.dist(u, S.c0) <= 2); H.eq(Map.GetPlot(u.x, u.y):GetOwner(), 0)
+	H.eq(u:GetMovesRemaining(), u:GetMaxMoves())
+	H.ok(#FAKE.CitiesOf(2) >= 2, "F got a second city (B already has two)")
+	H.len(FAKE.CitiesOf(1), 2)
+	H.ok(Players[0]:GetDiplomacy():HasDeclaredFriendship(7), "D is your friend")
+	H.ok(PlayersVisibility[0]:IsRevealed(c7.x, c7.y), "D's capital revealed")
+	local rows = EFV_DestinationRows(0, u, "EXPEDITIONARY", EFV_Records.Load())
+	local dRow = nil
+	for _, r in ipairs(rows) do if r.recipientID == 7 then dRow = r end end
+	H.notnil(dRow, "a row for D")
+	H.ok(not dRow.ok); H.contains(dRow.reasons, "NO_COMMON_WAR", "greyed: no common enemy")
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.open, "PICKER"); H.eq(st.focus.ft, "EXPEDITIONARY"); H.eq(st.focus.u, u.id); H.eq(st.focus.o, 0)
+	H.eq(st.focus.stamp, 21); H.eq(st.focus.zoom, 0.5)
+	H.ok(H.gold(0) >= 2000)
+	-- again: the old Legio VEF is replaced, no second city founded twice
+	Dev("shot1", { stamp = 22 })
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1)
+	H.ok(not H.unitAlive(u), "previous shot's unit removed")
+	H.len(H.lines("[EFV][CHECK] SETUP"), 1, "S0 only once")
+	H.clean()
+end)
+
+test("shot2: Expeditionary (B's colours) and Volunteers (yours) next to B's capital, DEPLOYED, two Unit Arrived", function()
+	local S = FreshBoot()
+	Dev("shot2", { stamp = 31 })
+	H.ok(CheckLine("SHOT2", "PASS"))
+	local exp = Recs(function(r) return r.forceType == "EXPEDITIONARY" end)
+	local vol = Recs(function(r) return r.forceType == "VOLUNTEER" end)
+	H.len(exp, 1); H.len(vol, 1)
+	H.eq(exp[1].state, "DEPLOYED"); H.eq(vol[1].state, "DEPLOYED")
+	H.eq(exp[1].onMapPlayerID, 1, "B owns the Expeditionary unit"); H.eq(vol[1].onMapPlayerID, 0, "you own the Volunteers")
+	H.eq(exp[1].deployedTurn, FAKE.turn)
+	local e = FAKE.units[exp[1].onMapUnitID]
+	local v = FAKE.units[vol[1].onMapUnitID]
+	H.eq(Map.GetPlot(e.x, e.y):GetOwner(), 1); H.eq(Map.GetPlot(v.x, v.y):GetOwner(), 1)
+	H.ok(H.dist(e, S.c1) <= 2 and H.dist(e, v) <= 3)
+	H.len(H.notifs(0, EFV_Config.NOTIF.ARRIVED), 2)
+	local st = H.prop("EFV_DEV_SCN")
+	H.isnil(st.focus.open); H.eq(st.focus.zoom, 0.25); H.eq(st.focus.stamp, 31)
+	Dev("shot2", { stamp = 32 })
+	H.len(H.records(), 2, "the previous shot's records were removed first")
+	H.ok(not H.unitAlive(e) and not H.unitAlive(v))
+	H.clean()
+end)
+
+test("shot3: six records (Grace, Deployed x3, Returning, Outbound), one Grace notification, focus TRACKER", function()
+	FreshBoot()
+	Dev("shot2")
+	Dev("shot3", { stamp = 41 })
+	H.ok(CheckLine("SHOT3", "PASS"))
+	local rs = H.records()
+	H.len(rs, 6, "shot 2's records removed")
+	local by = {}
+	for _, r in ipairs(rs) do by[r.state] = (by[r.state] or 0) + 1 end
+	H.eq(by.GRACE, 1); H.eq(by.DEPLOYED, 3); H.eq(by.RETURNING, 1); H.eq(by.OUTBOUND, 1)
+	local grace = Recs(function(r) return r.state == "GRACE" end)[1]
+	H.eq(grace.graceTurnsLeft, 3); H.eq(grace.recipientID, 1)
+	local gu = FAKE.units[grace.onMapUnitID]
+	H.ok(IsNeutral(gu), "grace unit on neutral land")
+	local ret = Recs(function(r) return r.state == "RETURNING" end)[1]
+	H.eq(ret.forceType, "CS_EXPEDITIONARY"); H.eq(ret.arrivalTurn, FAKE.turn + 2); H.isnil(ret.onMapUnitID)
+	local out = Recs(function(r) return r.state == "OUTBOUND" end)[1]
+	H.eq(out.arrivalTurn, FAKE.turn + 3); H.eq(out.unitType, "UNIT_HORSEMAN")
+	H.len(Recs(function(r) return r.senderID == 1 and r.recipientID == 0 end), 1, "one received from B")
+	H.len(H.notifs(0, EFV_Config.NOTIF.GRACE), 1)
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.open, "TRACKER"); H.eq(st.focus.x, gu.x); H.eq(st.focus.y, gu.y)
+	H.clean()
+end)
+
+test("shot4: C's city weakened with 3 Tanks next to it, focus CAPTURE with the target city; previous shot cleared", function()
+	FreshBoot()
+	Dev("shot3")
+	Dev("shot4", { stamp = 51 })
+	H.ok(CheckLine("SHOT4", "PASS"))
+	H.len(H.records(), 0, "shot 3's records removed")
+	H.len(H.unitsOf(0, "UNIT_HORSEMAN"), 0); H.len(H.unitsOf(2, "UNIT_ARCHER"), 0)
+	local tanks = H.unitsOf(0, "UNIT_TANK")
+	H.len(tanks, 3)
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.open, "CAPTURE"); H.eq(st.focus.u, tanks[1].id)
+	local city = CityManager.GetCityAt(st.focus.tx, st.focus.ty)
+	H.notnil(city); H.eq(city:GetOwner(), 3)
+	H.eq(CityManager.GetDistrictAt(city.x, city.y):GetDamage(DefenseTypes.DISTRICT_GARRISON), 199, "1 HP")
+	Dev("shot4", { stamp = 52 })
+	H.len(H.unitsOf(0, "UNIT_TANK"), 3, "old Tanks removed, three new ones")
+	H.clean()
+end)
+
+test("shot5: B's Swordsman of yours in MUTINY with 40 damage on neutral land, Mutiny notification, close zoom", function()
+	FreshBoot()
+	Dev("shot4")
+	Dev("shot5", { stamp = 61 })
+	H.ok(CheckLine("SHOT5", "PASS"))
+	H.len(H.unitsOf(0, "UNIT_TANK"), 0, "shot 4's Tanks removed")
+	local rs = H.records()
+	H.len(rs, 1)
+	local r = rs[1]
+	H.eq(r.state, "MUTINY"); H.eq(r.lastDamage, 40); H.eq(r.onMapPlayerID, 1)
+	local u = FAKE.units[r.onMapUnitID]
+	H.eq(u.damage, 40); H.ok(IsNeutral(u))
+	H.len(H.notifs(0, EFV_Config.NOTIF.MUTINY), 1)
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.zoom, 0.25); H.isnil(st.focus.open)
+	-- the next turn start keeps the mutiny going (+20)
+	H.endTurn()
+	H.eq(H.records()[1].state, "MUTINY")
+	H.eq(u.damage, 60)
+	H.clean()
+end)
+
+test("shot panel: deselect, VEF notifications dismissed, stamped request; picker opened, panel and DEV button hidden, zoom set", function()
+	local S = BootUI()
+	Events.LoadGameViewStateDone()
+	local sel = H.unit(0, "UNIT_SWORDSMAN", 11, 10)
+	FAKE_UI.selectedUnit = sel
+	NotificationManager.SendNotification(0, GameInfo.Types[EFV_Config.NOTIF.GRACE].Hash, {})
+	NotificationManager.SendNotification(0, GameInfo.Types[EFV_Config.NOTIF.ARRIVED].Hash, {})
+	FAKE_UI.Key(Keys.D, { ctrl = true, shift = true })
+	FAKE_UI.FindButton("Shot 1 Send picker"):Click()
+	H.isnil(FAKE_UI.selectedUnit, "UI.DeselectAllUnits before the request")
+	H.len(NotificationManager.GetList(0), 0, "VEF notifications dismissed")
+	local p = FAKE_UI.requests[#FAKE_UI.requests].params
+	H.eq(p.cmd, "shot1"); H.ok(p.stamp > 0)
+	local opened, zoom = nil, nil
+	LuaEvents.EFV_OpenDestinationPicker.Add(function(pid, uid, ft) opened = { pid, uid, ft } end)
+	UI.SetMapZoom = function(z) zoom = z end
+	UI.GetMapZoom = function() return 0.7 end
+	Game:SetProperty("EFV_DEV_SCN", { me = 0, ally = 1, friend = 2, enemy = 3, cs = 4,
+		focus = { x = S.c0.x, y = S.c0.y, o = 0, u = sel.id, stamp = p.stamp, open = "PICKER", ft = "EXPEDITIONARY", zoom = 0.5 } })
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.eq(zoom, 0.5, "UI.SetMapZoom")
+	H.ok(Controls.Main:IsHidden(), "the panel closes itself")
+	local launch = nil
+	for _, b in ipairs(FAKE_UI.builtInstances or {}) do if b.name == "DevLaunchBarItem" then launch = b.inst end end
+	H.notnil(launch)
+	H.ok(launch.LaunchItemButton:IsHidden(), "DEV button hidden")
+	H.eq(FAKE_UI.selectedUnit, sel, "LookAt selected the unit")
+	H.isnil(opened, "the picker waits one tick")
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.deq(opened, { 0, sel.id, "EXPEDITIONARY" })
+	H.ok(CheckLine("SHOT1", "INFO"))
+	FAKE_UI.Key(Keys.D, { ctrl = true, shift = true })
+	H.ok(not launch.LaunchItemButton:IsHidden(), "Ctrl+Shift+D shows the DEV button again")
+end)
+
+test("shot panel: Shot 3 sends the tracker hook; Shot 4 attacks, waits for the capture screen, expands Entrust", function()
+	local S = BootUI()
+	local tank = H.unit(0, "UNIT_TANK", 12, 10)
+	local tracker, expand, attack = 0, 0, nil
+	LuaEvents.EFV_TrackerOpen.Add(function() tracker = tracker + 1 end)
+	LuaEvents.EFV_EntrustExpand.Add(function() expand = expand + 1 end)
+	FAKE_UI.FindButton("Shot 3 Tracker"):Click()
+	local p = FAKE_UI.requests[#FAKE_UI.requests].params
+	Game:SetProperty("EFV_DEV_SCN", { me = 0, ally = 1, focus = { x = 30, y = 5, o = -1, u = -1, stamp = p.stamp, open = "TRACKER" } })
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.eq(tracker, 1, "LuaEvents.EFV_TrackerOpen")
+	-- Shot 4
+	UnitOperationTypes.MOVE_TO, UnitOperationTypes.PARAM_MODIFIERS = "MOVE_TO", "PARAM_MODIFIERS"
+	UnitOperationMoveModifiers = { ATTACK = 1, MOVE_IGNORE_UNEXPLORED_DESTINATION = 2 }
+	UnitManager.CanStartOperation = function(u, op, _, t) return u == tank and op == "MOVE_TO" end
+	UnitManager.RequestOperation = function(u, op, t)
+		attack = { uid = u.id, op = op, x = t.PARAM_X, y = t.PARAM_Y, mods = t.PARAM_MODIFIERS }
+	end
+	local raze = ContextPtr:LookUpControl("/InGame/RazeCity")
+	raze:SetHide(true)
+	FAKE_UI.FindButton("Shot 4 Entrust"):Click()
+	p = FAKE_UI.requests[#FAKE_UI.requests].params
+	Game:SetProperty("EFV_DEV_SCN", { me = 0, ally = 1, focus = { x = S.c3.x, y = S.c3.y, o = 0, u = tank.id, stamp = p.stamp,
+		open = "CAPTURE", tx = S.c3.x, ty = S.c3.y } })
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.notnil(attack, "attack requested")
+	H.eq(attack.uid, tank.id); H.eq(attack.op, "MOVE_TO"); H.eq(attack.x, S.c3.x); H.eq(attack.y, S.c3.y); H.eq(attack.mods, 3)
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.eq(expand, 0, "waits while the capture screen is hidden")
+	raze:SetHide(false)
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.eq(expand, 1, "LuaEvents.EFV_EntrustExpand once the capture screen shows")
+	FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5)
+	H.eq(expand, 1)
+end)
+
+test("shot panel: no zoom call and no attack call in the engine -> logged, the shot still completes", function()
+	BootUI()
+	UI.SetMapZoom = nil
+	local tank = H.unit(0, "UNIT_TANK", 12, 10)
+	local expand = 0
+	LuaEvents.EFV_EntrustExpand.Add(function() expand = expand + 1 end)
+	FAKE_UI.FindButton("Shot 4 Entrust"):Click()
+	local p = FAKE_UI.requests[#FAKE_UI.requests].params
+	Game:SetProperty("EFV_DEV_SCN", { me = 0, ally = 1, focus = { x = 12, y = 10, o = 0, u = tank.id, stamp = p.stamp,
+		open = "CAPTURE", tx = 22, ty = 10, zoom = 0.5 } })
+	ContextPtr:LookUpControl("/InGame/RazeCity"):SetHide(true)
+	for _ = 1, 40 do FAKE_UI.Update({ ContextPtr = ContextPtr }, 0.5) end
+	H.ok(H.hasLine("(use the mouse wheel)"), "zoom fallback logged")
+	H.ok(H.hasLine("click the city with the selected Tank"), "attack fallback")
+	H.ok(H.hasLine("click Entrust... once"), "capture screen timeout")
+	H.eq(expand, 1, "the expand hook is still sent once (a no-op without a capture popup)")
 end)

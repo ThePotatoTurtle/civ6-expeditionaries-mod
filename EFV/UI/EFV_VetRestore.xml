@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ======================================================================
+     EFV_VetRestore (AddUserInterfaces, Context InGame) - 0.7, veteran
+     route B (FIXPLAN_0.7 item 7, INTERFACES note 33). Companion context
+     with no controls: on every client it issues the engine's own PROMOTE
+     command for the local player's open veteran jobs. Owner: WP0 (stub),
+     WP3 (implementation).
+     ====================================================================== -->
+<Context Name="EFV_VetRestore"/>
