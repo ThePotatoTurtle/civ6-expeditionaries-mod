@@ -226,14 +226,21 @@ test("UI: Send to City-State button -> picker row (duration 10, EXP fee) -> flat
 	H.clean()
 end)
 
-test("UI: CS button disabled with the war reason when no met city-state shares a war", function()
+test("UI (1.0.2): CS button enabled when the met city-state shares no war; disabled only by a war with it", function()
 	local _, ctx = Boot()
 	H.peace(3, 4)
 	Select(ctx, MyUnit())
 	local b = Button(CS_ICON)
 	H.notnil(b)
-	H.ok(b.UnitActionButton.disabled)
-	H.ok(string.find(b.UnitActionButton.tooltip, Locale.Lookup("LOC_EFV_REASON_NO_COMMON_WAR", EFV_UI_PlayerName(4)), 1, true),
+	H.ok(not b.UnitActionButton.disabled, "no shared enemy needed")
+	H.ok(not string.find(b.UnitActionButton.tooltip, Locale.Lookup("LOC_EFV_REASON_NO_COMMON_WAR", EFV_UI_PlayerName(4)), 1, true),
+		b.UnitActionButton.tooltip)
+	H.war(0, 4)
+	Select(ctx, MyUnit())
+	b = Button(CS_ICON)
+	H.notnil(b)
+	H.ok(b.UnitActionButton.disabled, "at war with the city-state")
+	H.ok(string.find(b.UnitActionButton.tooltip, Locale.Lookup("LOC_EFV_REASON_AT_WAR_WITH_RECIPIENT", EFV_UI_PlayerName(4)), 1, true),
 		b.UnitActionButton.tooltip)
 	H.clean()
 end)

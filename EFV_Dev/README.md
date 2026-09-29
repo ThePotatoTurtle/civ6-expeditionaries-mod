@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteers & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 1.0.1.3, made for VEF 1.0.1. Never enable it in a real game.
+Version 1.0.2.1, made for VEF 1.0.2. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -44,7 +44,7 @@ These sit under "Test sessions", below the Screenshot buttons. Each one sets up 
 
 | Button | cmd | What it sets up | Check line at your next turn |
 |---|---|---|---|
-| S0 Setup session | `scn_setup` | from a new game: B, F, C = the three lowest-ID other majors with a city, CS = the lowest-ID city-state with a city. You meet them (and they meet each other), the land within 3 tiles of their cities is revealed to you, you, B, F and CS declare war on C, B becomes your declared friend and grants you open borders (VEF basis FRIEND for Expeditionary / Entrust, FRIEND_OB for Volunteers), F your friend; 2000 gold, 10 Iron, 3 Swordsmen with full moves next to your capital. The check asks VEF's own send rule (`EFV_EvaluateSend`) about B's capital and the city-state. Without a capital, or with fewer than 3 civs and 1 city-state with a city, it changes nothing and says what to do | `SETUP` (right away) |
+| S0 Setup session | `scn_setup` | from a new game: B, F, C = the three lowest-ID other majors with a city, CS = the lowest-ID city-state with a city. You meet them (and they meet each other), the land within 3 tiles of their cities is revealed to you, you, B and F declare war on C (the city-state stays at peace: since VEF 1.0.2 a City-State send needs no shared enemy), B becomes your declared friend and grants you open borders (VEF basis FRIEND for Expeditionary / Entrust, FRIEND_OB for Volunteers), F your friend; 2000 gold, 10 Iron, 3 Swordsmen with full moves next to your capital. The check asks VEF's own send rule (`EFV_EvaluateSend`) about B's capital and the city-state. Without a capital, or with fewer than 3 civs and 1 city-state with a city, it changes nothing and says what to do | `SETUP` (right away) |
 | S1 Arrive next turn | `scn_arrive` | every unit you sent, or that is coming home, arrives at the next turn start | `ARRIVE` (placement of every arrival), `HOME`, `RECALL` |
 | S2 Expire CS unit (off its land) | `scn_expire_cs` | your newest deployed City-State unit is moved onto free neutral land within 6 tiles (else onto land owned by neither the city-state nor you) and ends its service next turn. Since 0.7 it must start home at once, wherever it is, with no grace | `EXPIRE` (CHECK if it went into grace) |
 | S3 Grace/mutiny step | `scn_grace` | your newest Expeditionary unit, one phase per press: onto neutral land with its service ending, then 1 grace turn left, then back onto the host's land | `GRACE`, `MUTINY`, `MUTINY_RETURN` |
@@ -93,7 +93,7 @@ Game calls S0, S5, S7 and S11 add for a new game (all pcall-guarded, EFV_Dev onl
 
 ## Eligibility tests (T1, T2)
 
-Two buttons in the test group check who shows up in the Send picker, and how, after the 1.0.1 common-war fix (only real wars against a major civ or a city-state count; the Free Cities and the barbarians never do). Use a new game for each button (written for a Large map with 8 civs and city-states), found your capital, then press the button. Don't combine them with S0, the Shot buttons or each other in one game: wars can't be undone, and the peace cooldown is 10 turns.
+Two buttons in the test group check who shows up in the Send picker, and how, after the 1.0.1 common-war fix (only real wars against a major civ or a city-state count; the Free Cities and the barbarians never do). T2 also checks the City-State list against the 1.0.2 rule: any city-state you have met, with no shared enemy needed, unless you are at war with it. Use a new game for each button (written for a Large map with 8 civs and city-states), found your capital, then press the button. Don't combine them with S0, the Shot buttons or each other in one game: wars can't be undone, and the peace cooldown is 10 turns.
 
 Both buttons make every major civ and city-state meet every other one, so the diplomacy screen shows all relations. They reveal the cities of the civs involved, top your gold up to 2000 and your Iron to 10, and put 2 Swordsmen with full moves next to your capital (the first one selected). A second press replaces the Swordsmen, unless you already sent one. Roles go to the other majors with a city in player ID order. Majors left over get the role OTHER (met only, expected absent). With fewer civs than roles, the last roles are skipped and the summary says which ones.
 
@@ -103,7 +103,7 @@ The check asks VEF's own `EFV_DestinationRows` for the Expeditionary list (Sword
 - FAIL: the picker disagrees with the rule (a VEF problem).
 - CHECK: the setup didn't come out as planned, so the line says nothing about VEF. `SETUP:` says what went wrong. If the engine pulled an ally into your war, it reads "ENGINE EFFECT, not a VEF failure". An expected open row that is greyed only by other reasons (not revealed, gold, the unit) is also CHECK.
 
-The panel's first line shows the role map (for example `T2: E=Gaul, FW=Japan, FOW=England, ...`). The second line shows a short result: `T2: gameplay 7/7 PASS, UI 7/7 PASS`.
+The panel's first line shows the role map (for example `T2: E=Gaul, FW=Japan, FOW=England, ...`). The second line shows a short result: `T2: gameplay 10/10 PASS, UI 10/10 PASS` (7 civs and 3 city-states).
 
 T1 Volunteer partners (every partner shares the war with E, only the basis changes):
 
@@ -127,7 +127,15 @@ T2 Shared enemy (with and without the shared war; needs 7 AI civs):
 | NW | met only, at war with E | absent | absent |
 | AN | your ally, at war with nobody | greyed, no common enemy | greyed, no common enemy |
 
-The setup declares only the wars listed (you on E, then the "at war with E" roles on E), before any friendship or alliance, and never tries to make peace. Afterwards `python tools/summarize_efv_log.py --eligibility` prints the last run of each button, per rules, with one line per civ.
+T2 also gives the city-states with a city roles, in player ID order, and checks the City-State list (Swordsman 1). Each gets its own `ELIG_T2` / `ELIG_T2_UI` line with "City-State expected ... actual ...":
+
+| Role | Setup | City-State |
+|---|---|---|
+| CSN | met, at war with nobody | allowed (no shared enemy needed) |
+| CSX | met, you declare war on it | greyed, you are at war with it |
+| CSO | any further city-state, met only | allowed |
+
+The setup declares only the wars listed (you on E, you on CSX, then the "at war with E" roles on E), before any friendship or alliance, and never tries to make peace. Afterwards `python tools/summarize_efv_log.py --eligibility` prints the last run of each button, per rules, with one line per civ and city-state.
 
 ## Panel fields
 

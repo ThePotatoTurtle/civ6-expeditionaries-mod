@@ -10,6 +10,9 @@
 -- which is why the City-State path (Kandy blocked) looked right.
 -- Rule now (spec 6.1.3, DECISIONS "Common enemy"): only real wars against a
 -- major civ or a city-state count; barbarians and Free Cities never do.
+-- 1.0.2 (designer ruling, proxy wars): City-State sends need no shared enemy
+-- at all, so the CS assertions below expect no NO_COMMON_WAR
+-- (test_102_cs_any.lua covers the new rule).
 --
 -- Scenario = the designer's game: 0 Rome (human), 1 England (friend + open
 -- borders), 2 Japan (friend), 3 Gaul (at war with 0, 1, 2 and Rapa Nui),
@@ -92,9 +95,10 @@ test("1.0.1 exact case: friend with no wars -> Expeditionary blocked (NO_COMMON_
 		H.deq(Reasons(u, JAPAN, S.c2, EXP), {}, ctx .. ": Expeditionary to Japan")
 		H.deq(Reasons(u, ENGLAND, S.c1, VOL), {}, ctx .. ": Volunteers to England")
 		H.deq(Reasons(u, JAPAN, S.c2, VOL), { "VOL_NEEDS_ACCESS" }, ctx .. ": Volunteers to Japan")
-		-- City-State path unchanged: Rapa Nui (at war with Gaul) ok, Kandy blocked.
+		-- City-State sends need no shared enemy (1.0.2): Rapa Nui (at war
+		-- with Gaul) and Kandy (no wars) are both allowed.
 		H.deq(Reasons(u, RAPA, S.c6, CS), {}, ctx .. ": Rapa Nui")
-		H.deq(Reasons(u, KANDY, S.c7, CS), { "NO_COMMON_WAR" }, ctx .. ": Kandy")
+		H.deq(Reasons(u, KANDY, S.c7, CS), {}, ctx .. ": Kandy (no common enemy, allowed since 1.0.2)")
 	end)
 	H.clean()
 end)
@@ -150,8 +154,8 @@ test("1.0.1: Free Cities never make a common war (all force types, both contexts
 		H.contains(Reasons(u, ENGLAND, S.c1, EXP), "NO_COMMON_WAR", ctx .. ": EXP England")
 		H.contains(Reasons(u, MALI, S.c5, EXP), "NO_COMMON_WAR", ctx .. ": EXP Mali")
 		H.contains(Reasons(u, ENGLAND, S.c1, VOL), "NO_COMMON_WAR", ctx .. ": VOL England")
-		H.contains(Reasons(u, KANDY, S.c7, CS), "NO_COMMON_WAR", ctx .. ": CS Kandy")
-		H.contains(Reasons(u, RAPA, S.c6, CS), "NO_COMMON_WAR", ctx .. ": CS Rapa Nui")
+		H.deq(Reasons(u, KANDY, S.c7, CS), {}, ctx .. ": CS Kandy (no shared enemy needed, 1.0.2)")
+		H.deq(Reasons(u, RAPA, S.c6, CS), {}, ctx .. ": CS Rapa Nui (no shared enemy needed, 1.0.2)")
 		H.eq(EFV_PlayerKind(FREE), "FREE_CITIES", ctx)
 		H.ok(not EFV_IsCommonEnemyCandidate(FREE), ctx)
 	end)
@@ -168,7 +172,7 @@ test("1.0.1: barbarians never count (declared or permanent), all force types, bo
 		H.ok(not EFV_IsCommonEnemyCandidate(BARB), ctx)
 		H.contains(Reasons(u, ENGLAND, S.c1, EXP), "NO_COMMON_WAR", ctx .. ": EXP")
 		H.contains(Reasons(u, ENGLAND, S.c1, VOL), "NO_COMMON_WAR", ctx .. ": VOL")
-		H.contains(Reasons(u, RAPA, S.c6, CS), "NO_COMMON_WAR", ctx .. ": CS")
+		H.deq(Reasons(u, RAPA, S.c6, CS), {}, ctx .. ": CS (no shared enemy needed, 1.0.2)")
 	end)
 	H.clean()
 end)

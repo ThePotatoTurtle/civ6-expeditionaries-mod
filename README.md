@@ -2,7 +2,9 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 1.0.1.
+Get it on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3810156577
+
+Version 1.0.2.
 
 ## The four options
 
@@ -66,7 +68,30 @@ If nobody qualifies, the button is greyed out and the tooltip says why. Entrust 
 - Volunteers: a teammate, an ally, or a declared friend who grants you open borders. Open borders without friendship do not count, and neither does friendship without open borders.
 - City-State Expeditionary: any city-state you have met.
 - Entrust: an ally, a teammate or a declared friend who was at war with the city's former owner when you took it (any partner for a Free City).
-- In every case you and the partner must be at war with the same enemy (Barbarians and Free Cities don't count), and not at war with each other.
+- Expeditionary Force and Volunteers: you and the partner must be at war with the same enemy (Barbarians and Free Cities don't count), and not at war with each other.
+- City-State Expeditionary needs no shared enemy. You can lend a unit to any city-state you have met, for example to help it in a war of its own, as long as you are not at war with it.
+
+This table shows who can receive units. "Not listed" means that player doesn't appear in the destination list at all. "No" means its cities are listed but greyed out, with the reason in the tooltip.
+
+| The recipient is | Shares an enemy with you | Expeditionary | Volunteers | City-State Expeditionary |
+|---|---|---|---|---|
+| Teammate | yes | Yes | Yes | Not listed |
+| Teammate | no | No: no shared enemy | No: no shared enemy | Not listed |
+| Ally | yes | Yes | Yes | Not listed |
+| Ally | no | No: no shared enemy | No: no shared enemy | Not listed |
+| Declared friend who gives you open borders | yes | Yes | Yes | Not listed |
+| Declared friend who gives you open borders | no | No: no shared enemy | No: no shared enemy | Not listed |
+| Declared friend without open borders | yes | Yes | No: needs open borders | Not listed |
+| Declared friend without open borders | no | No: no shared enemy | No: needs open borders, no shared enemy | Not listed |
+| Other major civ (met, no alliance or friendship) | doesn't matter | Not listed | Not listed | Not listed |
+| Major civ you are at war with | doesn't matter | Not listed | Not listed | Not listed |
+| City-state you have met | doesn't matter | Not listed | Not listed | Yes |
+| City-state you are at war with | doesn't matter | Not listed | Not listed | No: at war with you |
+| City-state you haven't met | doesn't matter | Not listed | Not listed | Not listed |
+
+- A shared enemy is a major civ or a city-state that you and the recipient are both at war with. Barbarians and the Free Cities never count, and they can't receive units.
+- The unit must stand in your own territory, or in the recipient's territory. From the recipient's land it can only go to that recipient's cities.
+- Entrust has its own rule: the city goes to an ally, teammate or declared friend who was at war with the city's former owner when you took it (any of them for a Free City).
 
 ### Which units can go
 Land and naval combat units, including Warrior Monks and Nihangs. The unit must:
@@ -152,6 +177,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
+- 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.
 - 1.0.0: First public release, on the Steam Workshop and GitHub. Same rules as 0.7.4.
 - 0.7.4: Veterans with three or more promotions no longer lose their level when they come home. They get one promotion back per turn until all are back.
@@ -170,6 +196,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Earlier builds: sending, travel, arrival and return, grace and mutiny, flag badges.
 
 ## For modders
-- To install by hand, copy the `EFV` folder into `Documents\My Games\Sid Meier's Civilization VI\Mods`, then enable Volunteers & Expeditionary Forces and Gathering Storm under Additional Content.
+- The easiest way to install is to subscribe on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3810156577
+- To install by hand instead, copy the `EFV` folder into `Documents\My Games\Sid Meier's Civilization VI\Mods`, then enable Volunteers & Expeditionary Forces and Gathering Storm under Additional Content.
 - `EFV` is the project's internal prefix, so folders, files and code use it. In the game the mod is always called VEF.
 - `EFV_Dev` is a separate developer panel for in-game testing. Don't enable it in a normal game.

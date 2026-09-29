@@ -52,7 +52,8 @@
        LOC_EFV_REASON_FEE_CHANGED       1 new fee
        LOC_EFV_REASON_RECALL_MIN_TURNS  1 N turns until recall is allowed
        LOC_EFV_REASON_NOT_PARTNER, _VOL_NEEDS_ACCESS, _CS_NOT_MET,
-         _AT_WAR_WITH_RECIPIENT, _NO_COMMON_WAR
+         _AT_WAR_WITH_RECIPIENT, _NO_COMMON_WAR (Expeditionary and
+         Volunteers only; City-State sends need no shared enemy, 1.0.2)
                                         1 recipient name(s) (EFV_UIShared
                                           NAME_REASON_LIST; comma-joined list
                                           in the Send-button summary)
@@ -120,7 +121,7 @@
 			<Text>Send to City-State</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_CS_TT" Language="en_US">
-			<Text>Lend this unit to a city-state you have met that is at war with one of your enemies. It can leave from your territory or from the city-state's. The city-state controls it for 10 turns, then it comes home by itself, wherever it is, with its promotions and level. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
+			<Text>Lend this unit to any city-state you have met that you are not at war with. No shared enemy is needed, so you can back a city-state in a war you stay out of. It can leave from your territory or from the city-state's. The city-state controls it for 10 turns, then it comes home by itself, wherever it is, with its promotions and level. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_RECALL" Language="en_US">
 			<Text>Recall Volunteers</Text>
@@ -141,7 +142,7 @@
 			<Text>No eligible destination:</Text>
 		</Row>
 		<Row Tag="LOC_EFV_SEND_NO_RECIPIENTS" Language="en_US">
-			<Text>No eligible recipients: you need an ally, teammate, declared friend or met city-state that shares one of your wars.</Text>
+			<Text>No eligible recipients: Expeditionary Forces and Volunteers need an ally, teammate or declared friend, and City-State units need a city-state you have met.</Text>
 		</Row>
 
 		<!-- ============================================================

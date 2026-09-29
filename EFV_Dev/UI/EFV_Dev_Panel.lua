@@ -111,7 +111,7 @@ local function EligText(e)
 	if e.err ~= nil then return Str(e.test) .. ": " .. Str(e.err) end
 	local parts = {}
 	for _, c in ipairs(e.civs or {}) do
-		if c.role ~= "OTHER" then parts[#parts + 1] = Str(c.role) .. "=" .. CivName(c.pid) end
+		if c.role ~= "OTHER" and c.role ~= "CSO" then parts[#parts + 1] = Str(c.role) .. "=" .. CivName(c.pid) end
 	end
 	return Str(e.test) .. ": " .. table.concat(parts, ", ") .. (e.skipped and (" (skipped " .. Str(e.skipped) .. ")") or "")
 end
@@ -749,7 +749,8 @@ local function RunAudit()
 end
 
 -- ---------------------------------------------------------------------------
--- Eligibility tests T1 / T2, UI side (EFV_Dev 1.0.1.3). Gameplay sets up the
+-- Eligibility tests T1 / T2, UI side (EFV_Dev 1.0.1.3; T2 City-State lines
+-- 1.0.2.1). Gameplay sets up the
 -- roles, logs its ELIG_Tn lines (gameplay rules) and writes st.elig (roles,
 -- expected results, facts, the two Swordsmen). ELIG_UI_DELAY s after its
 -- answer the panel asks VEF's picker rows again with the UI rules (the
@@ -810,34 +811,50 @@ local function EligUI(test, stamp)
 	local u1, u2 = OwnUnit(me, e.u1), OwnUnit(me, e.u2)
 	local store = nil
 	pcall(function() store = EFV_UI_ReadStore() end)
-	local rowsExp, rowsVol = {}, {}
+	local rowsExp, rowsVol, rowsCs = {}, {}, {}
 	if u1 ~= nil then
 		rowsExp = EFV_DestinationRows(me, u1, EFV_Config.FT_EXP, store)
 		rowsVol = EFV_DestinationRows(me, u2 or u1, EFV_Config.FT_VOL, store)
+		if (tonumber(e.ncs) or 0) > 0 then rowsCs = EFV_DestinationRows(me, u1, EFV_Config.FT_CS, store) end
 	end
 	local n, pass, fail, chk, bad = 0, 0, 0, 0, {}
+	local function Act(a, o) return a .. (#o > 0 and (" (also " .. table.concat(o, "+") .. ")") or "") end
 	for _, c in ipairs(e.civs or {}) do
-		local aExp, oExp = EligClass(rowsExp, c.pid)
-		local aVol, oVol = EligClass(rowsVol, c.pid)
-		local v = "PASS"
-		for _, w in ipairs({ EligCompare(c.exp, aExp), EligCompare(c.vol, aVol) }) do
-			if w == "FAIL" then v = "FAIL" elseif w == "CHECK" and v == "PASS" then v = "CHECK" end
+		if c.cs ~= nil then
+			-- City-State line (T2, EFV_Dev 1.0.2.1): VEF 1.0.2 needs no shared enemy.
+			local aCs, oCs = EligClass(rowsCs, c.pid)
+			local v = EligCompare(c.cs, aCs)
+			if c.setup ~= nil or u1 == nil then v = "CHECK" end
+			n = n + 1
+			if v == "PASS" then pass = pass + 1 elseif v == "FAIL" then fail = fail + 1 else chk = chk + 1 end
+			if v ~= "PASS" then bad[#bad + 1] = Str(c.role) .. " " .. v end
+			UICheck(id, v, Str(c.role) .. "=" .. PlayerName(c.pid) .. " | " .. Str(c.facts) ..
+				" | City-State expected " .. Str(c.cs) .. " actual " .. Act(aCs, oCs) ..
+				(c.setup and (" | SETUP: " .. Str(c.setup)) or "") .. " [UI rules]")
+		else
+			local aExp, oExp = EligClass(rowsExp, c.pid)
+			local aVol, oVol = EligClass(rowsVol, c.pid)
+			local v = "PASS"
+			for _, w in ipairs({ EligCompare(c.exp, aExp), EligCompare(c.vol, aVol) }) do
+				if w == "FAIL" then v = "FAIL" elseif w == "CHECK" and v == "PASS" then v = "CHECK" end
+			end
+			if c.setup ~= nil or u1 == nil then v = "CHECK" end
+			n = n + 1
+			if v == "PASS" then pass = pass + 1 elseif v == "FAIL" then fail = fail + 1 else chk = chk + 1 end
+			if v ~= "PASS" then bad[#bad + 1] = Str(c.role) .. " " .. v end
+			local okB, pb = pcall(EFV_PartnerBasis, me, c.pid)
+			local okV, vb = pcall(EFV_VolunteerBasis, me, c.pid)
+			UICheck(id, v, Str(c.role) .. "=" .. PlayerName(c.pid) .. " | " .. Str(c.facts) .. "; UI basis " ..
+				(okB and Str(pb) or "error") .. ", Volunteer basis " .. (okV and Str(vb) or "error") ..
+				" | Expeditionary expected " .. Str(c.exp) .. " actual " .. Act(aExp, oExp) ..
+				" | Volunteers expected " .. Str(c.vol) .. " actual " .. Act(aVol, oVol) ..
+				(c.setup and (" | SETUP: " .. Str(c.setup)) or "") .. " [UI rules]")
 		end
-		if c.setup ~= nil or u1 == nil then v = "CHECK" end
-		n = n + 1
-		if v == "PASS" then pass = pass + 1 elseif v == "FAIL" then fail = fail + 1 else chk = chk + 1 end
-		if v ~= "PASS" then bad[#bad + 1] = Str(c.role) .. " " .. v end
-		local okB, pb = pcall(EFV_PartnerBasis, me, c.pid)
-		local okV, vb = pcall(EFV_VolunteerBasis, me, c.pid)
-		local function Act(a, o) return a .. (#o > 0 and (" (also " .. table.concat(o, "+") .. ")") or "") end
-		UICheck(id, v, Str(c.role) .. "=" .. PlayerName(c.pid) .. " | " .. Str(c.facts) .. "; UI basis " ..
-			(okB and Str(pb) or "error") .. ", Volunteer basis " .. (okV and Str(vb) or "error") ..
-			" | Expeditionary expected " .. Str(c.exp) .. " actual " .. Act(aExp, oExp) ..
-			" | Volunteers expected " .. Str(c.vol) .. " actual " .. Act(aVol, oVol) ..
-			(c.setup and (" | SETUP: " .. Str(c.setup)) or "") .. " [UI rules]")
 	end
 	local sv = (fail > 0) and "FAIL" or ((chk > 0 or e.skipped ~= nil) and "CHECK" or "PASS")
-	UICheck(id, sv, "summary (UI rules): " .. test .. ", " .. n .. " civ(s): " .. pass .. " PASS, " .. fail .. " FAIL, " .. chk ..
+	local ncs = tonumber(e.ncs) or 0
+	UICheck(id, sv, "summary (UI rules): " .. test .. ", " .. (n - ncs) .. " civ(s)" ..
+		(ncs > 0 and (" + " .. ncs .. " city-state(s)") or "") .. ": " .. pass .. " PASS, " .. fail .. " FAIL, " .. chk ..
 		" CHECK" .. (e.skipped and ("; roles " .. Str(e.skipped) .. " skipped (too few civs)") or ""))
 	m_EligStatus = test .. ": gameplay " .. Str(e.pass) .. "/" .. Str(e.n) .. " PASS, UI " .. pass .. "/" .. n .. " PASS" ..
 		(#bad > 0 and (" (UI: " .. table.concat(bad, ", ") .. ")") or "") ..

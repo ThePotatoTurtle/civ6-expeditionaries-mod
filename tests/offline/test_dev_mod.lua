@@ -322,7 +322,9 @@ test("final S0: from a brand-new game (nobody met, nothing revealed) the three s
 	for _, c in ipairs({ S.c1, S.c1b, S.c2, S.c3, S.c4 }) do H.ok(Revealed(0, c), "city revealed " .. c.name) end
 	H.ok(PlayersVisibility[0]:IsRevealed(S.c1.x + 3, S.c1.y), "tiles around the city revealed too")
 	H.ok(not Revealed(0, S.c5), "other city-states untouched")
-	for _, pid in ipairs({ 0, 1, 2, 4 }) do H.ok(Players[pid]:GetDiplomacy():IsAtWarWith(3), pid .. " at war with C") end
+	for _, pid in ipairs({ 0, 1, 2 }) do H.ok(Players[pid]:GetDiplomacy():IsAtWarWith(3), pid .. " at war with C") end
+	H.ok(not Players[4]:GetDiplomacy():IsAtWarWith(3), "the city-state stays at peace (VEF 1.0.2: no shared enemy needed)")
+	H.ok(H.hasLine("city-state at war with C=false (not needed since VEF 1.0.2)"))
 	H.ok(d0:HasDeclaredFriendship(1) and Players[1]:GetDiplomacy():HasDeclaredFriendship(0), "B: declared friendship both ways")
 	H.ok(d0:HasDeclaredFriendship(2), "F: friend")
 	H.ok(not d0:HasAllied(1), "no alliance (none at turn 1; SetHasAllied(false) is a no-op in game)")
@@ -1318,6 +1320,9 @@ end)
 -- Eligibility tests T1 / T2 (EFV_Dev 1.0.1.3, VEF 1.0.1 common-war fix):
 -- a fresh game with up to 7 AI majors; roles by ascending ID; one
 -- ELIG_Tn line per civ (gameplay rules) and ELIG_Tn_UI lines from the panel.
+-- EFV_Dev 1.0.2.1: T2 adds one line per city-state (VEF 1.0.2: City-State
+-- sends need no shared enemy): CSN at peace ALLOWED, CSX at war with you
+-- GREY:AT_WAR_WITH_RECIPIENT, CSO (further ones) ALLOWED.
 -- ---------------------------------------------------------------------------
 local ELIG_EXTRA = { { 7, 60, 10 }, { 8, 50, 45 }, { 9, 25, 45 }, { 10, 75, 15 } }
 
@@ -1346,7 +1351,7 @@ end
 
 local function Has(line, text) return line ~= nil and string.find(line, text, 1, true) ~= nil end
 
-test("1.0.1.3 T2 shared enemy: 7 AI civs by ID; FW / FOW open, FN / FON / AN no common enemy, NW absent (gameplay rules)", function()
+test("1.0.2.1 T2 shared enemy: 7 AI civs by ID; FW / FOW open, FN / FON / AN no common enemy, NW absent; city-states need none (gameplay rules)", function()
 	local S = EligBoot(4)
 	Dev("elig_t2", { stamp = 31 })
 	local d0 = Players[0]:GetDiplomacy()
@@ -1374,10 +1379,22 @@ test("1.0.1.3 T2 shared enemy: 7 AI civs by ID; FW / FOW open, FN / FON / AN no 
 	for _, u in ipairs(swords) do
 		H.eq(u:GetMovesRemaining(), u:GetMaxMoves()); H.ok(H.dist(u, S.c0) <= 4)
 	end
-	-- one line per civ, all PASS, then the summary
-	H.len(EligLines("ELIG_T2", "PASS"), 8, "7 civs + summary")
+	-- one line per civ and city-state, all PASS, then the summary
+	H.len(EligLines("ELIG_T2", "PASS"), 11, "7 civs + 3 city-states + summary")
 	H.len(EligLines("ELIG_T2", "FAIL"), 0); H.len(EligLines("ELIG_T2", "CHECK"), 0)
-	H.ok(H.hasLine("summary (gameplay rules): T2 Shared enemy, 7 civ(s): 7 PASS, 0 FAIL, 0 CHECK"))
+	H.ok(H.hasLine("summary (gameplay rules): T2 Shared enemy, 7 civ(s) + 3 city-state(s): 10 PASS, 0 FAIL, 0 CHECK"))
+	-- city-states (VEF 1.0.2): CSN=4 at peace, CSX=5 at war with you, CSO=6
+	H.ok(d0:IsAtWarWith(5), "you are at war with CSX")
+	for _, pid in ipairs({ 4, 6 }) do
+		H.ok(not d0:IsAtWarWith(pid), "not at war with " .. pid)
+		H.ok(not EFV_HasCommonWar(0, pid), "no shared enemy with " .. pid)
+	end
+	local csn = RoleLine("ELIG_T2", "CSN", 4)
+	H.ok(Has(csn, "City-State expected ALLOWED actual ALLOWED"), csn)
+	H.ok(Has(csn, "real wars: none"), csn)
+	H.ok(Has(RoleLine("ELIG_T2", "CSX", 5), "City-State expected GREY:AT_WAR_WITH_RECIPIENT actual GREY:AT_WAR_WITH_RECIPIENT"))
+	H.ok(Has(RoleLine("ELIG_T2", "CSO", 6), "City-State expected ALLOWED actual ALLOWED"))
+	H.ok(not H.hasLine("City-State expected GREY:NO_COMMON_WAR"), "no City-State line expects a shared enemy")
 	local fn = RoleLine("ELIG_T2", "FN", 7)
 	H.ok(Has(fn, "Expeditionary expected GREY:NO_COMMON_WAR actual GREY:NO_COMMON_WAR"), fn)
 	H.ok(Has(fn, "Volunteers expected GREY:NO_COMMON_WAR+VOL_NEEDS_ACCESS actual GREY:NO_COMMON_WAR+VOL_NEEDS_ACCESS"), fn)
@@ -1386,14 +1403,15 @@ test("1.0.1.3 T2 shared enemy: 7 AI civs by ID; FW / FOW open, FN / FON / AN no 
 	H.ok(Has(RoleLine("ELIG_T2", "FOW", 3), "Volunteers expected ALLOWED actual ALLOWED"))
 	H.ok(Has(RoleLine("ELIG_T2", "AN", 10), "Expeditionary expected GREY:NO_COMMON_WAR actual GREY:NO_COMMON_WAR"))
 	local st = H.prop("EFV_DEV_SCN")
-	H.eq(st.elig.test, "T2"); H.eq(st.elig.stamp, 31); H.len(st.elig.civs, 7); H.eq(st.elig.pass, 7)
+	H.eq(st.elig.test, "T2"); H.eq(st.elig.stamp, 31); H.len(st.elig.civs, 10); H.eq(st.elig.pass, 10)
+	H.eq(st.elig.n, 10); H.eq(st.elig.ncs, 3)
 	H.eq(st.focus.stamp, 31); H.eq(st.focus.u, st.elig.u1)
 	H.ok(H.gold(0) >= 2000)
 	H.ok(not H.hasLine(": ERROR"))
 	-- pressed again: the Swordsmen are replaced, the verdicts stay
 	Dev("elig_t2", { stamp = 32 })
 	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 2)
-	H.len(EligLines("ELIG_T2", "PASS"), 16)
+	H.len(EligLines("ELIG_T2", "PASS"), 22)
 	H.clean()
 end)
 
@@ -1417,7 +1435,7 @@ end)
 test("1.0.1.3 T2 with 3 AI civs: FN, FON, NW, AN skipped and named; summary CHECK", function()
 	EligBoot(0)
 	Dev("elig_t2", { stamp = 51 })
-	H.len(EligLines("ELIG_T2", "PASS"), 3, "E, FW, FOW")
+	H.len(EligLines("ELIG_T2", "PASS"), 6, "E, FW, FOW, CSN, CSX, CSO")
 	H.ok(H.hasLine("roles FN, FON, NW, AN skipped"))
 	H.len(EligLines("ELIG_T2", "CHECK"), 1, "the summary")
 	H.eq(H.prop("EFV_DEV_SCN").elig.skipped, "FN,FON,NW,AN")
@@ -1442,7 +1460,7 @@ test("1.0.1.3 T2: the engine pulls the ally into your war -> AN is CHECK with an
 	H.ok(Has(an, "[EFV][CHECK] ELIG_T2 CHECK"), an)
 	H.ok(Has(an, "ENGINE EFFECT, not a VEF failure"), an)
 	H.len(EligLines("ELIG_T2", "FAIL"), 0)
-	H.ok(H.hasLine("7 civ(s): 6 PASS, 0 FAIL, 1 CHECK"))
+	H.ok(H.hasLine("7 civ(s) + 3 city-state(s): 9 PASS, 0 FAIL, 1 CHECK"))
 	H.clean()
 end)
 
@@ -1468,14 +1486,18 @@ test("1.0.1.3 T2 panel: button sends the stamped request; UI rules give the same
 	b:Click()
 	Pump({ panel }, 8)
 	H.ok(CheckLine("ELIG_T2", "PASS"), "gameplay lines")
-	H.len(EligLines("ELIG_T2_UI", "PASS"), 8, "UI rules: 7 civs + summary")
+	H.len(EligLines("ELIG_T2_UI", "PASS"), 11, "UI rules: 7 civs + 3 city-states + summary")
 	H.len(EligLines("ELIG_T2_UI", "FAIL"), 0); H.len(EligLines("ELIG_T2_UI", "CHECK"), 0)
 	H.ok(Has(RoleLine("ELIG_T2_UI", "FOW", 3), "UI basis FRIEND, Volunteer basis FRIEND_OB"), "FOW seen by the UI adapters")
 	H.ok(Has(RoleLine("ELIG_T2_UI", "AN", 10), "UI basis ALLIANCE"), "AN seen by the UI adapters")
+	H.ok(Has(RoleLine("ELIG_T2_UI", "CSN", 4), "City-State expected ALLOWED actual ALLOWED [UI rules]"), "CSN, UI rules")
+	H.ok(Has(RoleLine("ELIG_T2_UI", "CSX", 5), "City-State expected GREY:AT_WAR_WITH_RECIPIENT actual GREY:AT_WAR_WITH_RECIPIENT"))
+	H.ok(H.hasLine("summary (UI rules): T2, 7 civ(s) + 3 city-state(s): 10 PASS, 0 FAIL, 0 CHECK"))
 	local info = panel.Controls.InfoLabel:GetText()
 	H.ok(string.find(info, "T2: E=", 1, true) == 1, "role map on the first line: " .. info)
 	H.ok(Has(info, "FW=") and Has(info, "AN="), info)
 	local rec = panel.Controls.RecordLabel:GetText()
-	H.ok(string.find(rec, "T2: gameplay 7/7 PASS, UI 7/7 PASS", 1, true) == 1, "status: " .. rec)
+	H.ok(string.find(rec, "T2: gameplay 10/10 PASS, UI 10/10 PASS", 1, true) == 1, "status: " .. rec)
+	H.ok(Has(info, "CSN=") and Has(info, "CSX=") and not Has(info, "CSO="), info)
 	H.eq(FAKE_UI.selectedUnit and FAKE_UI.selectedUnit.id, H.prop("EFV_DEV_SCN").elig.u1, "the first Swordsman is selected")
 end)

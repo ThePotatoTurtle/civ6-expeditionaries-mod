@@ -37,10 +37,10 @@
 --
 -- City-State Expeditionary (spec 6.1, 9.3; WP4.1): recipient = any alive
 -- city-state the sender HasMet (CS_NOT_MET otherwise; majors, Free Cities
--- and barbarians are never CS recipients); war requirement = EFV_HasCommonWar
--- (the sender and the city-state both at war with some third player,
--- barbarians and Free Cities excluded, 1.0.1); not at war with the city-state
--- (AT_WAR_WITH_RECIPIENT); fee FEE_CS_EXPEDITIONARY (= the Expeditionary
+-- and barbarians are never CS recipients); NO shared-enemy requirement
+-- (designer ruling 1.0.2, "proxy wars": NO_COMMON_WAR is never emitted for
+-- CS; Expeditionary to majors and Volunteers keep it); not at war with the
+-- city-state (AT_WAR_WITH_RECIPIENT); fee FEE_CS_EXPEDITIONARY (= the Expeditionary
 -- column); duration CS_EXPEDITIONARY_DURATION (10); naval dry run as the
 -- city-state (future owner); valid return territory = the city-state's or
 -- the sender's tiles (EFV_ValidReturnTerritory, recipientID = the city-state).
@@ -578,9 +578,9 @@ end
 -- friend with no wars was allowed, and the Volunteer WAR lapse never
 -- fired). Free Cities count only for Entrust's "at war with the old owner"
 -- (EFV_EntrustCandidates). A city-state counts when both sides are really
--- at war with it. Used unchanged by all three force types, by the UI and
--- gameplay adapters (RecipientInfo) and by the Volunteer lapse
--- (EFV_VolunteerLapseReason).
+-- at war with it. Used by the Expeditionary and Volunteer send checks
+-- (RecipientInfo; City-State sends skip it since 1.0.2) in both contexts
+-- and by the Volunteer lapse (EFV_VolunteerLapseReason).
 -- Params:  s, r player IDs.
 -- Returns: boolean.
 -- PLAN 2.3; spec 6.1.3. APIs: A43, A42, A36 (+ EFV_PlayerKind adapters).
@@ -853,7 +853,8 @@ end
 -- Recipient-level evaluation, shared by all cities of one recipient.
 -- Returns { reasons = {codes}, basis = accessBasis or nil }.
 -- Order: basis (NOT_PARTNER / VOL_NEEDS_ACCESS / CS_NOT_MET),
--- AT_WAR_WITH_RECIPIENT, NO_COMMON_WAR (spec 6.1.2-6.1.4).
+-- AT_WAR_WITH_RECIPIENT, NO_COMMON_WAR (spec 6.1.2-6.1.4; EXP and VOL only:
+-- City-State sends need no shared enemy, designer ruling 1.0.2).
 local function RecipientInfo(senderID, recipientID, forceType)
 	local info = { reasons = {}, basis = nil }
 	if recipientID == nil or recipientID == senderID or Players[recipientID] == nil or not IsAlive(recipientID) then
@@ -889,7 +890,7 @@ local function RecipientInfo(senderID, recipientID, forceType)
 	if AtWar(senderID, recipientID) then
 		Add(info.reasons, "AT_WAR_WITH_RECIPIENT")
 	end
-	if not EFV_HasCommonWar(senderID, recipientID) then
+	if forceType ~= EFV_Config.FT_CS and not EFV_HasCommonWar(senderID, recipientID) then
 		Add(info.reasons, "NO_COMMON_WAR")
 	end
 	return info
@@ -1051,7 +1052,8 @@ end
 -- (CITY_NOT_OWNED), revealed to sender (NOT_REVEALED; G: A59 NEW-VERIFY,
 -- skipped with a log line if unavailable), basis present (EXP: NOT_PARTNER,
 -- VOL: VOL_NEEDS_ACCESS / NOT_PARTNER, CS: CS_NOT_MET), not at war
--- sender-recipient (AT_WAR_WITH_RECIPIENT), common war (NO_COMMON_WAR), gold
+-- sender-recipient (AT_WAR_WITH_RECIPIENT), common war (NO_COMMON_WAR; EXP
+-- and VOL only, 1.0.2), gold
 -- floor(GetGoldBalance()) >= fee (GOLD), naval dry run
 -- EFV_SpawnCandidates(city, "SEA", futureOwner) ~= nil (NAVAL_NO_SPAWN;
 -- futureOwner = recipient for EXP/CS, sender for VOL). A nil city -> REQ_STALE;

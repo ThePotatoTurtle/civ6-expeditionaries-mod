@@ -3,8 +3,8 @@
 -- end to end on the fake engine, in the confirmed in-game hook order:
 --   P4.1 eligibility (any met city-state), rows, fee = Expeditionary column,
 --        duration 10, send -> arrival as a city-state-owned unit with 0 moves;
---   P4.2 CS war requirement (a war the city-state shares; barbarians do not
---        count; at war with the city-state -> rejected);
+--   P4.2 CS war rule (1.0.2 designer ruling: no shared enemy needed; only
+--        a war between the sender and the city-state -> rejected);
 --   P4.3 10-turn timer, EXPIRY_SOON at 3 and 1 (_CS sender text), return
 --        at expiry from anywhere (0.7: no grace / mutiny for CS);
 --   P4.4 valid return territory = the city-state's or the sender's tiles,
@@ -112,7 +112,7 @@ test("P4.1 rules: CS rows = met city-states' cities; fee = Expeditionary column;
 	H.clean()
 end)
 
-test("P4.2 CS war requirement: shared war only; barbarians and Free Cities do not count; no war with the city-state", function()
+test("P4.2 CS war rule (1.0.2): no shared enemy needed; only a war with the city-state itself blocks", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local u = MyUnit()
@@ -120,13 +120,18 @@ test("P4.2 CS war requirement: shared war only; barbarians and Free Cities do no
 	local function Reasons() local _, r = EFV_EvaluateSend(0, u, 4, S.c4, CS, store); return r end
 	H.deq(Reasons(), {})
 	H.peace(3, 4)                                     -- the city-state's only war ends
-	H.deq(Reasons(), { "NO_COMMON_WAR" })
+	H.deq(Reasons(), {}, "a city-state at war with nobody is allowed (proxy wars)")
 	H.war(63, 4); H.war(63, 0)                        -- both fight the barbarians only
-	H.deq(Reasons(), { "NO_COMMON_WAR" }, "barbarians excluded")
+	H.deq(Reasons(), {}, "barbarian wars change nothing")
 	H.war(62, 4)                                      -- 0 is always at war with the Free Cities
-	H.deq(Reasons(), { "NO_COMMON_WAR" }, "Free Cities excluded (1.0.1)")
+	H.deq(Reasons(), {}, "Free Cities wars change nothing")
 	H.peace(62, 4); H.war(2, 4)                       -- the city-state fights F, 0 does not
-	H.deq(Reasons(), { "NO_COMMON_WAR" }, "a war of the city-state the sender does not share")
+	H.deq(Reasons(), {}, "a war of the city-state the sender stays out of is allowed")
+	H.len(EFV_DestinationRows(0, u, CS, store), 1, "the met city-state is listed")
+	H.ok(EFV_DestinationRows(0, u, CS, store)[1].ok, "and its row is open")
+	-- Expeditionary to a major still needs the shared war (unchanged).
+	H.peace(3, 1); H.peace(3, 0)
+	H.contains(select(2, EFV_EvaluateSend(0, u, 1, S.c1, "EXPEDITIONARY", store)), "NO_COMMON_WAR", "EXP keeps the shared-enemy rule")
 	H.war(3, 4)
 	H.war(0, 4)
 	H.contains(Reasons(), "AT_WAR_WITH_RECIPIENT")

@@ -9,8 +9,9 @@ Civilization VI\\Logs\\Lua.log, or EFV_CIV6_LOGS) and prints the result of every
 EFV/TESTING_FINAL.md, with --retest of the 6-step 0.7 re-test EFV/TESTING_RETEST_0.7.md, or with
 --s14 of the mutiny-death check EFV/TESTING_S14.md. Every mode also prints the EFV_Dev badge audit
 (BADGE_AUDIT lines, EFV_Dev 0.7.2-dev.1) next to the error count. --eligibility prints the T1 / T2
-eligibility buttons of EFV_Dev 1.0.1.3 instead: one line per civ (role, picker result expected
-and actual for Expeditionary and Volunteers, PASS/FAIL/CHECK) for the gameplay rules and the UI
+eligibility buttons of EFV_Dev 1.0.1.3+ instead: one line per civ (role, picker result expected
+and actual for Expeditionary and Volunteers; T2 also one per city-state for the City-State picker,
+EFV_Dev 1.0.2.1; PASS/FAIL/CHECK) for the gameplay rules and the UI
 rules, from the last press of each button:
 
     Step  3  PASS   Send Expeditionary: fee 36 (band 2, expected 36)
@@ -442,6 +443,9 @@ S14_STEPS = [
 ELIG_TITLES = {"T1": "Volunteer partners", "T2": "Shared enemy"}
 ELIG_CIV_RE = re.compile(r"^(\S+?)=(.+?) \| (.*?) \| Expeditionary expected (\S+) actual (.+?) \| "
                          r"Volunteers expected (\S+) actual (.+?)(?: \| SETUP: (.*?))? \[(?:gameplay|UI) rules\]$")
+# T2 city-state lines (EFV_Dev 1.0.2.1; VEF 1.0.2: no shared enemy needed for City-State sends).
+ELIG_CS_RE = re.compile(r"^(\S+?)=(.+?) \| (.*?) \| City-State expected (\S+) actual (.+?)"
+                        r"(?: \| SETUP: (.*?))? \[(?:gameplay|UI) rules\]$")
 
 
 def elig_runs(log, cid):
@@ -462,13 +466,20 @@ def elig_runs(log, cid):
 
 
 def elig_civ_text(detail):
-    m = ELIG_CIV_RE.match(detail)
-    if not m:
-        return short(detail, 200)
-    role, civ, _facts, xe, ae, xv, av, setup = m.groups()
-
     def part(name, want, got):
         return "%s %s" % (name, got) if want == got else "%s %s (EXPECTED %s)" % (name, got, want)
+    m = ELIG_CIV_RE.match(detail)
+    if not m:
+        mc = ELIG_CS_RE.match(detail)
+        if not mc:
+            return short(detail, 200)
+        role, civ, _facts, xc, ac, setup = mc.groups()
+        civ = re.sub(r" \((major|minor/other)\)$", "", civ)
+        text = "%-5s %s: %s" % (role, short(civ, 40), part("City-State", xc, ac))
+        if setup:
+            text += "; SETUP: " + setup
+        return text
+    role, civ, _facts, xe, ae, xv, av, setup = m.groups()
     civ = re.sub(r" \((major|minor/other)\)$", "", civ)
     text = "%-5s %s: %s; %s" % (role, short(civ, 40), part("Expeditionary", xe, ae), part("Volunteers", xv, av))
     if setup:
