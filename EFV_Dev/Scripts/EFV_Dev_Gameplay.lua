@@ -47,9 +47,10 @@ EFV_Dev = {}
 -- fight, S12 checks the arrival turn): 0.7.2-dev.1; rebuilt for EFV
 -- 0.7.3-dev without changes: 0.7.3-dev.1; rebuilt for EFV 0.7.4-dev
 -- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3; rebuilt for
--- the EFV 1.0.0 release without changes: 1.0.0.1); a
+-- the EFV 1.0.0 release without changes: 1.0.0.1; eligibility tests T1 / T2:
+-- 1.0.1.3); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.1.2"
+EFV_Dev.VERSION = "1.0.1.3"
 EFV_Dev.FOR_EFV = "1.0.1"
 
 -- ---------------------------------------------------------------------------
@@ -2930,6 +2931,274 @@ CMD.scn_receive = function(me, p)
 	Check("RECEIVE", ok and "PASS" or "CHECK", Row("Expeditionary", recE, e) .. "; " .. Row("Volunteers", recV, v) ..
 		"; next to your capital " .. EFV_CityName(cap))
 end
+
+-- ---------------------------------------------------------------------------
+-- Eligibility tests T1 / T2 (EFV_Dev 1.0.1.3; VEF 1.0.1 common-war fix).
+-- From a fresh game after founding the capital (Large map, 8 civs): every
+-- major and city-state meets every other, two Swordsmen with full moves
+-- next to your capital, and the other majors with a city (ascending ID) get
+-- the roles below. Then VEF's own EFV_DestinationRows (gameplay rules) says
+-- for each civ whether its Expeditionary / Volunteer rows are ALLOWED, GREY
+-- (with the eligibility reasons) or ABSENT, against the expected result.
+-- One line per civ, then a summary:
+--   [EFV][CHECK] ELIG_T1|ELIG_T2 PASS|FAIL|CHECK T<turn> <ROLE>=<civ> | facts | Expeditionary ... | Volunteers ...
+--   [EFV][CHECK] ELIG_T1|ELIG_T2 <verdict> T<turn> summary (gameplay rules): ...
+-- The panel repeats the check with the UI rules (ELIG_T1_UI / ELIG_T2_UI).
+-- FAIL = the picker disagrees with the rule; CHECK = the setup did not come
+-- out as planned (e.g. the engine pulled an ally into your war), so the
+-- verdict says nothing about VEF. Wars are only declared for the roles that
+-- need one, before any friendship or alliance, and nobody makes peace.
+-- ---------------------------------------------------------------------------
+local ELIG_CODES = { NOT_PARTNER = true, VOL_NEEDS_ACCESS = true, CS_NOT_MET = true,
+	AT_WAR_WITH_RECIPIENT = true, NO_COMMON_WAR = true }
+local CIVIC_ALLY = "CIVIC_CIVIL_SERVICE"
+
+-- war: at war with E. peace: at war with nobody (majors / city-states).
+local ELIG_TESTS = {
+	T1 = { title = "Volunteer partners", roles = {
+		{ r = "E",  enemy = true,               exp = "ABSENT",  vol = "ABSENT" },
+		{ r = "A",  ally = true, war = true,    exp = "ALLOWED", vol = "ALLOWED" },
+		{ r = "F",  friend = true, war = true,  exp = "ALLOWED", vol = "GREY:VOL_NEEDS_ACCESS" },
+		{ r = "FO", friend = true, ob = true, war = true, exp = "ALLOWED", vol = "ALLOWED" },
+		{ r = "N",  war = true,                 exp = "ABSENT",  vol = "ABSENT" },
+	} },
+	T2 = { title = "Shared enemy", roles = {
+		{ r = "E",   enemy = true,              exp = "ABSENT",  vol = "ABSENT" },
+		{ r = "FW",  friend = true, war = true, exp = "ALLOWED", vol = "GREY:VOL_NEEDS_ACCESS" },
+		{ r = "FOW", friend = true, ob = true, war = true, exp = "ALLOWED", vol = "ALLOWED" },
+		{ r = "FN",  friend = true, peace = true, exp = "GREY:NO_COMMON_WAR", vol = "GREY:NO_COMMON_WAR+VOL_NEEDS_ACCESS" },
+		{ r = "FON", friend = true, ob = true, peace = true, exp = "GREY:NO_COMMON_WAR", vol = "GREY:NO_COMMON_WAR" },
+		{ r = "NW",  war = true,                exp = "ABSENT",  vol = "ABSENT" },
+		{ r = "AN",  ally = true, peace = true, exp = "GREY:NO_COMMON_WAR", vol = "GREY:NO_COMMON_WAR" },
+	} },
+}
+-- Majors beyond the roles: met only, never partners.
+local ELIG_OTHER = { r = "OTHER", exp = "ABSENT", vol = "ABSENT" }
+
+local function IsRealPlayer(i) return IsMajorID(i) or IsCityStateID(i) end
+
+-- Real enemies of pid (majors and city-states; the engine's permanent wars
+-- with the Free Cities and the barbarians never count, VEF 1.0.1).
+local function RealWars(pid)
+	local out = {}
+	for _, e in ipairs(SortedIDs(IsRealPlayer)) do
+		if e ~= pid and AtWar(pid, e) then out[#out + 1] = e end
+	end
+	return out
+end
+
+-- The picker result for pid from EFV_DestinationRows rows: "ALLOWED" (a
+-- row is open), "ABSENT" (no row) or "GREY:<eligibility codes, sorted>" of
+-- its row with the fewest reasons; other codes (NOT_REVEALED, GOLD, unit
+-- reasons) are returned separately.
+local function EligClass(rows, pid)
+	local any, open, best = false, false, nil
+	for _, r in ipairs(rows) do
+		if r.recipientID == pid then
+			any = true
+			if r.ok then open = true
+			elseif best == nil or #(r.reasons or {}) < #best then best = r.reasons or {} end
+		end
+	end
+	if not any then return "ABSENT", {} end
+	if open then return "ALLOWED", {} end
+	local elig, other = {}, {}
+	for _, c in ipairs(best) do
+		if ELIG_CODES[c] then elig[#elig + 1] = c else other[#other + 1] = c end
+	end
+	table.sort(elig)
+	return "GREY:" .. table.concat(elig, "+"), other
+end
+
+-- PASS when equal; CHECK when an expected open row is greyed only by other
+-- codes (setup: not revealed, gold, unit); FAIL otherwise.
+local function EligCompare(want, got)
+	if want == got then return "PASS" end
+	if want == "ALLOWED" and got == "GREY:" then return "CHECK" end
+	return "FAIL"
+end
+
+local function YesNo(b) return b and "yes" or "no" end
+
+-- Facts of pid toward you, and what does not match its role (nil = all fine).
+local function EligFacts(me, pid, role, E)
+	local ally = Diplo(me, "HasAllied", pid)
+	local friend = Diplo(me, "HasDeclaredFriendship", pid)
+	local okOB, ob = pcall(EFV_HasOpenBordersFrom, me, pid)
+	ob = okOB and ob == true
+	local warYou = AtWar(me, pid)
+	local warE = E ~= nil and pid ~= E and AtWar(pid, E)
+	local wars = RealWars(pid)
+	local names = {}
+	for _, e in ipairs(wars) do names[#names + 1] = PlayerName(e) end
+	local facts = "at war with E: " .. (pid == E and "-" or YesNo(warE)) .. " (real wars: " ..
+		(#names > 0 and table.concat(names, ", ") or "none") .. "), ally: " .. YesNo(ally) .. ", friend: " .. YesNo(friend) ..
+		", OB to you: " .. YesNo(ob) .. ", at war with you: " .. YesNo(warYou)
+	local bad = {}
+	if role.enemy then
+		if not warYou then bad[#bad + 1] = "not at war with you" end
+	else
+		if warYou then bad[#bad + 1] = "at war with you" end
+		if role.war and not warE then bad[#bad + 1] = "not at war with E" end
+		if role.peace and #wars > 0 then
+			if ally and warE then
+				bad[#bad + 1] = "ENGINE EFFECT, not a VEF failure: the alliance pulled it into your war with E"
+			else
+				bad[#bad + 1] = "at war although this role must be at peace"
+			end
+		end
+		if role.ally and not ally then bad[#bad + 1] = "the alliance did not take" end
+		if not role.ally and ally then bad[#bad + 1] = "allied although this role is not" end
+		if role.friend and not friend then bad[#bad + 1] = "no declared friendship" end
+		if not role.friend and not role.ally and friend then bad[#bad + 1] = "declared friend although this role is not" end
+		if role.ob and not ob then bad[#bad + 1] = "no open borders to you" end
+		if role.friend and not role.ob and ob then bad[#bad + 1] = "grants you open borders although this role must not" end
+	end
+	return facts, (#bad > 0) and table.concat(bad, "; ") or nil
+end
+
+-- Removes the Swordsmen an earlier T1 / T2 press created (unless VEF tracks
+-- them now: the tester sent one).
+local function EligCleanup(st)
+	local e = st.elig
+	if type(e) ~= "table" or type(e.units) ~= "table" then return end
+	local store = EFV_Records.Load()
+	for _, x in ipairs(e.units) do
+		local o = tonumber(x.o) or -1
+		local u = FindUnit(o, tonumber(x.u) or -1)
+		if u ~= nil and UnitTypeName(u) == x.ut and EFV_Records.FindByUnit(store, o, u:GetID()) == nil then
+			pcall(function() Players[o]:GetUnits():Destroy(u) end)
+		end
+	end
+end
+
+local function EligTest(test, me, p)
+	local spec = ELIG_TESTS[test]
+	local id = "ELIG_" .. test
+	local st = ScnLoad()
+	local function Fail(msg)
+		st.elig = { test = test, err = msg, stamp = p.stamp }
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		ScnSave(st)
+		Check(id, "CHECK", msg)
+	end
+	local cap = Capital(me)
+	if cap == nil then return Fail("you have no city yet: found your capital, then press " .. test .. " again") end
+	local majors = SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)
+	if #majors < 2 then
+		return Fail("needs at least 2 other civs with a city, found " .. #majors .. ": End Turn once more, then press " .. test .. " again")
+	end
+	local notes = {}
+	if type(st.elig) == "table" and st.elig.test ~= nil and st.elig.test ~= test and st.elig.err == nil then
+		notes[#notes + 1] = "an earlier " .. Str(st.elig.test) .. " in this game set up other wars: use a fresh game for each test"
+	end
+	if st.ally ~= nil then notes[#notes + 1] = "S0 ran in this game: its wars and friendships may disturb the roles" end
+	EligCleanup(st)
+	-- 1. everybody meets everybody (the diplomacy screen shows every relation)
+	local all = SortedIDs(IsRealPlayer)
+	for i = 1, #all do
+		for j = i + 1, #all do MeetPair(all[i], all[j]) end
+	end
+	-- 2. roles by ascending ID
+	local civs, skipped = {}, {}
+	for i, role in ipairs(spec.roles) do
+		if majors[i] ~= nil then civs[#civs + 1] = { pid = majors[i], role = role } else skipped[#skipped + 1] = role.r end
+	end
+	for i = #spec.roles + 1, #majors do civs[#civs + 1] = { pid = majors[i], role = ELIG_OTHER } end
+	local E = civs[1].pid
+	-- 3. wars first (only for the roles that need one), then the partners
+	DeclareWar(me, E)
+	for _, c in ipairs(civs) do
+		if c.role.war then DeclareWar(c.pid, E) end
+	end
+	local civicOB, civicAlly = false, false
+	for _, c in ipairs(civs) do
+		local r, pid = c.role, c.pid
+		if (r.friend or r.ally) and not Diplo(me, "HasDeclaredFriendship", pid) then
+			SetDiploPair(id, me, pid, "SetHasDeclaredFriendship", true)
+		end
+		if r.ob then
+			if not civicOB then GrantCivic(me, CIVIC_OB); civicOB = true end
+			GrantCivic(pid, CIVIC_OB)
+			GrantOpenBorders(pid, me)
+		end
+		if r.ally and not Diplo(me, "HasAllied", pid) then
+			-- Alliances need Civil Service (nobody has it early on).
+			if not civicAlly then GrantCivic(me, CIVIC_ALLY); civicAlly = true end
+			GrantCivic(pid, CIVIC_ALLY)
+			SetDiploPair(id, me, pid, "SetHasAllied", true)
+		end
+	end
+	-- 4. their cities revealed (no NOT_REVEALED), gold and Iron for the fees
+	for _, c in ipairs(civs) do
+		for _, city in ipairs(Cities(c.pid)) do RevealCity(me, city, nil) end
+	end
+	pcall(function()
+		local t = Players[me]:GetTreasury()
+		local g = t:GetGoldBalance()
+		if g < 2000 then t:ChangeGoldBalance(2000 - g) end
+	end)
+	pcall(function()
+		local r = Players[me]:GetResources()
+		local idx = GameInfo.Resources["RESOURCE_IRON"].Index
+		local have = r:GetResourceAmount(idx)
+		if have < 10 then r:ChangeResourceAmount(idx, 10 - have) end
+	end)
+	-- 5. two Swordsmen with full moves next to your capital
+	local swords, units, full = {}, {}, 0
+	for _ = 1, 2 do
+		local plot = FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1) or FindPlot(cap:GetX(), cap:GetY(), 4, OwnedByAny({ -1, me }), 1)
+		local u = NewUnit(id, me, "UNIT_SWORDSMAN", plot)
+		if u ~= nil then
+			swords[#swords + 1] = u
+			units[#units + 1] = { o = me, u = u:GetID(), ut = "UNIT_SWORDSMAN" }
+			if FullMoves(u) then full = full + 1 end
+		end
+	end
+	-- 6. VEF's picker rows (gameplay rules) against the expected results
+	local store = EFV_Records.Load()
+	local rowsExp, rowsVol = {}, {}
+	if swords[1] ~= nil then
+		rowsExp = EFV_DestinationRows(me, swords[1], FT_EXP, store)
+		rowsVol = EFV_DestinationRows(me, swords[2] or swords[1], FT_VOL, store)
+	end
+	local n, pass, fail, chk = 0, 0, 0, 0
+	local map, saved = {}, {}
+	for _, c in ipairs(civs) do
+		local r = c.role
+		local facts, setup = EligFacts(me, c.pid, r, E)
+		local aExp, oExp = EligClass(rowsExp, c.pid)
+		local aVol, oVol = EligClass(rowsVol, c.pid)
+		local v = "PASS"
+		for _, w in ipairs({ EligCompare(r.exp, aExp), EligCompare(r.vol, aVol) }) do
+			if w == "FAIL" then v = "FAIL" elseif w == "CHECK" and v == "PASS" then v = "CHECK" end
+		end
+		if setup ~= nil then v = "CHECK" end
+		if swords[1] == nil then v = "CHECK" end
+		n = n + 1
+		if v == "PASS" then pass = pass + 1 elseif v == "FAIL" then fail = fail + 1 else chk = chk + 1 end
+		local function Act(a, o) return a .. (#o > 0 and (" (also " .. table.concat(o, "+") .. ")") or "") end
+		Check(id, v, r.r .. "=" .. PlayerName(c.pid) .. " | " .. facts .. " | Expeditionary expected " .. r.exp .. " actual " ..
+			Act(aExp, oExp) .. " | Volunteers expected " .. r.vol .. " actual " .. Act(aVol, oVol) ..
+			(setup and (" | SETUP: " .. setup) or "") .. " [gameplay rules]")
+		if r ~= ELIG_OTHER then map[#map + 1] = r.r .. "=" .. PlayerName(c.pid) end
+		saved[#saved + 1] = { pid = c.pid, role = r.r, exp = r.exp, vol = r.vol, facts = facts, setup = setup, g = v }
+	end
+	if #skipped > 0 then notes[#notes + 1] = "only " .. #majors .. " other civ(s) with a city: roles " .. table.concat(skipped, ", ") .. " skipped" end
+	if #swords < 2 or full < #swords then notes[#notes + 1] = "Swordsmen " .. #swords .. " of 2 (full moves " .. full .. ")" end
+	local sv = (fail > 0) and "FAIL" or ((chk > 0 or #notes > 0) and "CHECK" or "PASS")
+	st.elig = { test = test, stamp = p.stamp, units = units, civs = saved, n = n, pass = pass, fail = fail, check = chk,
+		u1 = swords[1] and swords[1]:GetID() or -1, u2 = swords[2] and swords[2]:GetID() or -1,
+		skipped = (#skipped > 0) and table.concat(skipped, ",") or nil }
+	Focus(st, cap:GetX(), cap:GetY(), me, swords[1] and swords[1]:GetID() or -1, p.stamp)
+	ScnSave(st)
+	Check(id, sv, "summary (gameplay rules): " .. test .. " " .. spec.title .. ", " .. n .. " civ(s): " .. pass .. " PASS, " ..
+		fail .. " FAIL, " .. chk .. " CHECK; roles " .. table.concat(map, ", ") ..
+		(#notes > 0 and ("; " .. table.concat(notes, "; ")) or ""))
+end
+
+CMD.elig_t1 = function(me, p) EligTest("T1", me, p) end
+CMD.elig_t2 = function(me, p) EligTest("T2", me, p) end
 
 -- ---------------------------------------------------------------------------
 -- Evaluation: at your turn start and on "Check now".

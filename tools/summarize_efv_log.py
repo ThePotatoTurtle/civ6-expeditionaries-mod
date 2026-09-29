@@ -2,13 +2,16 @@
 """summarize_efv_log.py - one PASS/CHECK line per step of an in-game test session.
 
 Usage:
-    python tools/summarize_efv_log.py [--retest | --s14] [--log PATH] [--db PATH] [-v]
+    python tools/summarize_efv_log.py [--retest | --s14 | --eligibility] [--log PATH] [--db PATH] [-v]
 
 Reads Lua.log of the last game run (default: %LOCALAPPDATA%\\Firaxis Games\\Sid Meier's
 Civilization VI\\Logs\\Lua.log, or EFV_CIV6_LOGS) and prints the result of every step of
 EFV/TESTING_FINAL.md, with --retest of the 6-step 0.7 re-test EFV/TESTING_RETEST_0.7.md, or with
 --s14 of the mutiny-death check EFV/TESTING_S14.md. Every mode also prints the EFV_Dev badge audit
-(BADGE_AUDIT lines, EFV_Dev 0.7.2-dev.1) next to the error count:
+(BADGE_AUDIT lines, EFV_Dev 0.7.2-dev.1) next to the error count. --eligibility prints the T1 / T2
+eligibility buttons of EFV_Dev 1.0.1.3 instead: one line per civ (role, picker result expected
+and actual for Expeditionary and Volunteers, PASS/FAIL/CHECK) for the gameplay rules and the UI
+rules, from the last press of each button:
 
     Step  3  PASS   Send Expeditionary: fee 36 (band 2, expected 36)
     Step  7  CHECK  Grace (S3): record 2 state=DEPLOYED grace=nil (expected GRACE with 5 turns)
@@ -436,6 +439,69 @@ S14_STEPS = [
 ]
 
 
+ELIG_TITLES = {"T1": "Volunteer partners", "T2": "Shared enemy"}
+ELIG_CIV_RE = re.compile(r"^(\S+?)=(.+?) \| (.*?) \| Expeditionary expected (\S+) actual (.+?) \| "
+                         r"Volunteers expected (\S+) actual (.+?)(?: \| SETUP: (.*?))? \[(?:gameplay|UI) rules\]$")
+
+
+def elig_runs(log, cid):
+    """Per-civ check lines and the summary line of the last complete run of ELIG_T1 / ELIG_T2
+    (or their _UI twins): ([(verdict, detail)], (verdict, detail) or None)."""
+    runs, cur = [], []
+    for c in log.checks_of(cid):
+        if c[3].startswith("summary"):
+            runs.append((cur, (c[1], c[3])))
+            cur = []
+        else:
+            cur.append((c[1], c[3]))
+    if runs:
+        return runs[-1]
+    if cur:
+        return cur, None
+    return [], None
+
+
+def elig_civ_text(detail):
+    m = ELIG_CIV_RE.match(detail)
+    if not m:
+        return short(detail, 200)
+    role, civ, _facts, xe, ae, xv, av, setup = m.groups()
+
+    def part(name, want, got):
+        return "%s %s" % (name, got) if want == got else "%s %s (EXPECTED %s)" % (name, got, want)
+    civ = re.sub(r" \((major|minor/other)\)$", "", civ)
+    text = "%-5s %s: %s; %s" % (role, short(civ, 40), part("Expeditionary", xe, ae), part("Volunteers", xv, av))
+    if setup:
+        text += "; SETUP: " + setup
+    return text
+
+
+def eligibility_report(log):
+    """Prints the T1 / T2 results; returns the number of tests (per rules) that did not pass."""
+    bad, seen = 0, 0
+    for test in ("T1", "T2"):
+        for cid, rules in (("ELIG_" + test, "gameplay rules"), ("ELIG_%s_UI" % test, "UI rules")):
+            civs, summ = elig_runs(log, cid)
+            if not civs and summ is None:
+                print("%s %s, %s: not run" % (test, ELIG_TITLES[test], rules))
+                continue
+            seen += 1
+            if summ is None:
+                bad += 1
+                print("%s %s, %s: CHECK  no summary line (setup stopped early)" % (test, ELIG_TITLES[test], rules))
+            else:
+                if summ[0] != "PASS":
+                    bad += 1
+                print("%s %s, %s: %-5s  %s" % (test, ELIG_TITLES[test], rules, summ[0],
+                                               short(summ[1].split(": ", 1)[-1], 200)))
+            for verdict, detail in civs:
+                print("    %-5s  %s" % (verdict, elig_civ_text(detail)))
+    if seen == 0:
+        print("No T1 / T2 lines: press T1 Volunteer partners or T2 Shared enemy on the dev panel (EFV_Dev 1.0.1.3)")
+        return 1
+    return bad
+
+
 def error_lines(log):
     out = []
     for i, ln in enumerate(log.lines):
@@ -453,6 +519,8 @@ def main(argv=None):
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--retest", action="store_true", help="the 6-step 0.7 re-test (EFV/TESTING_RETEST_0.7.md)")
     ap.add_argument("--s14", action="store_true", help="the S14 mutiny-death check (EFV/TESTING_S14.md)")
+    ap.add_argument("--eligibility", action="store_true",
+                    help="the T1 / T2 eligibility buttons (EFV_Dev 1.0.1.3): per-civ lines and PASS/FAIL")
     a = ap.parse_args(argv)
     if not os.path.exists(a.log):
         print("Lua.log not found: %s" % a.log)
@@ -464,6 +532,12 @@ def main(argv=None):
         m = SPEED_RE.search(ln)
         if m:
             ctx["pm"], ctx["speed"] = int(m.group(1)), int(m.group(2))
+    if a.eligibility:
+        print("VEF eligibility tests (%s, %d check lines)" % (a.log, len(log.checks)))
+        bad = eligibility_report(log)
+        errs = error_lines(log)
+        print("Errors: %s" % ("none" if not errs else "%d, first: %s" % (len(errs), short(errs[0], 200))))
+        return 1 if bad or errs else 0
     title = "VEF S14 mutiny-death summary" if a.s14 else ("VEF 0.7 re-test summary" if a.retest else "VEF final session summary")
     print("%s (%s, %d VEF lines, %d check lines)" % (title, a.log, len(log.efv), len(log.checks)))
     failed = 0

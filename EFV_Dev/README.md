@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteers & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 1.0.1.2, made for VEF 1.0.1. Never enable it in a real game.
+Version 1.0.1.3, made for VEF 1.0.1. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -60,6 +60,8 @@ These sit under "Test sessions", below the Screenshot buttons. Each one sets up 
 | S13 Unit in B's land | `scn_inland` | a Spearman of yours with full moves on a free tile of B within 3 tiles of B's capital, selected. The first check asks VEF's own picker rule right away (B's rows open, every other row `WRONG_TERRITORY`); send it to B the same turn | `FROM_LAND_RULES` (right away), `FROM_LAND` |
 | S14 Mutiny death | `scn_mutdeath` | two Swordsmen of yours, lent to F as Volunteers, in mutiny with 80 damage on neutral land next to F's land, each next to two Barbarian Warriors, plus an enemy Warrior of C nearby. Leave copy 1 (no moves) for the Barbarians and attack with copy 2 (selected). Every unit ID is logged. At the next turn start each copy must be closed and gone, with no unit of yours and no VEF record on its tile. `EFV/TESTING_S14.md` walks through it (`--s14`) | `MUT_DEATH` |
 | S15 Receive forces | `scn_receive` | B sends to you, both already deployed next to your capital: an Expeditionary Swordsman you now control (20 turns) and a Volunteer Swordsman B keeps in your land. Gives B open borders from you first if B has no Volunteer basis. Runs S0 if needed, removes the previous Shot or S15 scene and opens the VEF tracker | `RECEIVE` |
+| T1 Volunteer partners | `elig_t1` | see "Eligibility tests" below | `ELIG_T1`, `ELIG_T1_UI` (right away) |
+| T2 Shared enemy | `elig_t2` | see "Eligibility tests" below | `ELIG_T2`, `ELIG_T2_UI` (right away) |
 | Go to scenario | (UI) | moves the camera back to the current test and selects your test unit | |
 | Check now | `scn_check` | runs the checks that don't need a new turn (S7, S11, S12, S13) | |
 
@@ -83,10 +85,49 @@ Game calls S0, S5, S7 and S11 add for a new game (all pcall-guarded, EFV_Dev onl
 | reveal | `PlayersVisibility[p]:ChangeVisibilityCount(plotIndex, 1)` for every plot within 3 tiles of a city. If the city still is not revealed, a Scout "VEF-SCOUT" of yours is placed within 2 tiles of it | AlexanderScenario.lua:59, AustraliaScenario.lua:1273 (gameplay), Debug/Map.ltp "Reveal All" |
 | open borders | Early Empire for you and B (`GetCulture():SetCivic`), then a one-way scripted deal: working deal, `AddItemOfType(AGREEMENTS, B)`, `SetSubType(OPEN_BORDERS)`, `SetDuration(30)`, `SetLocked`, `Validate`, `EnactWorkingDeal` | IndonesiaKhmerScenario.lua:31; Debug/Diplomacy.ltp:115-127; Session F T27 PASS (F:L1080-L1082) |
 | friendship, war | `SetHasDeclaredFriendship`, `DeclareWarOn(FORMAL_WAR)` | Session F T27 PASS |
+| alliance (T1, T2) | Civil Service for both (`GetCulture():SetCivic`), then `SetHasAllied(p, true)` both ways, after the friendship | Session E 6 (the flag takes and does not end a war); whether the UI sees it is what the `ELIG_*_UI` lines show |
 | tech, civic (S5) | `GetTechs():SetTech(idx, true)`, `GetCulture():SetCivic(idx, true)` | AustraliaScenario.lua:1368, VikingScenario.lua:38 |
 | city HP (S7, S11) | `CityManager.GetDistrictAt(x, y)`, `SetDamage(DefenseTypes.DISTRICT_OUTER, max)`, `SetDamage(DefenseTypes.DISTRICT_GARRISON, max - 1)` | BlackDeathScenario.lua:437, PiratesScenario_StartScript.lua:1342-1369 |
 | new city (S11) | `GetCities():Create(x, y)` | AustraliaScenario.lua:1163, 1346 |
 | full moves | `UnitManager.RestoreMovementToFormation(u)`, only if a created Swordsman lacks moves | BlackDeathScenario_UnitCommands.lua:281 (LIKELY) |
+
+## Eligibility tests (T1, T2)
+
+Two buttons in the test group check who shows up in the Send picker, and how, after the 1.0.1 common-war fix (only real wars against a major civ or a city-state count; the Free Cities and the barbarians never do). Use a new game for each button (written for a Large map with 8 civs and city-states), found your capital, then press the button. Don't combine them with S0, the Shot buttons or each other in one game: wars can't be undone, and the peace cooldown is 10 turns.
+
+Both buttons make every major civ and city-state meet every other one, so the diplomacy screen shows all relations. They reveal the cities of the civs involved, top your gold up to 2000 and your Iron to 10, and put 2 Swordsmen with full moves next to your capital (the first one selected). A second press replaces the Swordsmen, unless you already sent one. Roles go to the other majors with a city in player ID order. Majors left over get the role OTHER (met only, expected absent). With fewer civs than roles, the last roles are skipped and the summary says which ones.
+
+The check asks VEF's own `EFV_DestinationRows` for the Expeditionary list (Swordsman 1) and the Volunteer list (Swordsman 2). Each civ comes out as ALLOWED (an open row), GREY with its eligibility reasons, or ABSENT (no row). Gameplay logs one `ELIG_T1` / `ELIG_T2` line per civ with the gameplay rules. About a second later the panel runs the same check with the UI rules the real picker uses and logs `ELIG_T1_UI` / `ELIG_T2_UI`, adding the UI's partner and Volunteer basis. Each line has the role, the facts (at war with E, real wars, ally, friend, open borders to you, at war with you), expected and actual for both force types, and a verdict. A summary line comes last.
+
+- PASS: the picker matches the rule.
+- FAIL: the picker disagrees with the rule (a VEF problem).
+- CHECK: the setup didn't come out as planned, so the line says nothing about VEF. `SETUP:` says what went wrong. If the engine pulled an ally into your war, it reads "ENGINE EFFECT, not a VEF failure". An expected open row that is greyed only by other reasons (not revealed, gold, the unit) is also CHECK.
+
+The panel's first line shows the role map (for example `T2: E=Gaul, FW=Japan, FOW=England, ...`). The second line shows a short result: `T2: gameplay 7/7 PASS, UI 7/7 PASS`.
+
+T1 Volunteer partners (every partner shares the war with E, only the basis changes):
+
+| Role | Setup | Expeditionary | Volunteers |
+|---|---|---|---|
+| E | you declare war on E | absent | absent |
+| A | your ally (Civil Service granted to both), at war with E | allowed | allowed |
+| F | declared friend, no open borders, at war with E | allowed | greyed, needs open borders |
+| FO | declared friend, grants you open borders, at war with E | allowed | allowed |
+| N | met only, at war with E | absent | absent |
+
+T2 Shared enemy (with and without the shared war; needs 7 AI civs):
+
+| Role | Setup | Expeditionary | Volunteers |
+|---|---|---|---|
+| E | at war with you | absent | absent |
+| FW | declared friend, at war with E | allowed | greyed, needs open borders |
+| FOW | declared friend, grants you open borders, at war with E | allowed | allowed |
+| FN | declared friend, at war with nobody | greyed, no common enemy | greyed, no common enemy + needs open borders |
+| FON | declared friend, grants you open borders, at war with nobody | greyed, no common enemy | greyed, no common enemy |
+| NW | met only, at war with E | absent | absent |
+| AN | your ally, at war with nobody | greyed, no common enemy | greyed, no common enemy |
+
+The setup declares only the wars listed (you on E, then the "at war with E" roles on E), before any friendship or alliance, and never tries to make peace. Afterwards `python tools/summarize_efv_log.py --eligibility` prints the last run of each button, per rules, with one line per civ.
 
 ## Panel fields
 
@@ -152,4 +193,4 @@ Forged requests go straight to VEF and skip its UI checks, to test the gameplay 
 
 ## Offline tests
 
-`tests/offline/test_dev_mod.lua` runs this mod in the offline fake engine: every command, every test-session scenario and its check line (S12 end to end with VEF's promotion context and the panel), every Shot scene from a fresh game and the panel's Shot steps, and the panel (hidden start, hotkey, flat parameters, forged requests, scenario buttons, camera focus, session line, Target set to B). The final-session tests start from a fake brand-new game (nobody met, nothing revealed, no diplomacy) and run S0 first; S0 is also tested without a capital, without the reveal call (Scout fallback) and with a refused open-borders deal (alliance fallback). Run it with `python tests/offline/run_tests.py -k dev`.
+`tests/offline/test_dev_mod.lua` runs this mod in the offline fake engine: every command, every test-session scenario and its check line (S12 end to end with VEF's promotion context and the panel), every Shot scene from a fresh game and the panel's Shot steps, T1 and T2 with 7 AI civs, with 3 (skipped roles), without a capital and with an ally the engine pulls into your war, and the panel (hidden start, hotkey, flat parameters, forged requests, scenario buttons, camera focus, session line, Target set to B). The final-session tests start from a fake brand-new game (nobody met, nothing revealed, no diplomacy) and run S0 first; S0 is also tested without a capital, without the reveal call (Scout fallback) and with a refused open-borders deal (alliance fallback). Run it with `python tests/offline/run_tests.py -k dev`.

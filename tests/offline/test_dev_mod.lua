@@ -1313,3 +1313,169 @@ test("shot panel: no zoom call and no attack call in the engine -> logged, the s
 	H.ok(H.hasLine("click Entrust... once"), "capture screen timeout")
 	H.eq(expand, 1, "the expand hook is still sent once (a no-op without a capture popup)")
 end)
+
+-- ---------------------------------------------------------------------------
+-- Eligibility tests T1 / T2 (EFV_Dev 1.0.1.3, VEF 1.0.1 common-war fix):
+-- a fresh game with up to 7 AI majors; roles by ascending ID; one
+-- ELIG_Tn line per civ (gameplay rules) and ELIG_Tn_UI lines from the panel.
+-- ---------------------------------------------------------------------------
+local ELIG_EXTRA = { { 7, 60, 10 }, { 8, 50, 45 }, { 9, 25, 45 }, { 10, 75, 15 } }
+
+-- FreshBoot (AI majors 1, 2, 3; city-states 4, 5, 6) plus `extra` more
+-- majors 7.. with a capital each.
+local function EligBoot(extra)
+	local S = FreshBoot()
+	for i = 1, extra or 0 do
+		local e = ELIG_EXTRA[i]
+		FAKE.NewPlayer(e[1], { gold = 1000 })
+		S["c" .. e[1]] = H.city(e[1], e[2], e[3], { capital = true, name = "LOC_CITY_X" .. e[1] })
+	end
+	return S
+end
+
+local function EligLines(id, verdict)
+	return H.lines("[EFV][CHECK] " .. id .. " " .. verdict .. " ")
+end
+
+local function RoleLine(id, role, pid)
+	for _, l in ipairs(H.lines("[EFV][CHECK] " .. id .. " ")) do
+		if string.find(l, " " .. role .. "=P" .. pid .. " ", 1, true) then return l end
+	end
+	return nil
+end
+
+local function Has(line, text) return line ~= nil and string.find(line, text, 1, true) ~= nil end
+
+test("1.0.1.3 T2 shared enemy: 7 AI civs by ID; FW / FOW open, FN / FON / AN no common enemy, NW absent (gameplay rules)", function()
+	local S = EligBoot(4)
+	Dev("elig_t2", { stamp = 31 })
+	local d0 = Players[0]:GetDiplomacy()
+	-- roles: E=1, FW=2, FOW=3, FN=7, FON=8, NW=9, AN=10
+	H.ok(d0:IsAtWarWith(1), "you are at war with E")
+	for _, pid in ipairs({ 2, 3, 9 }) do H.ok(Players[pid]:GetDiplomacy():IsAtWarWith(1), pid .. " at war with E") end
+	for _, pid in ipairs({ 7, 8, 10 }) do
+		for _, e in ipairs({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }) do
+			H.ok(not Players[pid]:GetDiplomacy():IsAtWarWith(e), pid .. " must not be at war with " .. e)
+		end
+	end
+	for _, pid in ipairs({ 2, 3, 7, 8 }) do H.ok(d0:HasDeclaredFriendship(pid), "friend " .. pid) end
+	H.ok(not d0:HasDeclaredFriendship(9), "NW met only")
+	H.ok(d0:HasAllied(10) and Players[10]:GetDiplomacy():HasAllied(0), "AN allied both ways")
+	H.ok(EFV_HasOpenBordersFrom(0, 3) and EFV_HasOpenBordersFrom(0, 8), "FOW and FON grant you open borders")
+	H.ok(not EFV_HasOpenBordersFrom(0, 2) and not EFV_HasOpenBordersFrom(0, 7), "FW and FN do not")
+	-- everybody met everybody (majors and city-states)
+	local ids = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
+	for _, a in ipairs(ids) do
+		for _, b in ipairs(ids) do H.ok(Players[a]:GetDiplomacy():HasMet(b), a .. " met " .. b) end
+	end
+	-- two Swordsmen with full moves next to your capital
+	local swords = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(swords, 2)
+	for _, u in ipairs(swords) do
+		H.eq(u:GetMovesRemaining(), u:GetMaxMoves()); H.ok(H.dist(u, S.c0) <= 4)
+	end
+	-- one line per civ, all PASS, then the summary
+	H.len(EligLines("ELIG_T2", "PASS"), 8, "7 civs + summary")
+	H.len(EligLines("ELIG_T2", "FAIL"), 0); H.len(EligLines("ELIG_T2", "CHECK"), 0)
+	H.ok(H.hasLine("summary (gameplay rules): T2 Shared enemy, 7 civ(s): 7 PASS, 0 FAIL, 0 CHECK"))
+	local fn = RoleLine("ELIG_T2", "FN", 7)
+	H.ok(Has(fn, "Expeditionary expected GREY:NO_COMMON_WAR actual GREY:NO_COMMON_WAR"), fn)
+	H.ok(Has(fn, "Volunteers expected GREY:NO_COMMON_WAR+VOL_NEEDS_ACCESS actual GREY:NO_COMMON_WAR+VOL_NEEDS_ACCESS"), fn)
+	H.ok(Has(fn, "real wars: none"), "the Free Cities and barbarian wars are not listed")
+	H.ok(Has(RoleLine("ELIG_T2", "NW", 9), "Expeditionary expected ABSENT actual ABSENT"))
+	H.ok(Has(RoleLine("ELIG_T2", "FOW", 3), "Volunteers expected ALLOWED actual ALLOWED"))
+	H.ok(Has(RoleLine("ELIG_T2", "AN", 10), "Expeditionary expected GREY:NO_COMMON_WAR actual GREY:NO_COMMON_WAR"))
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.elig.test, "T2"); H.eq(st.elig.stamp, 31); H.len(st.elig.civs, 7); H.eq(st.elig.pass, 7)
+	H.eq(st.focus.stamp, 31); H.eq(st.focus.u, st.elig.u1)
+	H.ok(H.gold(0) >= 2000)
+	H.ok(not H.hasLine(": ERROR"))
+	-- pressed again: the Swordsmen are replaced, the verdicts stay
+	Dev("elig_t2", { stamp = 32 })
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 2)
+	H.len(EligLines("ELIG_T2", "PASS"), 16)
+	H.clean()
+end)
+
+test("1.0.1.3 T1 Volunteer partners: A and FO allowed, F greyed for open borders, N absent; extra civs met only", function()
+	EligBoot(4)
+	Dev("elig_t1", { stamp = 41 })
+	-- roles: E=1, A=2, F=3, FO=7, N=8; 9 and 10 OTHER
+	H.len(EligLines("ELIG_T1", "PASS"), 8, "7 civs + summary")
+	H.len(EligLines("ELIG_T1", "FAIL"), 0); H.len(EligLines("ELIG_T1", "CHECK"), 0)
+	for _, pid in ipairs({ 2, 3, 7, 8 }) do H.ok(Players[pid]:GetDiplomacy():IsAtWarWith(1), pid .. " at war with E") end
+	H.ok(Players[0]:GetDiplomacy():HasAllied(2))
+	local f = RoleLine("ELIG_T1", "F", 3)
+	H.ok(Has(f, "Expeditionary expected ALLOWED actual ALLOWED | Volunteers expected GREY:VOL_NEEDS_ACCESS actual GREY:VOL_NEEDS_ACCESS"), f)
+	H.ok(Has(RoleLine("ELIG_T1", "A", 2), "Volunteers expected ALLOWED actual ALLOWED"))
+	H.ok(Has(RoleLine("ELIG_T1", "N", 8), "Volunteers expected ABSENT actual ABSENT"))
+	H.notnil(RoleLine("ELIG_T1", "OTHER", 9)); H.notnil(RoleLine("ELIG_T1", "OTHER", 10))
+	H.ok(H.hasLine("roles E=P1 "), "role map in the summary")
+	H.clean()
+end)
+
+test("1.0.1.3 T2 with 3 AI civs: FN, FON, NW, AN skipped and named; summary CHECK", function()
+	EligBoot(0)
+	Dev("elig_t2", { stamp = 51 })
+	H.len(EligLines("ELIG_T2", "PASS"), 3, "E, FW, FOW")
+	H.ok(H.hasLine("roles FN, FON, NW, AN skipped"))
+	H.len(EligLines("ELIG_T2", "CHECK"), 1, "the summary")
+	H.eq(H.prop("EFV_DEV_SCN").elig.skipped, "FN,FON,NW,AN")
+	H.clean()
+end)
+
+test("1.0.1.3 T2: the engine pulls the ally into your war -> AN is CHECK with an engine-effect note, not FAIL", function()
+	EligBoot(4)
+	-- engine model for this test: an alliance joins the ally to its partner's wars
+	local d0 = Players[0]:GetDiplomacy()
+	local setAllied = d0.SetHasAllied
+	d0.SetHasAllied = function(self, b, v)
+		setAllied(self, b, v)
+		if v then
+			for _, e in ipairs({ 1, 2, 3, 7, 8, 9 }) do
+				if d0:IsAtWarWith(e) then FAKE.SetWar(b, e, true) end
+			end
+		end
+	end
+	Dev("elig_t2", { stamp = 61 })
+	local an = RoleLine("ELIG_T2", "AN", 10)
+	H.ok(Has(an, "[EFV][CHECK] ELIG_T2 CHECK"), an)
+	H.ok(Has(an, "ENGINE EFFECT, not a VEF failure"), an)
+	H.len(EligLines("ELIG_T2", "FAIL"), 0)
+	H.ok(H.hasLine("7 civ(s): 6 PASS, 0 FAIL, 1 CHECK"))
+	H.clean()
+end)
+
+test("1.0.1.3 T1: no capital yet -> CHECK with what to do, nothing set up", function()
+	H.world({ turn = 1 })
+	H.loadEFV()
+	FAKE.dofile("EFV_Dev/Scripts/EFV_Dev_Gameplay.lua")
+	H.markBody()
+	Dev("elig_t1", { stamp = 71 })
+	H.ok(H.hasLine("[EFV][CHECK] ELIG_T1 CHECK"))
+	H.ok(H.hasLine("found your capital"))
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0)
+	H.notnil(H.prop("EFV_DEV_SCN").elig.err)
+end)
+
+test("1.0.1.3 T2 panel: button sends the stamped request; UI rules give the same verdicts; role map and status shown", function()
+	EligBoot(4)
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	H.notnil(FAKE_UI.FindButton("T1 Volunteer partners"), "T1 button")
+	local b = FAKE_UI.FindButton("T2 Shared enemy")
+	H.notnil(b, "T2 button")
+	b:Click()
+	Pump({ panel }, 8)
+	H.ok(CheckLine("ELIG_T2", "PASS"), "gameplay lines")
+	H.len(EligLines("ELIG_T2_UI", "PASS"), 8, "UI rules: 7 civs + summary")
+	H.len(EligLines("ELIG_T2_UI", "FAIL"), 0); H.len(EligLines("ELIG_T2_UI", "CHECK"), 0)
+	H.ok(Has(RoleLine("ELIG_T2_UI", "FOW", 3), "UI basis FRIEND, Volunteer basis FRIEND_OB"), "FOW seen by the UI adapters")
+	H.ok(Has(RoleLine("ELIG_T2_UI", "AN", 10), "UI basis ALLIANCE"), "AN seen by the UI adapters")
+	local info = panel.Controls.InfoLabel:GetText()
+	H.ok(string.find(info, "T2: E=", 1, true) == 1, "role map on the first line: " .. info)
+	H.ok(Has(info, "FW=") and Has(info, "AN="), info)
+	local rec = panel.Controls.RecordLabel:GetText()
+	H.ok(string.find(rec, "T2: gameplay 7/7 PASS, UI 7/7 PASS", 1, true) == 1, "status: " .. rec)
+	H.eq(FAKE_UI.selectedUnit and FAKE_UI.selectedUnit.id, H.prop("EFV_DEV_SCN").elig.u1, "the first Swordsman is selected")
+end)

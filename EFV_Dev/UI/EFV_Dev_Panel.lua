@@ -24,6 +24,7 @@ include("InstanceManager")
 local m_UIShared = pcall(include, "EFV_UIShared")
 include("EFV_Config")
 -- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText EFV_UI_TrackerState EFV_SortedKeys EFV_UI_RecordsFor EFV_UI_TrackedUnit
+-- EFV:GLOBALS EFV_DestinationRows EFV_PartnerBasis EFV_VolunteerBasis
 
 local PREFIX = "[EFV][Dev][UI]"
 local m_ButtonIM = InstanceManager:new("DevButtonInstance", "Button", Controls.ButtonStack)
@@ -104,8 +105,21 @@ local function CivName(id)
 	return name
 end
 
+-- After T1 / T2 the first line is the role map ("T2: E=Gaul, FW=Japan, ...").
+local function EligText(e)
+	if type(e) ~= "table" or e.test == nil then return nil end
+	if e.err ~= nil then return Str(e.test) .. ": " .. Str(e.err) end
+	local parts = {}
+	for _, c in ipairs(e.civs or {}) do
+		if c.role ~= "OTHER" then parts[#parts + 1] = Str(c.role) .. "=" .. CivName(c.pid) end
+	end
+	return Str(e.test) .. ": " .. table.concat(parts, ", ") .. (e.skipped and (" (skipped " .. Str(e.skipped) .. ")") or "")
+end
+
 local function SessionText()
 	local ok, st = pcall(function() return Game:GetProperty("EFV_DEV_SCN") end)
+	local elig = ok and type(st) == "table" and EligText(st.elig) or nil
+	if elig ~= nil then return elig end
 	if not ok or type(st) ~= "table" or st.ally == nil then
 		return "Final session: start a NEW game, then press S0"
 	end
@@ -149,6 +163,8 @@ local function RecordText(unit)
 	return s
 end
 
+local m_EligStatus = nil     -- short T1 / T2 result shown in the panel
+
 local function RefreshInfo()
 	local s = SessionText() .. " | Local " .. PlayerName(LocalID()) .. " | turn " .. Str(Game.GetCurrentGameTurn())
 	local unit = UI.GetHeadSelectedUnit()
@@ -165,7 +181,7 @@ local function RefreshInfo()
 		s = s .. " | City " .. city:GetOwner() .. "/" .. city:GetID() .. " @" .. city:GetX() .. "," .. city:GetY()
 	end
 	Controls.InfoLabel:SetText(s)
-	Controls.RecordLabel:SetText(RecordText(unit))
+	Controls.RecordLabel:SetText((m_EligStatus and (m_EligStatus .. " | ") or "") .. RecordText(unit))
 	Controls.TargetLabel:SetText(PlayerName(CurrentTarget()))
 end
 
@@ -732,6 +748,102 @@ local function RunAudit()
 	end
 end
 
+-- ---------------------------------------------------------------------------
+-- Eligibility tests T1 / T2, UI side (EFV_Dev 1.0.1.3). Gameplay sets up the
+-- roles, logs its ELIG_Tn lines (gameplay rules) and writes st.elig (roles,
+-- expected results, facts, the two Swordsmen). ELIG_UI_DELAY s after its
+-- answer the panel asks VEF's picker rows again with the UI rules (the
+-- destination picker's own adapters: GetDiplomaticStateIndex and
+-- HasOpenBordersFrom) and logs ELIG_Tn_UI lines in the same format, then
+-- shows a short status on the panel.
+-- ---------------------------------------------------------------------------
+local ELIG_UI_DELAY = 1.0
+local m_Elig = nil          -- { cmd, stamp, at }
+local ELIG_CODES = { NOT_PARTNER = true, VOL_NEEDS_ACCESS = true, CS_NOT_MET = true,
+	AT_WAR_WITH_RECIPIENT = true, NO_COMMON_WAR = true }
+
+-- Same classification as the gameplay side (EligClass in EFV_Dev_Gameplay.lua).
+local function EligClass(rows, pid)
+	local any, open, best = false, false, nil
+	for _, r in ipairs(rows) do
+		if r.recipientID == pid then
+			any = true
+			if r.ok then open = true
+			elseif best == nil or #(r.reasons or {}) < #best then best = r.reasons or {} end
+		end
+	end
+	if not any then return "ABSENT", {} end
+	if open then return "ALLOWED", {} end
+	local elig, other = {}, {}
+	for _, c in ipairs(best) do
+		if ELIG_CODES[c] then elig[#elig + 1] = c else other[#other + 1] = c end
+	end
+	table.sort(elig)
+	return "GREY:" .. table.concat(elig, "+"), other
+end
+
+local function EligCompare(want, got)
+	if want == got then return "PASS" end
+	if want == "ALLOWED" and got == "GREY:" then return "CHECK" end
+	return "FAIL"
+end
+
+local function EligUI(test, stamp)
+	local id = "ELIG_" .. test .. "_UI"
+	local st = ScnState()
+	local e = st and st.elig
+	if type(e) ~= "table" or e.stamp ~= stamp then
+		UICheck(id, "CHECK", "no answer from gameplay")
+		m_EligStatus = test .. ": no answer from gameplay (see Lua.log)"
+		return
+	end
+	if e.err ~= nil then
+		m_EligStatus = test .. ": " .. Str(e.err)
+		return
+	end
+	if type(EFV_DestinationRows) ~= "function" then
+		UICheck(id, "CHECK", "VEF's UI rules are not loaded (EFV_UIShared)")
+		m_EligStatus = test .. ": gameplay " .. Str(e.pass) .. "/" .. Str(e.n) .. " PASS, UI rules not loaded"
+		return
+	end
+	local me = LocalID()
+	local u1, u2 = OwnUnit(me, e.u1), OwnUnit(me, e.u2)
+	local store = nil
+	pcall(function() store = EFV_UI_ReadStore() end)
+	local rowsExp, rowsVol = {}, {}
+	if u1 ~= nil then
+		rowsExp = EFV_DestinationRows(me, u1, EFV_Config.FT_EXP, store)
+		rowsVol = EFV_DestinationRows(me, u2 or u1, EFV_Config.FT_VOL, store)
+	end
+	local n, pass, fail, chk, bad = 0, 0, 0, 0, {}
+	for _, c in ipairs(e.civs or {}) do
+		local aExp, oExp = EligClass(rowsExp, c.pid)
+		local aVol, oVol = EligClass(rowsVol, c.pid)
+		local v = "PASS"
+		for _, w in ipairs({ EligCompare(c.exp, aExp), EligCompare(c.vol, aVol) }) do
+			if w == "FAIL" then v = "FAIL" elseif w == "CHECK" and v == "PASS" then v = "CHECK" end
+		end
+		if c.setup ~= nil or u1 == nil then v = "CHECK" end
+		n = n + 1
+		if v == "PASS" then pass = pass + 1 elseif v == "FAIL" then fail = fail + 1 else chk = chk + 1 end
+		if v ~= "PASS" then bad[#bad + 1] = Str(c.role) .. " " .. v end
+		local okB, pb = pcall(EFV_PartnerBasis, me, c.pid)
+		local okV, vb = pcall(EFV_VolunteerBasis, me, c.pid)
+		local function Act(a, o) return a .. (#o > 0 and (" (also " .. table.concat(o, "+") .. ")") or "") end
+		UICheck(id, v, Str(c.role) .. "=" .. PlayerName(c.pid) .. " | " .. Str(c.facts) .. "; UI basis " ..
+			(okB and Str(pb) or "error") .. ", Volunteer basis " .. (okV and Str(vb) or "error") ..
+			" | Expeditionary expected " .. Str(c.exp) .. " actual " .. Act(aExp, oExp) ..
+			" | Volunteers expected " .. Str(c.vol) .. " actual " .. Act(aVol, oVol) ..
+			(c.setup and (" | SETUP: " .. Str(c.setup)) or "") .. " [UI rules]")
+	end
+	local sv = (fail > 0) and "FAIL" or ((chk > 0 or e.skipped ~= nil) and "CHECK" or "PASS")
+	UICheck(id, sv, "summary (UI rules): " .. test .. ", " .. n .. " civ(s): " .. pass .. " PASS, " .. fail .. " FAIL, " .. chk ..
+		" CHECK" .. (e.skipped and ("; roles " .. Str(e.skipped) .. " skipped (too few civs)") or ""))
+	m_EligStatus = test .. ": gameplay " .. Str(e.pass) .. "/" .. Str(e.n) .. " PASS, UI " .. pass .. "/" .. n .. " PASS" ..
+		(#bad > 0 and (" (UI: " .. table.concat(bad, ", ") .. ")") or "") ..
+		(e.skipped and ("; skipped " .. Str(e.skipped)) or "") .. "; details: Lua.log [EFV][CHECK] ELIG_" .. test
+end
+
 local function OnUpdate(dt)
 	m_Clock = m_Clock + (tonumber(dt) or 0)
 	if m_AuditDue ~= nil and m_Clock >= m_AuditDue then
@@ -746,9 +858,19 @@ local function OnUpdate(dt)
 			LookAt(f)
 			if m_FocusWait.cmd == "scn_setup" and st.ally ~= nil then TargetTo(st.ally) end
 			if m_FocusWait.shot then StartShot(m_FocusWait.cmd, f) end
+			if m_FocusWait.elig then
+				m_Elig = { test = m_FocusWait.elig, stamp = m_FocusWait.stamp, at = m_Clock + ELIG_UI_DELAY }
+				m_EligStatus = m_FocusWait.elig .. ": set up, checking the UI rules..."
+				RefreshInfo()
+			end
 			m_FocusWait = nil
 		elseif m_Clock > m_FocusWait.untilClock then
 			if m_FocusWait.shot then UICheck(ShotID(m_FocusWait.cmd), "CHECK", "no answer from gameplay within " .. SHOT_WAIT .. " s") end
+			if m_FocusWait.elig then
+				UICheck("ELIG_" .. m_FocusWait.elig .. "_UI", "CHECK", "no answer from gameplay within " .. SHOT_WAIT .. " s")
+				m_EligStatus = m_FocusWait.elig .. ": no answer from gameplay (see Lua.log)"
+				RefreshInfo()
+			end
 			m_FocusWait = nil
 		end
 	end
@@ -758,6 +880,16 @@ local function OnUpdate(dt)
 			Log("shot error: " .. Str(err))
 			m_Shot = nil
 		end
+	end
+	if m_Elig ~= nil and m_Clock >= m_Elig.at then
+		local e = m_Elig
+		m_Elig = nil
+		local ok, err = pcall(EligUI, e.test, e.stamp)
+		if not ok then
+			Log("eligibility UI check error: " .. Str(err))
+			m_EligStatus = e.test .. ": UI check error (see Lua.log)"
+		end
+		RefreshInfo()
 	end
 	if m_Clock >= m_CheckAt then
 		m_CheckAt = m_Clock + 0.5
@@ -795,6 +927,16 @@ local function Shot(cmd)
 	Send(p)
 end
 
+-- Eligibility tests T1 / T2: stamped request, then the UI check (EligUI).
+local function Elig(cmd, test)
+	local p = BaseParams(cmd)
+	m_Elig = nil
+	m_EligStatus = test .. ": waiting for gameplay..."
+	m_FocusWait = { stamp = p.stamp, nextAt = m_Clock + 0.3, untilClock = m_Clock + SHOT_WAIT, cmd = cmd, elig = test }
+	Send(p)
+	RefreshInfo()
+end
+
 -- ---------------------------------------------------------------------------
 -- Buttons: cmd = gameplay command (EFV_Dev_Gameplay.lua), ui = local function
 -- ---------------------------------------------------------------------------
@@ -825,6 +967,8 @@ local BUTTONS = {
 	{ label = "S13 Unit in B's land",   scn = "scn_inland" },
 	{ label = "S14 Mutiny death",       scn = "scn_mutdeath" },
 	{ label = "S15 Receive forces",     shot = "scn_receive" },
+	{ label = "T1 Volunteer partners",  elig = "elig_t1", test = "T1" },
+	{ label = "T2 Shared enemy",        elig = "elig_t2", test = "T2" },
 	{ label = "Go to scenario",         ui = "GoTo" },
 	{ label = "Check now",              cmd = "scn_check" },
 	{ header = "Units (selected unit, or extra rec=<id>; Type/Amount fields)" },
@@ -872,6 +1016,8 @@ local function OnButton(def)
 		if not ok then Log(def.label .. " threw: " .. Str(err)) end
 	elseif def.shot ~= nil then
 		Shot(def.shot)
+	elseif def.elig ~= nil then
+		Elig(def.elig, def.test)
 	elseif def.scn ~= nil then
 		Scenario(def.scn)
 	else
