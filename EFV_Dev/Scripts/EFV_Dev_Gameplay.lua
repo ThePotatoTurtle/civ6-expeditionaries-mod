@@ -46,9 +46,9 @@ EFV_Dev = {}
 -- fixes (S4 holds the Volunteer, S10 removes the Barbarians after your
 -- fight, S12 checks the arrival turn): 0.7.2-dev.1; rebuilt for EFV
 -- 0.7.3-dev without changes: 0.7.3-dev.1; rebuilt for EFV 0.7.4-dev
--- without changes: 0.7.4-dev.1); a
+-- without changes: 0.7.4-dev.2); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.7.4-dev.1"
+EFV_Dev.VERSION = "0.7.4-dev.2"
 EFV_Dev.FOR_EFV = "0.7.4-dev"
 
 -- ---------------------------------------------------------------------------
@@ -2552,7 +2552,7 @@ local function ShotPrep(cmd, me, p)
 	st = Session(cmd, me)
 	if st == nil then return nil end
 	if EFV_VolunteerBasis(me, st.ally) == nil then EnsurePartner(cmd, me, st.ally) end
-	if ranSetup and type(st.setupUnits) == "table" then
+	if type(st.setupUnits) == "table" then
 		local l = ShotList(st)
 		for _, e in ipairs(st.setupUnits) do l.units[#l.units + 1] = e end
 		st.setupUnits = nil
