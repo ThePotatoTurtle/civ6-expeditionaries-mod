@@ -858,7 +858,7 @@ test("final panel: scenario buttons send stamped requests; Go to scenario looks 
 	H.ok(type(p.stamp) == "number" and p.stamp > 0, "stamp")
 	for _, label in ipairs({ "S1 Arrive next turn", "S2 Expire CS unit (off its land)", "S3 Grace/mutiny step", "S4 Lapse on/off",
 		"S5 Upgrade test", "S6 Veteran copies", "S7 Killed unit", "S8 Relink guard", "S9 Crowded arrival", "S10 Mutiny combat",
-		"S11 Entrust city", "S12 Veteran return", "S13 Unit in B's land", "S14 Mutiny death", "Go to scenario", "Check now",
+		"S11 Entrust city", "S12 Veteran return", "S13 Unit in B's land", "S14 Mutiny death", "S15 Receive forces", "Go to scenario", "Check now",
 		"Shot 1 Send picker", "Shot 2 Arrival", "Shot 3 Tracker", "Shot 4 Entrust", "Shot 5 Mutiny" }) do
 		H.notnil(FAKE_UI.FindButton(label), label)
 	end
@@ -1182,6 +1182,31 @@ test("shot5: B's Swordsman of yours in MUTINY with 40 damage on neutral land, Mu
 	H.endTurn()
 	H.eq(H.records()[1].state, "MUTINY")
 	H.eq(u.damage, 60)
+	H.clean()
+end)
+
+test("S15 receive: B sends you a deployed Expeditionary (yours) and Volunteers (B's) next to your capital, focus TRACKER", function()
+	local S = FreshBoot()
+	Dev("shot5")
+	Dev("scn_receive", { stamp = 71 })
+	H.ok(CheckLine("RECEIVE", "PASS"))
+	local rs = H.records()
+	H.len(rs, 2, "shot 5's record removed")
+	local exp = Recs(function(r) return r.forceType == "EXPEDITIONARY" end)[1]
+	local vol = Recs(function(r) return r.forceType == "VOLUNTEER" end)[1]
+	H.notnil(exp); H.notnil(vol)
+	for _, r in ipairs({ exp, vol }) do
+		H.eq(r.state, "DEPLOYED"); H.eq(r.senderID, 1); H.eq(r.recipientID, 0)
+		H.eq(r.deployedTurn, FAKE.turn); H.eq(r.destX, S.c0.x); H.eq(r.destY, S.c0.y)
+		H.eq(Map.GetPlot(r.lastX, r.lastY):GetOwner(), 0, "in your land")
+	end
+	H.eq(exp.onMapPlayerID, 0, "you control the Expeditionary unit"); H.eq(exp.durationTurns, EFV_Config.EXPEDITIONARY_DURATION)
+	H.eq(vol.onMapPlayerID, 1, "B controls its Volunteers")
+	H.notnil(EFV_VolunteerBasis(1, 0), "B has a Volunteer basis toward you")
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.open, "TRACKER"); H.eq(st.focus.x, S.c0.x); H.eq(st.focus.stamp, 71)
+	Dev("scn_receive")
+	H.len(H.records(), 2, "a second press replaces the scene")
 	H.clean()
 end)
 

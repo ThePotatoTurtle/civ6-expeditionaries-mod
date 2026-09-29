@@ -507,7 +507,14 @@ local function DismissVefNotifications()
 	return n
 end
 
+-- S15 (scn_receive) runs as a Shot too: its UI lines read RECEIVE and the DEV
+-- launch button stays visible.
+local function IsShotCmd(cmd)
+	return string.sub(Str(cmd), 1, 4) == "shot"
+end
+
 local function ShotID(cmd)
+	if not IsShotCmd(cmd) then return "RECEIVE" end
 	return "SHOT" .. string.sub(Str(cmd), 5)
 end
 
@@ -520,7 +527,7 @@ local function StartShot(cmd, f)
 	end
 	m_Shot = { cmd = cmd, id = ShotID(cmd), f = f, phase = f.open or "DONE", nextAt = m_Clock + 0.3, relookAt = m_Clock + 1.0 }
 	SetOpen(false)
-	HideLaunch(true)
+	if IsShotCmd(cmd) then HideLaunch(true) end
 end
 
 local function ShotAttack(s)
@@ -816,6 +823,7 @@ local BUTTONS = {
 	{ label = "S12 Veteran return",     scn = "scn_vetret" },
 	{ label = "S13 Unit in B's land",   scn = "scn_inland" },
 	{ label = "S14 Mutiny death",       scn = "scn_mutdeath" },
+	{ label = "S15 Receive forces",     shot = "scn_receive" },
 	{ label = "Go to scenario",         ui = "GoTo" },
 	{ label = "Check now",              cmd = "scn_check" },
 	{ header = "Units (selected unit, or extra rec=<id>; Type/Amount fields)" },

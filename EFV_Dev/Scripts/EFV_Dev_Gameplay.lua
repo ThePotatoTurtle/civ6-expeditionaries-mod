@@ -46,9 +46,9 @@ EFV_Dev = {}
 -- fixes (S4 holds the Volunteer, S10 removes the Barbarians after your
 -- fight, S12 checks the arrival turn): 0.7.2-dev.1; rebuilt for EFV
 -- 0.7.3-dev without changes: 0.7.3-dev.1; rebuilt for EFV 0.7.4-dev
--- without changes: 0.7.4-dev.2); a
+-- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.7.4-dev.2"
+EFV_Dev.VERSION = "0.7.4-dev.3"
 EFV_Dev.FOR_EFV = "0.7.4-dev"
 
 -- ---------------------------------------------------------------------------
@@ -2830,6 +2830,58 @@ CMD.shot5 = function(me, p)
 	local ok = rec ~= nil and UnitDamage(u) == 40 and PlotOwner(spot) < 0 and u:GetOwner() == B
 	Check("SHOT5", ok and "PASS" or "CHECK", "record " .. Str(rec and rec.id) .. " MUTINY, damage " .. UnitDamage(u) .. ", owner " ..
 		PlayerName(u:GetOwner()) .. " at " .. spot:GetX() .. "," .. spot:GetY() .. " (tile owner " .. PlotOwner(spot) .. ")")
+end
+
+-- S15 Receive forces (EFV_Dev 0.7.4-dev.3): B is the SENDER, you the
+-- RECIPIENT. Two records DEPLOYED this turn next to your capital, no transit:
+-- an Expeditionary Swordsman of B's now owned by you (20-turn timer) and a
+-- Volunteer Swordsman owned by B in your land (held until the next turn
+-- start). B's Volunteer basis toward you: friendship + open borders from
+-- you to B (EnsurePartner with the roles swapped). S0 runs when needed; the
+-- previous Shot / S15 scene is removed first (ShotReset, not S0's units).
+-- The panel opens the tracker (focus open = TRACKER).
+CMD.scn_receive = function(me, p)
+	local st = ScnLoad()
+	if st.ally == nil or st.me ~= me then CMD.scn_setup(me, p) end
+	st = Session("RECEIVE", me)
+	if st == nil then return end
+	local B = st.ally
+	if EFV_VolunteerBasis(B, me) == nil then EnsurePartner("RECEIVE", B, me) end
+	ShotReset(st)
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil then ScnSave(st); Check("RECEIVE", "CHECK", "your capital or B's capital is missing"); return end
+	local store = EFV_Records.Load()
+	local e = NewUnit("receive", me, "UNIT_SWORDSMAN", FindPlot(cap:GetX(), cap:GetY(), 2, OwnedBy(me), 1))
+	ShotUnit(st, e)
+	local recE = nil
+	if e ~= nil then
+		recE = MakeRecord(store, e, { force = FT_EXP, sender = B, recipient = me, basis = EFV_PartnerBasis(B, me) or "FRIEND",
+			origin = capB, dest = cap, duration = EFV_Config.EXPEDITIONARY_DURATION })
+	end
+	local p2 = (e and FindPlot(e:GetX(), e:GetY(), 1, OwnedBy(me), 1)) or FindPlot(cap:GetX(), cap:GetY(), 2, OwnedBy(me), 1)
+	local v = NewUnit("receive", B, "UNIT_SWORDSMAN", p2)
+	ShotUnit(st, v)
+	local recV = nil
+	if v ~= nil then
+		recV = MakeRecord(store, v, { force = FT_VOL, sender = B, recipient = me, basis = EFV_VolunteerBasis(B, me) or "FRIEND_OB",
+			origin = capB, dest = cap })
+		Hold(store, v)
+	end
+	EFV_Records.Commit(store)
+	ShotRec(st, recE)
+	ShotRec(st, recV)
+	Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+	st.focus.open, st.focus.zoom = "TRACKER", ZOOM_MID
+	ScnSave(st)
+	local function Row(label, rec, u)
+		if rec == nil then return label .. " MISSING" end
+		return label .. " record " .. rec.id .. " " .. Str(rec.state) .. " sender " .. PlayerName(rec.senderID) .. " recipient " ..
+			PlayerName(rec.recipientID) .. " owner " .. PlayerName(u:GetOwner()) .. " basis " .. Str(rec.accessBasis) ..
+			" at " .. u:GetX() .. "," .. u:GetY() .. (rec.durationTurns and (" timer " .. rec.durationTurns) or "")
+	end
+	local ok = recE ~= nil and recV ~= nil and e:GetOwner() == me and v:GetOwner() == B and EFV_VolunteerBasis(B, me) ~= nil
+	Check("RECEIVE", ok and "PASS" or "CHECK", Row("Expeditionary", recE, e) .. "; " .. Row("Volunteers", recV, v) ..
+		"; next to your capital " .. EFV_CityName(cap))
 end
 
 -- ---------------------------------------------------------------------------
