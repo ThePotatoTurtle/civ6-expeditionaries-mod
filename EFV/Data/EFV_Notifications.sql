@@ -15,6 +15,14 @@
 -- - GroupType: NULL (no shipped row uses "USER"; spike harness note).
 -- - ExpiresEndOfTurn 0 = persists until dismissed or re-sent (D9; the
 --   gameplay side re-sends GRACE/MUTINY every turn with AlwaysUnique).
+--   0.7.2 designer policy: VEF never clears its notifications on a turn
+--   basis, only when what they warn about is over (EFV_Tracker SweepStale:
+--   GRACE / MUTINY, LAPSE_PAUSED, ACCESS_ / VOLUNTEER_LAPSE, EXPIRY_SOON,
+--   SPAWN_BLOCKED, REROUTED, by record) or when the player dismisses them
+--   (MUTINY_DEATH, UNIT_LOST, MERGED, REVERTED: losses, kept until read).
+--   ExpiresEndOfTurn 1 stays only on pure one-off news that needs no action:
+--   DEPARTED, ARRIVED, RETURNING, RETURNED, ENTRUSTED, REQUEST_FAILED,
+--   LAPSE_CANCELLED.
 -- - AutoActivate 1 on GRACE / MUTINY / MUTINY_DEATH (D9 map focus): the
 --   default activate handler only calls LookAtPlot (NotificationPanel.lua:
 --   642-713), it never dismisses. Gameplay also sets data.AlwaysAutoActivate
@@ -30,20 +38,20 @@
 -- NotificationType            Recipients                          Severity   Expires  AutoAct  Icon cell (ICON_ATLAS_NOTIFICATIONS)
 -- EFV_NOTIF_DEPARTED          sender                              LOW        1        0        9   COMMAND_UNITS
 -- EFV_NOTIF_ARRIVED           both                                MID        1        0        9   COMMAND_UNITS
--- EFV_NOTIF_SPAWN_BLOCKED     sender                              MID        1        0        110 CITY_BESIEGED_BY_OTHER_PLAYER
--- EFV_NOTIF_EXPIRY_SOON       recipient, sender (EXP/CS only)     MID        1        0        85  DIPLO_DEAL_EXPIRED
+-- EFV_NOTIF_SPAWN_BLOCKED     sender                              MID        0        0        110 CITY_BESIEGED_BY_OTHER_PLAYER
+-- EFV_NOTIF_EXPIRY_SOON       recipient, sender (EXP/CS only)     MID        0        0        85  DIPLO_DEAL_EXPIRED
 -- EFV_NOTIF_GRACE             recipient, sender                   HIGH       0        1        12  DECLARE_WAR (D9)
 -- EFV_NOTIF_MUTINY            recipient, sender                   VERY_HIGH  0        1        66  REBELLION (D9, WP2.2)
--- EFV_NOTIF_MUTINY_DEATH      both                                VERY_HIGH  1        1        53  UNIT_LOST
+-- EFV_NOTIF_MUTINY_DEATH      both                                VERY_HIGH  0        1        53  UNIT_LOST
 -- EFV_NOTIF_RETURNING         sender                              LOW        1        0        9   COMMAND_UNITS
 -- EFV_NOTIF_RETURNED          sender                              MID        1        0        9   COMMAND_UNITS
--- EFV_NOTIF_REROUTED          sender                              MID        1        0        59  CITY_LOST
+-- EFV_NOTIF_REROUTED          sender                              MID        0        0        59  CITY_LOST
 -- EFV_NOTIF_VOLUNTEER_LAPSE   sender (lapse reason WAR)           HIGH       0        0        15  MAKE_PEACE
 -- EFV_NOTIF_ENTRUSTED         both                                MID        1        0        11  CONSIDER_RAZE_CITY
 -- EFV_NOTIF_ACCESS_LAPSE      sender (lapse reason PARTNER)       HIGH       0        0        122 DIPLO_ALLIANCE_EXPIRED
--- EFV_NOTIF_UNIT_LOST         sender (and recipient when NO_CITY) MID        1        0        53  UNIT_LOST
--- EFV_NOTIF_MERGED            both                                MID        1        0        52  UNIT_DISBANDED
--- EFV_NOTIF_REVERTED          both                                HIGH       1        0        55  UNIT_CAPTURED
+-- EFV_NOTIF_UNIT_LOST         sender (and recipient when NO_CITY) MID        0        0        53  UNIT_LOST
+-- EFV_NOTIF_MERGED            both                                MID        0        0        52  UNIT_DISBANDED
+-- EFV_NOTIF_REVERTED          both                                HIGH       0        0        55  UNIT_CAPTURED
 -- EFV_NOTIF_REQUEST_FAILED    requester                           LOW        1        0        0   GENERIC
 -- EFV_NOTIF_LAPSE_CANCELLED   sender, recipient if human          MID        1        0        84  DIPLOMATIC_PROMISE_TO_KEPT
 -- EFV_NOTIF_LAPSE_PAUSED      sender (lapsed VOL on valid land)   HIGH       0        0        9   COMMAND_UNITS
@@ -81,20 +89,20 @@ INSERT INTO Types (Type, Kind) VALUES
 INSERT INTO Notifications (NotificationType, SeverityType, ExpiresEndOfTurn, AutoActivate, Icon) VALUES
 	('EFV_NOTIF_DEPARTED',        'LOW',       1, 0, 'ICON_NOTIFICATION_COMMAND_UNITS'),
 	('EFV_NOTIF_ARRIVED',         'MID',       1, 0, 'ICON_NOTIFICATION_COMMAND_UNITS'),
-	('EFV_NOTIF_SPAWN_BLOCKED',   'MID',       1, 0, 'ICON_NOTIFICATION_CITY_BESIEGED_BY_OTHER_PLAYER'),
-	('EFV_NOTIF_EXPIRY_SOON',     'MID',       1, 0, 'ICON_NOTIFICATION_DIPLO_DEAL_EXPIRED'),
+	('EFV_NOTIF_SPAWN_BLOCKED',   'MID',       0, 0, 'ICON_NOTIFICATION_CITY_BESIEGED_BY_OTHER_PLAYER'),
+	('EFV_NOTIF_EXPIRY_SOON',     'MID',       0, 0, 'ICON_NOTIFICATION_DIPLO_DEAL_EXPIRED'),
 	('EFV_NOTIF_GRACE',           'HIGH',      0, 1, 'ICON_NOTIFICATION_DECLARE_WAR'),
 	('EFV_NOTIF_MUTINY',          'VERY_HIGH', 0, 1, 'ICON_NOTIFICATION_REBELLION'),
-	('EFV_NOTIF_MUTINY_DEATH',    'VERY_HIGH', 1, 1, 'ICON_NOTIFICATION_UNIT_LOST'),
+	('EFV_NOTIF_MUTINY_DEATH',    'VERY_HIGH', 0, 1, 'ICON_NOTIFICATION_UNIT_LOST'),
 	('EFV_NOTIF_RETURNING',       'LOW',       1, 0, 'ICON_NOTIFICATION_COMMAND_UNITS'),
 	('EFV_NOTIF_RETURNED',        'MID',       1, 0, 'ICON_NOTIFICATION_COMMAND_UNITS'),
-	('EFV_NOTIF_REROUTED',        'MID',       1, 0, 'ICON_NOTIFICATION_CITY_LOST'),
+	('EFV_NOTIF_REROUTED',        'MID',       0, 0, 'ICON_NOTIFICATION_CITY_LOST'),
 	('EFV_NOTIF_VOLUNTEER_LAPSE', 'HIGH',      0, 0, 'ICON_NOTIFICATION_MAKE_PEACE'),
 	('EFV_NOTIF_ENTRUSTED',       'MID',       1, 0, 'ICON_NOTIFICATION_CONSIDER_RAZE_CITY'),
 	('EFV_NOTIF_ACCESS_LAPSE',    'HIGH',      0, 0, 'ICON_NOTIFICATION_DIPLO_ALLIANCE_EXPIRED'),
-	('EFV_NOTIF_UNIT_LOST',       'MID',       1, 0, 'ICON_NOTIFICATION_UNIT_LOST'),
-	('EFV_NOTIF_MERGED',          'MID',       1, 0, 'ICON_NOTIFICATION_UNIT_DISBANDED'),
-	('EFV_NOTIF_REVERTED',        'HIGH',      1, 0, 'ICON_NOTIFICATION_UNIT_CAPTURED'),
+	('EFV_NOTIF_UNIT_LOST',       'MID',       0, 0, 'ICON_NOTIFICATION_UNIT_LOST'),
+	('EFV_NOTIF_MERGED',          'MID',       0, 0, 'ICON_NOTIFICATION_UNIT_DISBANDED'),
+	('EFV_NOTIF_REVERTED',        'HIGH',      0, 0, 'ICON_NOTIFICATION_UNIT_CAPTURED'),
 	('EFV_NOTIF_REQUEST_FAILED',  'LOW',       1, 0, 'ICON_NOTIFICATION_GENERIC'),
 	('EFV_NOTIF_LAPSE_CANCELLED', 'MID',       1, 0, 'ICON_NOTIFICATION_DIPLOMATIC_PROMISE_TO_KEPT'),
 	('EFV_NOTIF_LAPSE_PAUSED',    'HIGH',      0, 0, 'ICON_NOTIFICATION_COMMAND_UNITS');

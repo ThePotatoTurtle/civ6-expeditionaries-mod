@@ -21,14 +21,19 @@ local function FakeBase()
 	UnitFlag.__index = UnitFlag
 	function UnitFlag.new(pid, uid)
 		local im = InstanceManager:new("UnitFlag", "Anchor")
-		local o = setmetatable({ pid = pid, uid = uid, m_Instance = im:GetInstance() }, UnitFlag)
+		-- Base fields (UnitFlag.Initialize): m_Player, m_UnitID.
+		local o = setmetatable({ pid = pid, uid = uid, m_Player = Players[pid], m_UnitID = uid,
+			m_Instance = im:GetInstance() }, UnitFlag)
 		o.m_Instance.ReligionIconBacking:SetHide(true)
 		flags[pid .. ":" .. uid] = o
 		o:UpdateReligion()
 		return o
 	end
+	-- Base UnitFlag.GetUnit: m_Player:GetUnits():FindID(m_UnitID), which
+	-- resolves the slot only (Session C) and still returns a dead unit's
+	-- object for a while (Session F).
 	function UnitFlag.GetUnit(self)
-		return UnitManager.GetUnit(self.pid, self.uid)
+		return self.m_Player:GetUnits():FindID(self.m_UnitID)
 	end
 	function UnitFlag.UpdateReligion(self)
 		BASE.calls = BASE.calls + 1
@@ -96,7 +101,12 @@ local function EditRecord(id, fn)
 	end)
 end
 
-local GOLD, GREEN, LIGHT_BLUE = 0xFF3CC8FF, 0xFF4BE810, 0xFFFFC878
+-- 0.7.2: SetColor gets the engine value of the hex literal
+-- (UI.GetColorValueFromHexLiteral, Colors.lua:6); the fake returns the
+-- literal as a signed int32, so a raw literal no longer matches.
+local HEX_GOLD, HEX_GREEN, HEX_LIGHT_BLUE = 0xFF3CC8FF, 0xFF4BE810, 0xFFFFC878
+local function Int32(hex) return hex - 4294967296 end
+local GOLD, GREEN, LIGHT_BLUE = Int32(HEX_GOLD), Int32(HEX_GREEN), Int32(HEX_LIGHT_BLUE)
 local function Emblem(pid) return "ICON_" .. PlayerConfigurations[pid]:GetCivilizationTypeName() end
 
 local function Tip(flag) return flag.m_Instance.ReligionIconBacking.tooltip or "" end
@@ -247,5 +257,160 @@ test("flags: SetIcon returning false walks the fallback chain (unknown emblem, t
 	H.eq(icon.icon, "ICON_CITYSTATE_MILITARISTIC")
 	H.eq(icon.color, GOLD, "tint kept")
 	H.ok(not f.m_Instance.ReligionIconBacking:IsHidden())
+	H.clean()
+end)
+
+-- Re-test 0.7 step 3: the emblem was dark and identical for the three force
+-- types because the raw literal went to SetColor. Each type must get its own
+-- converted tint, and every tint must be bright (each 0xAABBGGRR channel
+-- decoded; the dark religion tag needs a light glyph).
+test("flags: 0.7.2 tints go through UI.GetColorValueFromHexLiteral, differ per force type and are bright", function()
+	local S = Boot()
+	local rec = Deploy(S, 1)[1]
+	local f = FlagFor(rec)
+	local seen = {}
+	for _, case in ipairs({ { "EXPEDITIONARY", HEX_GOLD }, { "VOLUNTEER", HEX_GREEN }, { "CS_EXPEDITIONARY", HEX_LIGHT_BLUE } }) do
+		EditRecord(rec.id, function(r) r.forceType = case[1] end)
+		Poll()
+		UnitFlag.UpdateReligion(f)
+		local c = f.m_Instance.ReligionIcon.color
+		H.ok(c ~= case[2], case[1] .. ": the raw literal must not reach SetColor")
+		H.eq(FAKE_UI.colorValues[c], case[2], case[1] .. ": converted from its own literal")
+		local a = math.floor(case[2] / 16777216) % 256
+		local b = math.floor(case[2] / 65536) % 256
+		local g = math.floor(case[2] / 256) % 256
+		local r = case[2] % 256
+		H.eq(a, 255, case[1] .. ": opaque")
+		H.ok(0.299 * r + 0.587 * g + 0.114 * b >= 120, case[1] .. string.format(": bright (r=%d g=%d b=%d)", r, g, b))
+		H.ok(seen[c] == nil, case[1] .. ": tint differs from the other types")
+		seen[c] = true
+		H.ok(not f.m_Instance.ReligionIconBacking:IsHidden(), case[1] .. ": badge shown")
+	end
+	H.clean()
+end)
+
+test("flags: 0.7.2 without the converter the literal is used (no error, badge shown)", function()
+	local S = Boot()
+	UI.GetColorValueFromHexLiteral = nil
+	local rec = Deploy(S, 1)[1]
+	local f = FlagFor(rec)
+	UnitFlag.UpdateReligion(f)
+	H.ok(not f.m_Instance.ReligionIconBacking:IsHidden(), "badge shown")
+	H.eq(f.m_Instance.ReligionIcon.color, HEX_GOLD)
+	H.clean()
+end)
+
+-- ---------------------------------------------------------------------------
+-- 0.7.2 (0.7.1 report "the Volunteer Swordsman turned into a Warrior"): a VEF
+-- badge / tooltip only on the flag's own live unit that a record names.
+-- ---------------------------------------------------------------------------
+local function DeployVolunteer(S)
+	FAKE_UI.AsGameplay(function()
+		H.openBorders(0, 1, true)
+		H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1, "VOLUNTEER", 999)
+		H.turns(2)
+	end)
+	local rec = EFV_UI_RecordsFor(0)[1]
+	H.eq(rec.state, "DEPLOYED"); H.eq(rec.forceType, "VOLUNTEER"); H.eq(rec.onMapPlayerID, 0)
+	return rec
+end
+
+local function AuditRows()
+	local got = nil
+	local fn = function(rows) got = rows end
+	LuaEvents.EFV_BadgeAuditReport.Add(fn)
+	LuaEvents.EFV_BadgeAuditRequest()
+	LuaEvents.EFV_BadgeAuditReport.Remove(fn)
+	return got
+end
+
+local function Bad(rows)
+	local out = {}
+	for _, r in ipairs(rows or {}) do if r.bad ~= nil then out[#out + 1] = r end end
+	return out
+end
+
+test("flags 0.7.2: the dead Volunteer's slot reused by a new Warrior of the same owner: no badge, no VEF tooltip on it", function()
+	local S = Boot()
+	local rec = DeployVolunteer(S)
+	local sw = FAKE.units[rec.onMapUnitID]
+	local f = FlagFor(rec)
+	H.ok(not f.m_Instance.ReligionIconBacking:IsHidden(), "badge on the Volunteer")
+	H.len(Bad(AuditRows()), 0, "audit clean while alive")
+	H.killUnit(sw)
+	local w = H.unitInSlot(sw, 0, "UNIT_WARRIOR", sw.x, sw.y)   -- same owner, same slot, same tile
+	H.ok(w.id ~= sw.id and w.id % 65536 == sw.id % 65536)
+	H.eq(f:GetUnit(), w, "the base flag's FindID now resolves to the Warrior")
+	UnitFlag.UpdateReligion(f)
+	H.ok(f.m_Instance.ReligionIconBacking:IsHidden(), "old flag: badge off, never moved to the Warrior")
+	local fw = UnitFlag.new(0, w.id)
+	H.ok(fw.m_Instance.ReligionIconBacking:IsHidden(), "the Warrior's own flag: no badge")
+	H.ok(not string.find(Tip(fw), "Warrior", 1, true), "no VEF tooltip names the Warrior")
+	H.len(Bad(AuditRows()), 0, "audit: nothing shows a VEF tag")
+	H.clean()
+end)
+
+test("flags 0.7.2: a dead unit's object (combat death, FindID still returns it) loses the badge", function()
+	local S = Boot()
+	local rec = DeployVolunteer(S)
+	local f = FlagFor(rec)
+	FAKE.CombatKill(FAKE.units[rec.onMapUnitID])
+	UnitFlag.UpdateReligion(f)
+	H.ok(f.m_Instance.ReligionIconBacking:IsHidden(), "GONE_DEAD: no badge")
+	H.clean()
+end)
+
+test("flags 0.7.2: another player's unit with the dead unit's ID number never gets the badge", function()
+	local S = Boot()
+	local rec = DeployVolunteer(S)
+	local sw = FAKE.units[rec.onMapUnitID]
+	local f = FlagFor(rec)
+	H.killUnit(sw)
+	local b = H.unit(63, "UNIT_WARRIOR", sw.x, sw.y)   -- the Barbarian that took the tile
+	FAKE.units[b.id] = nil
+	b.id = sw.id                                        -- IDs are per player: the same number
+	FAKE.units[b.id] = b
+	local fb = UnitFlag.new(63, b.id)
+	H.ok(fb.m_Instance.ReligionIconBacking:IsHidden(), "Barbarian flag: no badge")
+	UnitFlag.UpdateReligion(f)
+	H.ok(f.m_Instance.ReligionIconBacking:IsHidden(), "the old flag (unit gone for player 0): badge off")
+	H.len(Bad(AuditRows()), 0)
+	H.clean()
+end)
+
+test("flags 0.7.2: the audit hook reports a VEF tag on a unit that is not the record's live unit", function()
+	local S = Boot()
+	local rec = DeployVolunteer(S)
+	local f = FlagFor(rec)
+	local rows = AuditRows()
+	H.len(rows, 1, "one decorated flag")
+	H.eq(rows[1].fp, 0); H.eq(rows[1].fu, rec.onMapUnitID); H.eq(rows[1].ut, "UNIT_SWORDSMAN"); H.eq(rows[1].rid, rec.id)
+	H.isnil(rows[1].bad)
+	-- Simulate the reported glitch: a tag left visible on another unit's flag.
+	local w = H.unit(0, "UNIT_WARRIOR", 12, 12)
+	local fw = UnitFlag.new(0, w.id)
+	fw.m_Instance.ReligionIconBacking:SetHide(false)
+	local bad = Bad(AuditRows())
+	H.len(bad, 1)
+	H.eq(bad[1].fu, w.id); H.eq(bad[1].ut, "UNIT_WARRIOR"); H.eq(bad[1].bad, "no on-map record for this unit")
+	H.clean()
+end)
+
+test("flags 0.7.2: EFV_Dev Badge audit logs PASS at the turn start and FAIL when a VEF tag sits on another unit", function()
+	local S = Boot()
+	local rec = DeployVolunteer(S)
+	FlagFor(rec)
+	local panel = FAKE_UI.LoadContext("EFV_Dev/UI/EFV_Dev_Panel.lua")
+	Events.PlayerTurnActivated(0, true)
+	FAKE_UI.Update(panel, 0.5)
+	H.ok(H.hasLine("[EFV][CHECK] BADGE_AUDIT PASS"), "turn-start audit")
+	H.ok(H.hasLine("1 VEF tag(s), each on its record's live unit; tracker: 1 on-map row(s)"))
+	local w = H.unit(0, "UNIT_WARRIOR", 12, 12)
+	local fw = UnitFlag.new(0, w.id)
+	fw.m_Instance.ReligionIconBacking:SetHide(false)   -- the reported glitch, forced
+	Events.UnitKilledInCombat(0, rec.onMapUnitID, 63, 1)
+	FAKE_UI.Update(panel, 0.5)
+	H.ok(H.hasLine("[EFV][CHECK] BADGE_AUDIT FAIL"))
+	H.ok(H.hasLine("flag P0/" .. w.id .. " (unit P0/" .. w.id .. " UNIT_WARRIOR): no on-map record for this unit"))
 	H.clean()
 end)

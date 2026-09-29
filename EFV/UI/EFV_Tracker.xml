@@ -26,6 +26,9 @@
      0.7.1: each header column is a plain Button (SortXButton, same width as
      the row column) holding its label (SortXLabel); a click sorts by that
      column (A-Z, Z-A, default), and the label carries the sort mark (Lua).
+     0.7.2: the mark is a 22 px arrow font icon, so the Turns header starts
+     14 px left of its column (State header 186, Turns header 64 wide; the
+     rows keep 200 / 50) to fit "Turns" plus the arrow.
      The scroll bar uses the base ScrollVerticalBacking / ScrollThumbAlt
      pattern (UnitPanel.xml, TradeRouteChooser.xml) in the header's dark
      blue (BodyTextBlue 6,53,92; lighter track, solid thumb).
@@ -47,8 +50,8 @@
 				<Button ID="SortUnitButton" Size="170,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortUnitLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_UNIT"/></Button>
 				<Button ID="SortPartnerButton" Size="140,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortPartnerLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_PARTNER"/></Button>
 				<Button ID="SortForceButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortForceLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_FORCE"/></Button>
-				<Button ID="SortStateButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortStateLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/></Button>
-				<Button ID="SortTurnsButton" Size="50,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortTurnsLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/></Button>
+				<Button ID="SortStateButton" Size="186,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortStateLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/></Button>
+				<Button ID="SortTurnsButton" Size="64,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortTurnsLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/></Button>
 				<Button ID="SortDestButton" Size="150,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortDestLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_DEST"/></Button>
 			</Stack>
 			<ScrollPanel ID="TrackerScroll" Anchor="L,T" Offset="16,76" Size="930,360" Vertical="1" AutoScrollBar="1">

@@ -251,8 +251,8 @@ class TestSummarizeRetest(unittest.TestCase):
         return code, out.getvalue()
 
     def test_versions(self):
-        self.assertEqual(summarize_efv_log.EFV_VERSION, "0.7.0-dev")
-        self.assertEqual(summarize_efv_log.DEV_VERSION, "0.7.0-dev.1")
+        self.assertEqual(summarize_efv_log.EFV_VERSION, "0.7.2-dev")
+        self.assertEqual(summarize_efv_log.DEV_VERSION, "0.7.2-dev.1")
         self.assertEqual(len(summarize_efv_log.RETEST_STEPS), 6)
 
     def test_good_retest(self):
@@ -284,12 +284,104 @@ class TestSummarizeRetest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
         self.assertEqual(code, 1)
         self.assertIn("Step  2  CHECK", text)      # FROM_LAND not seen
-        self.assertIn("Step  3  CHECK", text)      # only 3 arrivals
-        self.assertIn("expected at least 4 arrivals", text)
+        self.assertIn("Step  3  CHECK", text)      # record 4 sent but not arrived
+        self.assertIn("3 of 4 sent unit(s) arrived, missing record(s) 4", text)
         self.assertIn("Step  5  CHECK", text)      # UI level check missing
         self.assertIn("VET_RESTORE_LEVEL not seen", text)
         self.assertIn("Step  6  CHECK", text)      # the runtime error
         self.assertIn("SelectedUnit.lua:195", text)
+
+
+    REAL_070 = os.path.join(FIX, "logs", "retest_070", "Lua.log")
+
+    @unittest.skipUnless(os.path.exists(REAL_070), "local fixture: the 0.7.0 re-test log (*.log is not committed)")
+    def test_real_070_retest_is_explained(self):
+        """The 0.7.0 re-test (research/retest_0.7): each CHECK names its cause (0.7.2)."""
+        code, text = self.run_summary(["--retest", "--log", self.REAL_070])
+        self.assertEqual(code, 1)
+        self.assertIn("S13 NOT PRESSED", text)
+        self.assertIn("Step  3  PASS", text)
+        self.assertIn("(S13 not pressed: 3 sends expected)", text)
+        self.assertIn("NOT VERIFIED: Volunteer record 2 left B's land (at 50,34)", text)
+        self.assertIn("grace 5 -> 4 is correct", text)
+        self.assertIn("LEVEL BACK 1 TURN(S) LATE", text)
+        self.assertIn("TEST UNIT KILLED", text)
+        self.assertIn("3 combat event(s), all PASS", text)
+        self.assertIn("Errors: none", text)
+
+    def test_s13_not_pressed(self):
+        with open(self.LOG, encoding="utf-8") as fh:
+            lines = [ln for ln in fh.read().splitlines() if "FROM_LAND" not in ln and "scn_inland" not in ln
+                     and "id=4 " not in ln and "record 4 " not in ln]
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "Lua.log")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(os.linesep.join(lines))
+            code, text = self.run_summary(["--retest", "--log", path])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self.assertIn("Step  2  CHECK", text)
+        self.assertIn("S13 NOT PRESSED", text)
+        self.assertIn("Step  3  PASS", text)
+        self.assertIn("all 3 sent unit(s) arrived (S13 not pressed", text)
+
+
+class TestSummarizeS14(unittest.TestCase):
+    """summarize_efv_log.py --s14 and the badge-audit line (EFV_Dev 0.7.2-dev.1)."""
+
+    GOOD = [
+        "EFV_Gameplay: [EFV][T1][Init] EFV_Gameplay loading version=0.7.2-dev",
+        "EFV_Dev_Gameplay: [EFV][T1][Dev] init: EFV_Dev gameplay loaded; registered GameEvents.EFV_Dev; version=0.7.2-dev.1 for EFV 0.7.2-dev EFV=0.7.2-dev",
+        "EFV_Dev_Gameplay: [EFV][CHECK] SETUP PASS T2 B=P1 Rome (basis FRIEND, Volunteers FRIEND_OB), F=P2 Arabia",
+        "EFV_Dev_Panel: [EFV][CHECK] BADGE_AUDIT PASS T2 (turn start) 0 VEF tag(s), each on its record's live unit; tracker: 0 on-map row(s)",
+        "EFV_Dev_Gameplay: [EFV][CHECK] MUT_DEATH INFO T2 copy 1: record 1 P0/131075 (slot 3) UNIT_SWORDSMAN at 38,27 damage 80",
+        "EFV_Dev_Gameplay: [EFV][CHECK] MUT_DEATH INFO T2 2 Volunteer Swordsman(s) of yours in MUTINY at 80 damage next to P2 Arabia's land",
+        "EFV_Dev_Gameplay: [EFV][CHECK] MUT_DEATH PASS T3 copy 1 (record 1, 38,27): record closed, Swordsman gone; on the tile now: P63/131076 (slot 4) UNIT_WARRIOR",
+        "EFV_Dev_Gameplay: [EFV][CHECK] MUT_DEATH PASS T3 copy 2 (record 2, 42,28): record closed, Swordsman gone; on the tile now: nothing",
+        "EFV_Dev_Panel: [EFV][CHECK] BADGE_AUDIT PASS T3 (turn start) 0 VEF tag(s), each on its record's live unit; tracker: 0 on-map row(s)",
+    ]
+
+    def run_lines(self, lines):
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "Lua.log")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(os.linesep.join(lines))
+            out = io.StringIO()
+            old = sys.stdout
+            sys.stdout = out
+            try:
+                code = summarize_efv_log.main(["--s14", "--log", path, "--db", os.path.join(FIX, "no_such.sqlite")])
+            finally:
+                sys.stdout = old
+            return code, out.getvalue()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_good(self):
+        code, text = self.run_lines(self.GOOD)
+        self.assertEqual(code, 0, text)
+        for n in range(1, 5):
+            self.assertIn("Step  %d  PASS" % n, text)
+        self.assertIn("Badge audit: PASS 2 audit line(s)", text)
+
+    def test_glitch_is_caught(self):
+        lines = [ln.replace("MUT_DEATH PASS T3 copy 1 (record 1, 38,27): record closed, Swordsman gone",
+                            "MUT_DEATH FAIL T3 copy 1 (record 1, 38,27): a unit of yours stands there: P0/196611 (slot 3) UNIT_WARRIOR")
+                 for ln in self.GOOD]
+        lines.append("EFV_Dev_Panel: [EFV][CHECK] BADGE_AUDIT FAIL T3 (unit killed) flag P0/131075 (unit P0/196611 UNIT_WARRIOR): "
+                     "the flag's unit is another unit")
+        code, text = self.run_lines(lines)
+        self.assertEqual(code, 1)
+        self.assertIn("Step  2  CHECK", text)
+        self.assertIn("a unit of yours stands there", text)
+        self.assertIn("Step  4  CHECK", text)
+        self.assertIn("Badge audit: CHECK 1 of 3 audit line(s) FAIL", text)
+
+    def test_no_verdict_yet(self):
+        code, text = self.run_lines(self.GOOD[:6])
+        self.assertIn("no verdict for copy 1 yet: End Turn once more", text)
 
 
 class TestOfflineRunnerClassify(unittest.TestCase):

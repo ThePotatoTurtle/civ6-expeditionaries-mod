@@ -32,6 +32,11 @@ local function Restore(owner, rec, turn)
 	return u
 end
 
+-- The owner's turn start gives the restored unit its moves back (the engine
+-- restores moves between PlayerTurnStarted and PlayerTurnStartComplete). The
+-- fake PROMOTE, like the engine (re-test 0.7 step 5), needs movement points.
+local function OwnerTurnStart(u) u.moves = u.maxMoves end
+
 local function Jobs() return EFV_Records.Load().vet end
 local function Xp(u) return u:GetExperience():GetExperiencePoints() end
 local function Next(u) return u:GetExperience():GetExperienceForNextLevel() end
@@ -97,6 +102,7 @@ test("owner's UI + engine PROMOTE: level 3 with both promotions, XP 50/90, damag
 	H.baseScenario()
 	H.loadEFV{ routeB = true }
 	local u = Restore(0)
+	OwnerTurnStart(u)
 	local env = BootUI()
 	H.ok(not env.ContextPtr:IsHidden(), "context shown (note 19)")
 	Pump(env, 8)
@@ -121,7 +127,7 @@ test("only the owner's client promotes (hot seat / MP: another human's UI sends 
 	H.baseScenario()
 	Players[1].human = true
 	H.loadEFV{ routeB = true }
-	Restore(0)
+	OwnerTurnStart(Restore(0))
 	include("fake_ui")
 	FAKE_UI.Enable()
 	FAKE.localPlayer = 1
@@ -140,7 +146,7 @@ end)
 test("PROMOTE sent once per step, one resend after 3 s; nothing offered -> the UI waits and logs once", function()
 	H.baseScenario()
 	H.loadEFV{ routeB = true }
-	Restore(0)
+	OwnerTurnStart(Restore(0))
 	local env = BootUI()
 	FAKE_UI.canPromote = false
 	for _ = 1, 30 do FAKE_UI.Update(env, 0.3) end
@@ -150,6 +156,103 @@ test("PROMOTE sent once per step, one resend after 3 s; nothing offered -> the U
 	FAKE_UI.ApplyUnitCommands = function() end   -- the command never lands
 	for _ = 1, 30 do FAKE_UI.Update(env, 0.3) end
 	H.len(Promotes(), 2, "first send + one resend")
+	H.clean()
+end)
+
+-- ---------------------------------------------------------------------------
+-- 0.7.2, re-test 0.7 step 5: the level came back one turn late (arrival turn:
+-- 0 moves, "no wanted promotion offered now"; next turn: both promotions at
+-- full moves, and the round heal of 15 in own land left damage 15). Now a
+-- route B unit gets no pending exhaust; the job owes it and pays it when the
+-- level is back in the arrival turn.
+-- The owner's turn start as the engine runs it after the turn-start
+-- pipeline (Session E order): PTS -> moves restored -> PTSC.
+local function HumanTurnStart(pid)
+	GameEvents.PlayerTurnStarted(pid)
+	for _, u in ipairs(FAKE.UnitsOf(pid)) do u.moves = u.maxMoves end
+	GameEvents.PlayerTurnStartComplete(pid)
+end
+
+test("0.7.2 step 5: the 0.7.0 order (arrival exhaust at the owner's PTSC) leaves nothing to promote in the arrival turn", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0)
+	local store = EFV_Records.Load()
+	EFV_Records.AddPending(store, 0, u.id, FAKE.turn)   -- what 0.7.0 queued
+	EFV_Records.Commit(store)
+	HumanTurnStart(0)
+	H.eq(u:GetMovesRemaining(), 0, "exhausted at PTSC")
+	local env = BootUI()
+	Pump(env, 8)
+	H.len(Promotes(), 0, "no PROMOTE at 0 moves")
+	H.ok(H.hasLine("[UIVet] waiting"), "the 0.7.0 log line")
+	H.len(Jobs(), 1)
+	H.clean()
+end)
+
+test("0.7.2 step 5: route B unit keeps its moves until the level is back, all in the arrival turn; then 0 moves", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local t0 = FAKE.turn
+	local u = Restore(0, nil, t0)
+	H.ok(H.hasLine("arrival exhaust left to the veteran job"))
+	H.len(EFV_Records.Load().pending, 0, "no pending exhaust for a route B unit")
+	H.eq(Jobs()[1].ex, 1, "the job owes the arrival exhaust")
+	HumanTurnStart(0)
+	H.ok(u:GetMovesRemaining() > 0, "moves kept at PTSC, so PROMOTE is offered")
+	local env = BootUI()
+	Pump(env, 8)
+	H.eq(FAKE.turn, t0, "still the arrival turn")
+	H.len(Promotes(), 2)
+	H.eq(u:GetExperience():GetLevel(), 3)
+	H.eq(Xp(u), 50); H.eq(Next(u), 90)
+	H.eq(u:GetDamage(), 30, "no round heal yet, promotion heal undone")
+	H.len(Jobs(), 0)
+	H.eq(u:GetMovesRemaining(), 0, "exhausted once the level is back (arrived units do not act)")
+	H.ok(H.hasLine("[Vet] exhaust id=7"))
+	H.endTurn()
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "next turn: full moves (the pending entry is stale)")
+	H.ok(H.hasLine("[Exhaust] skip stale"))
+	H.clean()
+end)
+
+test("0.7.2 step 5: a job that ends after the arrival turn owes no exhaust (moves of a later turn are never taken)", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0)
+	HumanTurnStart(0)
+	local env = BootUI()
+	FAKE_UI.canPromote = false
+	Pump(env, 4)
+	H.len(Jobs(), 1, "nothing taken in the arrival turn")
+	H.endTurn()
+	FAKE_UI.canPromote = true
+	Pump(env, 8)
+	H.len(Jobs(), 0, "done the next turn")
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "moves of the later turn kept")
+	H.ok(not H.hasLine("[Vet] exhaust id="))
+	H.clean()
+end)
+
+test("0.7.2 step 5: a fallback in the arrival turn pays the exhaust (owner turned AI); a SNAPSHOT fallback does not (the unit leaves)", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0)
+	HumanTurnStart(0)
+	local store = EFV_Records.Load()
+	EFV_Veteran.Settle(store, u)
+	EFV_Records.Commit(store)
+	H.len(Jobs(), 0)
+	H.ok(H.hasLine("why=SNAPSHOT"))
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "SNAPSHOT: a removal follows, the send must not fail NOT_FULL_MOVES")
+	H.ok(not H.hasLine("[Vet] exhaust id=7"))
+	local v = Restore(0, VetRec({ id = 8 }))
+	v.moves = v.maxMoves
+	Players[0].human = false
+	GameEvents.OnGameTurnEnded(FAKE.turn)   -- a boundary in the arrival turn
+	H.ok(H.hasLine("why=NOT_HUMAN"))
+	H.eq(v:GetMovesRemaining(), 0, "the arrival exhaust is paid")
+	H.ok(H.hasLine("[Vet] exhaust id=8"))
 	H.clean()
 end)
 

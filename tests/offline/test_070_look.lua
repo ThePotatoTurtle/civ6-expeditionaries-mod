@@ -145,7 +145,10 @@ test("look: header columns match the row columns; dark header and summary, summa
 	local total = 0
 	for i = 1, 6 do
 		H.eq(hcols[i].key, order[i])
-		H.eq(hcols[i].width, rcols[i].width, order[i] .. " header width = row width")
+		-- 0.7.2 (designer): the Turns header starts 14 px left of its column to
+		-- fit "Turns" plus the arrow font icon (State header 186, Turns 64).
+		local shift = (order[i] == "STATE" and -14) or (order[i] == "TURNS" and 14) or 0
+		H.eq(hcols[i].width, rcols[i].width + shift, order[i] .. " header width = row width" .. (shift ~= 0 and " (0.7.2 shift)" or ""))
 		H.eq(hcols[i].style, "BodyTextDark14", order[i] .. " header style")
 		H.eq(rcols[i].truncate, rcols[i].width - 6, rcols[i].id .. " TruncateWidth = width - 6")
 		total = total + rcols[i].width

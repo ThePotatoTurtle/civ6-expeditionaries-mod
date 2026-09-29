@@ -723,6 +723,15 @@
     "EFV_Dev/"
    ]
   },
+  "UI.GetColorValueFromHexLiteral": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Colors.lua:6-17 (every Lua image tint, e.g. METER_HP_GOOD = UI.GetColorValueFromHexLiteral(0xFF4BE810))"
+   ],
+   "note": "0.7.2: flag badge tints (EFV_UnitFlagManager); a raw 0xAABBGGRR literal passed to SetColor drew dark (re-test 0.7 step 3)."
+  },
   "UI.GetMapZoom": {
    "ctx": {
     "UI": "L"
@@ -964,6 +973,24 @@
    "refs": [
     "harvested from base-game UI usage (GAME/Base/Assets/UI, DLC/Expansion2/UI; >=3 uses), 2026-09-28 (Controls.X:Method)"
    ]
+  },
+  "GetReligionType": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/UnitFlagManager.lua:799 (pUnit:GetReligionType() in UpdateReligion)"
+   ],
+   "note": "0.7.2: the flag badge audit skips a real religion tag (EFV_UnitFlagManager)."
+  },
+  "GetReligiousStrength": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/UnitFlagManager.lua:800 (pUnit:GetReligiousStrength() in UpdateReligion)"
+   ],
+   "note": "0.7.2: the flag badge audit skips a real religion tag (EFV_UnitFlagManager)."
   },
   "SetColor": {
    "ctx": {
@@ -2276,6 +2303,20 @@
   }
  },
  "events": {
+  "Events.UnitKilledInCombat": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/DiplomacyRibbon.lua:832 (Events.UnitKilledInCombat.Add)",
+    "GAME/Base/Assets/UI/Panels/NotificationPanel.lua:1777 (.Remove)",
+    "SPIKES.md T22 (fires in G too)"
+   ],
+   "note": "EFV_Dev 0.7.2-dev.1 Badge audit trigger only.",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
   "LuaEvents.DiplomacyActionView_HideIngameUI": {
    "ctx": {
     "UI": "C"

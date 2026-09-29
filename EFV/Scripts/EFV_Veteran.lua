@@ -18,8 +18,21 @@
 --     rid = recordID (log only), want = { promotion type names still to
 --     take, snapshot order }, got = promotions held when last synced,
 --     xp = target XP (snapshot), dmg = damage floor against the promotion
---     heal, n = steps synced }
+--     heal, n = steps synced, ex = 1 while the arrival-turn exhaust is
+--     owed (0.7.2) }
 -- Jobs are independent of records (a returned record is deleted at arrival).
+--
+-- Arrival-turn moves (0.7.2, re-test 0.7 step 5): the engine offers PROMOTE
+-- only to a unit with movement points (arrival turn at 0 moves: nothing
+-- offered; next turn at full moves: both promotions taken at once). So a
+-- route B unit is NOT queued for the arrival exhaust at the owner's
+-- PlayerTurnStartComplete (EFV_Units.Recreate); the job owes it (ex = 1)
+-- and PayExhaust zeroes the moves when the job ends in the arrival turn
+-- (Sync DONE or a Fallback other than SNAPSHOT, whose unit leaves the map
+-- at once), plus a pending entry for the case the owner's
+-- PTSC is still to come. A job that ends later owes nothing any more (the
+-- arrival turn is over). Known edge: when no promotion can be taken in the
+-- arrival turn at all, the unit keeps its moves for that turn.
 --
 -- Flow (FIXPLAN_0.7 item 7):
 --   1. EFV_Units.Recreate -> UseRouteB -> Begin (XP to the first threshold,
@@ -171,6 +184,26 @@ local function RestoreFloor(job, pUnit)
 	return false
 end
 
+-- The arrival-turn exhaust the job owes (ex = 1, see the header): paid
+-- only in the job's creation turn. Logs "[Vet] exhaust ...".
+local function PayExhaust(store, job, pUnit)
+	if tonumber(job.ex) ~= 1 then
+		return
+	end
+	job.ex = nil
+	Touch(store)
+	local turn = CurrentTurn()
+	if turn ~= tonumber(job.t) then
+		return
+	end
+	local ok, err = pcall(function() UnitManager.FinishMoves(pUnit) end)
+	EFV_Records.AddPending(store, job.p, job.u, job.t)
+	local moves = nil
+	pcall(function() moves = pUnit:GetMovesRemaining() end)
+	EFV_Log(2, TAG, "exhaust id=%s uid=%s moves=%s (arrival turn, level back)%s", tostring(job.rid), tostring(job.u),
+		tostring(moves), ok and "" or (" FinishMoves failed err=" .. ErrText(err)))
+end
+
 -- ---------------------------------------------------------------------------
 -- EFV_Veteran.UseRouteB(ownerID, rec) -> bool
 -- true when FLAG_VET_ROUTE_B is on, the owner is human and the snapshot has
@@ -216,7 +249,7 @@ function EFV_Veteran.Begin(store, ownerID, pUnit, rec, turn)
 	local job = {
 		p = ownerID, u = pUnit:GetID(), ut = UnitTypeOf(pUnit), t = tonumber(turn) or CurrentTurn(),
 		rid = rec.id, want = rest, got = #held, xp = tonumber(rec.experience) or 0,
-		dmg = pUnit:GetDamage() or 0, n = 0,
+		dmg = pUnit:GetDamage() or 0, n = 0, ex = 1,
 	}
 	if EFV_Records.AddVetJob(store, job) == nil then
 		return false
@@ -254,6 +287,14 @@ function EFV_Veteran.Fallback(store, job, pUnit, why)
 		end)
 		if not ok then
 			EFV_Log(1, TAG, "fallback id=%s uid=%s failed err=%s", tostring(job.rid), tostring(job.u), ErrText(err))
+		end
+		if why == "SNAPSHOT" then
+			-- A removal snapshot follows (send, return, revert): the unit
+			-- leaves the map, and exhausting it here would make the send
+			-- that asked for the snapshot fail NOT_FULL_MOVES.
+			job.ex = nil
+		else
+			PayExhaust(store, job, pUnit)
 		end
 	end
 	EFV_Records.RemoveVetJob(store, job.p, job.u)
@@ -337,6 +378,7 @@ function EFV_Veteran.Sync(store, job, pUnit, hook)
 			EFV_Log(2, TAG, "xp kept id=%s uid=%s xp=%s target=%s (never lowered)", tostring(job.rid),
 				tostring(job.u), tostring(xp), tostring(target))
 		end
+		PayExhaust(store, job, pUnit)
 		EFV_Records.RemoveVetJob(store, job.p, job.u)
 		EFV_Log(2, TAG, "done id=%s owner=%s uid=%s promotions=%s xp=%s/%s next=%s steps=%s",
 			tostring(job.rid), tostring(job.p), tostring(job.u), List(held), tostring(exp:GetExperiencePoints()),

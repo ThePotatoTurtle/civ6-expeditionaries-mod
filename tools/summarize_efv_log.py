@@ -2,18 +2,20 @@
 """summarize_efv_log.py - one PASS/CHECK line per step of an in-game test session.
 
 Usage:
-    python tools/summarize_efv_log.py [--retest] [--log PATH] [--db PATH] [-v]
+    python tools/summarize_efv_log.py [--retest | --s14] [--log PATH] [--db PATH] [-v]
 
 Reads Lua.log of the last game run (default: %LOCALAPPDATA%\\Firaxis Games\\Sid Meier's
 Civilization VI\\Logs\\Lua.log, or EFV_CIV6_LOGS) and prints the result of every step of
-EFV/TESTING_FINAL.md, or with --retest of the 6-step 0.7 re-test EFV/TESTING_RETEST_0.7.md:
+EFV/TESTING_FINAL.md, with --retest of the 6-step 0.7 re-test EFV/TESTING_RETEST_0.7.md, or with
+--s14 of the mutiny-death check EFV/TESTING_S14.md. Every mode also prints the EFV_Dev badge audit
+(BADGE_AUDIT lines, EFV_Dev 0.7.2-dev.1) next to the error count:
 
     Step  3  PASS   Send Expeditionary: fee 36 (band 2, expected 36)
     Step  7  CHECK  Grace (S3): record 2 state=DEPLOYED grace=nil (expected GRACE with 5 turns)
     Step 12  -      Recall and friendship restored: not run
 
 Sources: the "[EFV][CHECK] <ID> <PASS|CHECK|INFO> T<turn> <detail>" lines written by the
-EFV_Dev scenario buttons (EFV_Dev 0.7.0-dev.1) and a few of EFV's own log lines (version,
+EFV_Dev scenario buttons (EFV_Dev 0.7.2-dev.1) and a few of EFV's own log lines (version,
 [Send] ok, [Entrust] ok, loads). Lua.log is buffered while the game runs: quit to the
 desktop (or the main menu) before running this. -v also prints every CHECK line.
 Exit code 0 when every step that ran passed, 1 otherwise.
@@ -30,10 +32,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import efvlib as L  # noqa: E402
 
-EFV_VERSION = "0.7.0-dev"
-DEV_VERSION = "0.7.0-dev.1"
+EFV_VERSION = "0.7.2-dev"
+DEV_VERSION = "0.7.2-dev.1"
 
-CHECK_RE = re.compile(r"\[EFV\]\[CHECK\] (\S+) (PASS|CHECK|INFO) T(-?\d+) (.*)$")
+CHECK_RE = re.compile(r"\[EFV\]\[CHECK\] (\S+) (PASS|CHECK|FAIL|INFO) T(-?\d+) (.*)$")
 EFV_RE = re.compile(r"\[EFV\]\[T(-?\d+)\]\[([A-Za-z]+)\] (.*)$")
 SEND_RE = re.compile(r"ok id=(\d+) force=(\S+) sender=\d+ recipient=(\d+) unit=\S+ type=(\S+) fee=(\d+) band=(\S+)")
 SPEED_RE = re.compile(r"derived PM=(\d+) speedPct=(\d+)")
@@ -277,17 +279,102 @@ def combine(*evs):
     return ev
 
 
-def arrivals_step(minimum):
-    """At least `minimum` ARRIVE checks, every one PASS (re-test step 3)."""
-    def ev(log, ctx):
-        v, d = arrival_step(log, ctx)
-        if v is None:
-            return v, d
-        n = len(log.checks_of("ARRIVE"))
-        if n < minimum:
-            return "CHECK", "%s; expected at least %d arrivals" % (d, minimum)
+def pressed(log, cmd):
+    """True when the dev panel sent scenario command `cmd` in this log."""
+    return any("cmd=%s," % cmd in ln and "request ok=" in ln for ln in log.lines)
+
+
+def sent_ids(log):
+    """Record IDs of every '[Send] ok' line, in log order."""
+    out = []
+    for e in log.efv_of("Send", "ok "):
+        m = SEND_RE.search(e[2])
+        if m and int(m.group(1)) not in out:
+            out.append(int(m.group(1)))
+    return out
+
+
+def from_land_step(log, ctx):
+    """Re-test step 2, second part: S13 (0.7.2: says so when S13 was never pressed)."""
+    if not log.checks_of("FROM_LAND_RULES") and not log.checks_of("FROM_LAND"):
+        if not pressed(log, "scn_inland"):
+            return None, "S13 NOT PRESSED in this game (no scn_inland request in the log)"
+        return None, "S13 pressed but no FROM_LAND line"
+    return ids_step("FROM_LAND_RULES", "FROM_LAND")(log, ctx)
+
+
+def arrivals_step(log, ctx):
+    """Re-test step 3: every unit sent in this game arrived (ARRIVE PASS for each [Send] ok record).
+    0.7.2: the expected count follows the sends (3, or 4 with the S13 Spearman)."""
+    v, d = arrival_step(log, ctx)
+    if v is None:
         return v, d
-    return ev
+    sent = sent_ids(log)
+    arrived = set()
+    for c in log.checks_of("ARRIVE"):
+        m = re.search(r"record (\d+) ", c[3])
+        if m:
+            arrived.add(int(m.group(1)))
+    missing = [i for i in sent if i not in arrived]
+    if missing:
+        return "CHECK", "%s; %d of %d sent unit(s) arrived, missing record(s) %s" % (
+            d, len(sent) - len(missing), len(sent), ",".join(str(i) for i in missing))
+    note = "" if pressed(log, "scn_inland") else " (S13 not pressed: 3 sends expected)"
+    return v, "%s; all %d sent unit(s) arrived%s" % (d, len(sent), note)
+
+
+LAPSE_PAUSE_OLD_RE = re.compile(r"Volunteer record (\d+) grace=(\S+) \(was (\S+): the countdown must not move")
+RESUMED_RE = re.compile(r"resumed id=(\d+) .* at=(-?\d+),(-?\d+) hook=")
+
+
+def lapse_step(log, ctx):
+    """Re-test step 4. 0.7.2: when the countdown moved, a '[Lapse] resumed' line of that record
+    means the Volunteer had left B's land first, so the step is 'not verified', not a VEF bug
+    (EFV_Dev 0.7.0 logs; EFV_Dev 0.7.2 says so itself and holds the unit for the check)."""
+    v, d = ids_step("EXPIRE", "LAPSE", "LAPSE_PAUSE", "LAPSE_TEXT")(log, ctx)
+    pv, pd = verdict_of(log, "LAPSE_PAUSE")
+    m = LAPSE_PAUSE_OLD_RE.search(pd or "")
+    if pv == "CHECK" and m:
+        moves = [RESUMED_RE.search(e[2]) for e in log.efv_of("Lapse", "resumed ")]
+        moves = [r for r in moves if r and r.group(1) == m.group(1)]
+        if moves:
+            d = ("NOT VERIFIED: Volunteer record %s left B's land (at %s,%s) before the countdown, so grace %s -> %s "
+                 "is correct; leave it on B's land. " % (
+                     m.group(1), moves[0].group(2), moves[0].group(3), m.group(3), m.group(2))) + d
+    return v, d
+
+
+def vet_restore_step(log, ctx):
+    """Re-test step 5. 0.7.2: an 0.7.0 log where the level came back a turn late (the UI found no
+    promotion to take at 0 moves on the arrival turn) is named, and its damage explained."""
+    v, d = ids_step("VET_RESTORE", "VET_RESTORE_LEVEL")(log, ctx)
+    waits = [e for e in log.efv_of("UIVet", "waiting ")]
+    promotes = [e for e in log.efv_of("UIVet", "PROMOTE ")]
+    if v == "CHECK" and waits and promotes and promotes[0][0] > waits[0][0]:
+        late = promotes[0][0] - waits[0][0]
+        d = ("LEVEL BACK %d TURN(S) LATE: no promotion was offered on the arrival turn (0 moves); damage lower by the "
+             "engine's heal of 15 per round in your land (normal). " % late) + d
+    return v, d
+
+
+def t31_step(log, ctx):
+    """Re-test step 6: every combat event PASS and the T31 verdict. 0.7.2: a Spearman killed by
+    extra Barbarian attacks is named as a test-setup problem (EFV_Dev 0.7.2 removes them)."""
+    events = [c for c in log.checks_of("T31_EVENT") if c[1] != "INFO"]
+    v, d = verdict_of(log, "T31")
+    if not events and v is None:
+        return None, "not run"
+    bad_ev = [c for c in events if c[1] != "PASS"]
+    parts = []
+    if v is not None and "is gone" in d:
+        parts.append("TEST UNIT KILLED: the Barbarians' attacks and the mutiny damage killed it before the check "
+                     "(test setup, not VEF; EFV_Dev 0.7.2 removes them after your fight)")
+    parts.append("%d combat event(s), %s" % (len(events), "all PASS" if not bad_ev else "%d CHECK: %s" % (len(bad_ev), bad_ev[0][3])))
+    if events:
+        parts.append("first: " + events[0][3])
+    parts.append("T31 verdict not seen" if v is None else d)
+    ok = not bad_ev and v == "PASS"
+    return ("PASS" if ok else "CHECK"), "; ".join(parts)
 
 
 def no_errors_step(log, ctx):
@@ -301,11 +388,51 @@ def no_errors_step(log, ctx):
 RETEST_STEPS = [
     (1, "Install, new game and setup (S0)", combine(version_step, ids_step("SETUP"))),
     (2, "Sends, and a send from B's land (S13)", combine(send_step("EXPEDITIONARY", "VOLUNTEER", "CS_EXPEDITIONARY"),
-                                                         ids_step("FROM_LAND_RULES", "FROM_LAND"))),
-    (3, "Arrivals (S1)", arrivals_step(4)),
-    (4, "City-State recall from neutral land, lapse text (S2, S4)", ids_step("EXPIRE", "LAPSE", "LAPSE_PAUSE", "LAPSE_TEXT")),
-    (5, "Veteran level restored (S12)", ids_step("VET_RESTORE", "VET_RESTORE_LEVEL")),
-    (6, "Mutiny combat, no errors (S10)", combine(ids_step("T31_EVENT", "T31"), no_errors_step)),
+                                                         from_land_step)),
+    (3, "Arrivals (S1)", arrivals_step),
+    (4, "City-State recall from neutral land, lapse text (S2, S4)", lapse_step),
+    (5, "Veteran level restored (S12)", vet_restore_step),
+    (6, "Mutiny combat, no errors (S10)", combine(t31_step, no_errors_step)),
+]
+
+
+def mut_death_step(n):
+    """S14 copy n: the MUT_DEATH verdict at the next turn start (EFV_Dev 0.7.2-dev.1)."""
+    def ev(log, ctx):
+        rows = [c for c in log.checks_of("MUT_DEATH", "copy %d (" % n) if c[1] != "INFO"]
+        if not rows:
+            if log.checks_of("MUT_DEATH"):
+                return "CHECK", "no verdict for copy %d yet: End Turn once more, then quit" % n
+            return None, "not run (press S14)"
+        last = rows[-1]
+        return ("PASS" if last[1] == "PASS" else "CHECK"), last[3]
+    return ev
+
+
+def badge_audit(log):
+    """(verdict, detail) of the BADGE_AUDIT lines; verdict None when there are none."""
+    rows = [c for c in log.checks_of("BADGE_AUDIT") if c[1] != "INFO"]
+    if not rows:
+        info = log.checks_of("BADGE_AUDIT")
+        return None, (short(info[-1][3]) if info else "not run (needs VEF Dev Tools 0.7.2-dev.1)")
+    fails = [c for c in rows if c[1] != "PASS"]
+    if fails:
+        return "CHECK", "%d of %d audit line(s) FAIL, first T%d: %s" % (len(fails), len(rows), fails[0][2], fails[0][3])
+    return "PASS", "%d audit line(s), every VEF tag on its record's live unit; last: %s" % (len(rows), rows[-1][3])
+
+
+def badge_audit_step(log, ctx):
+    return badge_audit(log)
+
+
+# The S14 mutiny-death check (EFV/TESTING_S14.md, EFV_Dev 0.7.2-dev.1).
+S14_STEPS = [
+    (1, "New game, setup (S0) and S14", combine(version_step, ids_step("SETUP"),
+                                                lambda log, ctx: (("PASS", "S14 set up: " + short(log.checks_of("MUT_DEATH")[-1][3], 90))
+                                                                  if log.checks_of("MUT_DEATH") else (None, "not run (press S14)")))),
+    (2, "Copy 1 killed by the Barbarians (or the mutiny)", mut_death_step(1)),
+    (3, "Copy 2 killed attacking a Barbarian", mut_death_step(2)),
+    (4, "No VEF tag or tracker row on the wrong unit", badge_audit_step),
 ]
 
 
@@ -325,6 +452,7 @@ def main(argv=None):
     ap.add_argument("--db", default=L.GAMEPLAY_DB)
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--retest", action="store_true", help="the 6-step 0.7 re-test (EFV/TESTING_RETEST_0.7.md)")
+    ap.add_argument("--s14", action="store_true", help="the S14 mutiny-death check (EFV/TESTING_S14.md)")
     a = ap.parse_args(argv)
     if not os.path.exists(a.log):
         print("Lua.log not found: %s" % a.log)
@@ -336,10 +464,10 @@ def main(argv=None):
         m = SPEED_RE.search(ln)
         if m:
             ctx["pm"], ctx["speed"] = int(m.group(1)), int(m.group(2))
-    title = "VEF 0.7 re-test summary" if a.retest else "VEF final session summary"
+    title = "VEF S14 mutiny-death summary" if a.s14 else ("VEF 0.7 re-test summary" if a.retest else "VEF final session summary")
     print("%s (%s, %d VEF lines, %d check lines)" % (title, a.log, len(log.efv), len(log.checks)))
     failed = 0
-    for num, title, ev in (RETEST_STEPS if a.retest else STEPS):
+    for num, title, ev in (S14_STEPS if a.s14 else (RETEST_STEPS if a.retest else STEPS)):
         if ev is None:
             ev = arrival_step
         try:
@@ -352,6 +480,10 @@ def main(argv=None):
         print("Step %2d  %-5s  %s: %s" % (num, mark, title, short(detail, 230)))
     errs = error_lines(log)
     print("Errors: %s" % ("none" if not errs else "%d, first: %s" % (len(errs), short(errs[0], 200))))
+    av, ad = badge_audit(log)
+    print("Badge audit: %s%s" % ("" if av is None else av + " ", short(ad, 200)))
+    if av == "CHECK":
+        failed += 1
     if a.verbose:
         for c in log.checks:
             if c[1] == "CHECK":

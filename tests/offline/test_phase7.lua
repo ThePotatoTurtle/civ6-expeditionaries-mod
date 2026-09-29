@@ -205,7 +205,7 @@ test("tracker sort: click cycle per column asc -> desc -> default; another colum
 		H.eq(EFV_UI_TrackerSortMark(s, col), "LOC_EFV_TRACKER_SORT_DESC")
 		s = EFV_UI_TrackerSortClick(s, col)
 		H.deq(s, { col = nil, dir = 0 }, "third click: default order")
-		H.eq(EFV_UI_TrackerSortMark(s, col), "LOC_EFV_TRACKER_SORT_NONE")
+		H.isnil(EFV_UI_TrackerSortMark(s, col), "0.7.2: no mark on an unsorted column")
 		H.deq(EFV_UI_TrackerSortClick(s, col), { col = col, dir = 1 }, "fourth click starts over")
 	end
 	-- only one column at a time: another column always starts ascending
@@ -213,12 +213,19 @@ test("tracker sort: click cycle per column asc -> desc -> default; another colum
 	s = EFV_UI_TrackerSortClick(s, 5)
 	H.deq(s, { col = 5, dir = 1 }, "Turns ascending replaces Partner")
 	for col = 1, 6 do
-		H.eq(EFV_UI_TrackerSortMark(s, col), col == 5 and "LOC_EFV_TRACKER_SORT_ASC" or "LOC_EFV_TRACKER_SORT_NONE")
+		H.eq(EFV_UI_TrackerSortMark(s, col), col == 5 and "LOC_EFV_TRACKER_SORT_ASC" or nil)
 	end
 	H.deq(EFV_UI_TrackerSortClick(s, 9), s, "unknown column: unchanged")
-	for _, key in ipairs({ "LOC_EFV_TRACKER_SORT_NONE", "LOC_EFV_TRACKER_SORT_ASC", "LOC_EFV_TRACKER_SORT_DESC", "LOC_EFV_TRACKER_SORT_TT" }) do
+	for _, key in ipairs({ "LOC_EFV_TRACKER_SORT_ASC", "LOC_EFV_TRACKER_SORT_DESC", "LOC_EFV_TRACKER_SORT_TT" }) do
 		H.ne(Locale.Lookup(key), key, key .. " has a text")
 	end
+	-- 0.7.2: the marks are the base game's arrow font icons (bigger than the
+	-- 0.7.1 U+02C6 / U+02C7 glyphs), which exist in Base FontIcons.xml.
+	H.eq(Locale.Lookup("LOC_EFV_TRACKER_SORT_ASC"), "[ICON_PressureUp]")
+	H.eq(Locale.Lookup("LOC_EFV_TRACKER_SORT_DESC"), "[ICON_PressureDown]")
+	local xml = __py_read("EFV/UI/EFV_Tracker.xml")
+	H.ok(string.find(xml, 'ID="SortStateButton" Size="186,24"', 1, true) ~= nil and
+		string.find(xml, 'ID="SortTurnsButton" Size="64,24"', 1, true) ~= nil, "Turns header moved 14 px left to fit the arrow")
 	H.clean()
 end)
 
@@ -283,8 +290,8 @@ test("tracker panel: header click sorts the rows, marks follow, alerts stay red,
 	local C = tr.Controls
 	local function Mark(key) return Locale.Lookup(key) end
 	local function TurnsHeader() return C.SortTurnsLabel:GetText() end
-	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"), "sortable mark at load")
-	H.eq(C.SortUnitLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_UNIT") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"))
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"), "no mark at load (0.7.2)")
+	H.eq(C.SortUnitLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_UNIT"))
 	C.BannerButton:RClick()
 	local function Col()
 		local cells = {}
@@ -303,11 +310,11 @@ test("tracker panel: header click sorts the rows, marks follow, alerts stay red,
 	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_DESC"))
 	C.SortTurnsButton:Click()
 	H.deq(Col(), { "4!", "15", "-", "1" }, "third click: default order")
-	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"))
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"))
 	-- another column: Partner A-Z ("To <civ 1>" x3 by id, "To <civ 2>"), Turns mark back to neutral
 	C.SortTurnsButton:Click()
 	C.SortPartnerButton:Click()
-	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_NONE"), "one column at a time")
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"), "one column at a time")
 	H.eq(C.SortPartnerLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_PARTNER") .. " " .. Mark("LOC_EFV_TRACKER_SORT_ASC"))
 	local p1, p2 = Locale.Lookup("LOC_EFV_TRACKER_TO", EFV_UI_PlayerName(1)), Locale.Lookup("LOC_EFV_TRACKER_TO", EFV_UI_PlayerName(2))
 	local want = (string.lower(p1) < string.lower(p2)) and { "15", "4!", "1", "-" } or { "-", "15", "4!", "1" }

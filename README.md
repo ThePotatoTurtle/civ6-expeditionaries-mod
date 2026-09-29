@@ -2,7 +2,7 @@
 
 A Civilization VI mod for Gathering Storm. It lets you lend combat units to the civs and city-states that fight your wars, and hand a city you just captured to a partner.
 
-Version 0.7.1-dev. This is a development build.
+Version 0.7.2-dev. This is a development build.
 
 ## The four options
 
@@ -151,6 +151,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
 
 ## Changelog
+- 0.7.2-dev: The coloured emblem under a lent unit's flag was drawn almost black. It is now gold, green or light blue as intended. A veteran coming home gets its promotions back in the turn it arrives, not one turn later. The tracker's sort marks are now proper arrows. VEF warnings (grace, mutiny, lapse, service ending, blocked arrival, rerouted unit) stay until the problem is over, and losses stay until you dismiss them. Only plain news (departed, arrived, returned) still clears at the end of the turn. VEF never touches notifications from the game or other mods.
 - 0.7.1-dev: The tracker columns can be sorted by clicking their titles. The scroll bar is now dark blue and easier to see.
 - 0.7.0-dev: A unit can also be sent from the territory of the partner or city-state it goes to, but then only to that partner. City-State units no longer go into grace or mutiny; after 10 turns they come home from wherever they are. Your veterans keep their level when they come home or serve as Volunteers. The flag tag now shows the lending civ's emblem, coloured by type of force. The destination list shows one clear line per city. New icon for Send to City-State, and a wider, easier to read tracker.
 - 0.6.1-dev: A unit can only be sent with full movement points. A unit that has moved or attacked this turn has to wait until next turn.

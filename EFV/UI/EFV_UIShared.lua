@@ -928,10 +928,10 @@ function EFV_UI_TrackerSortRows(rows, sort)
 end
 
 -- ---------------------------------------------------------------------------
--- EFV_UI_TrackerSortMark(sort, col) -> text key   (added 0.7.1)
+-- EFV_UI_TrackerSortMark(sort, col) -> text key or nil   (added 0.7.1)
 -- The indicator next to header column col: LOC_EFV_TRACKER_SORT_ASC /
--- _DESC for the sorted column, LOC_EFV_TRACKER_SORT_NONE (sortable, not
--- sorted) for every other column.
+-- _DESC (arrow font icons, 0.7.2) for the sorted column; nil (no mark) for
+-- every other column (0.7.2: the 0.7.1 "sortable" mark is gone).
 -- ---------------------------------------------------------------------------
 function EFV_UI_TrackerSortMark(sort, col)
 	if sort ~= nil and sort.col == col then
@@ -941,7 +941,7 @@ function EFV_UI_TrackerSortMark(sort, col)
 			return "LOC_EFV_TRACKER_SORT_DESC"
 		end
 	end
-	return "LOC_EFV_TRACKER_SORT_NONE"
+	return nil
 end
 
 -- ---------------------------------------------------------------------------

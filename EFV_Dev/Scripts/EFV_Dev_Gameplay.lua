@@ -42,10 +42,12 @@ EFV_Dev = {}
 -- for (EFV_Config.VERSION). EFV_Dev may be bumped on its own (final-session
 -- scenarios: 0.6.0-dev.1; the session from a brand-new game: 0.6.1-dev.1;
 -- the 0.7 re-test S12 / S13 and the Workshop Shot buttons: 0.7.0-dev.1;
--- rebuilt for EFV 0.7.1-dev without changes: 0.7.1-dev.1); a
+-- rebuilt for EFV 0.7.1-dev without changes: 0.7.1-dev.1; re-test 0.7
+-- fixes (S4 holds the Volunteer, S10 removes the Barbarians after your
+-- fight, S12 checks the arrival turn): 0.7.2-dev.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.7.1-dev.1"
-EFV_Dev.FOR_EFV = "0.7.1-dev"
+EFV_Dev.VERSION = "0.7.2-dev.1"
+EFV_Dev.FOR_EFV = "0.7.2-dev"
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -1404,10 +1406,30 @@ local function EvalS4(st, store, t)
 		Check("LAPSE", ok and "PASS" or "CHECK", "Volunteer record " .. s.id .. " lapsed=" .. Str(rec and rec.lapsed) .. " paused=" ..
 			Str(rec and rec.lapsePaused) .. " grace=" .. Str(rec and rec.graceTurnsLeft) .. " (expected a paused lapse on valid land)")
 		s.want, s.turn, s.left = ok and "HOLD" or nil, t, rec and rec.graceTurnsLeft
+		-- 0.7.2 (re-test 0.7 step 4): the pause only holds on B's or your
+		-- land. In the re-test the Volunteer walked off B's land during this
+		-- turn (50,33 -> 50,34, then a tile a turn), so the countdown ran, as
+		-- designed. Hold it for this turn (no moves, nothing to order at End
+		-- Turn) so the next turn start really checks the pause.
+		local u = ok and RecUnit(rec) or nil
+		if u ~= nil then
+			Hold(store, u)
+			Check("LAPSE_PAUSE", "INFO", "the Volunteer is held on " .. PlayerName(st.ally) .. "'s land at " .. u:GetX() .. "," ..
+				u:GetY() .. " for this turn (no moves) so the countdown check at the next turn start is on valid land")
+		end
 	elseif s.want == "HOLD" then
 		s.want = nil
 		if rec == nil or rec.state == ST.RET then
 			Check("LAPSE_PAUSE", "INFO", "Volunteer record " .. s.id .. " already recalled")
+		elseif rec.lapsed == 1 and rec.lapsePaused ~= 1 then
+			-- Not a VEF fault: off valid land the countdown must run.
+			local u = RecUnit(rec)
+			local where = u and (u:GetX() .. "," .. u:GetY() .. " (tile owner " ..
+				Str(PlotOwner(Map.GetPlot(u:GetX(), u:GetY()))) .. ")") or "unknown"
+			local ran = tonumber(s.left) ~= nil and rec.graceTurnsLeft == s.left - 1
+			Check("LAPSE_PAUSE", "CHECK", "not verified: Volunteer record " .. s.id .. " left the valid land (now at " .. where ..
+				"), so the countdown ran: grace " .. Str(s.left) .. " -> " .. Str(rec.graceTurnsLeft) ..
+				(ran and " (correct off valid land)" or " (UNEXPECTED step)") .. "; leave the Volunteer on B's land")
 		else
 			local ok = rec.lapsed == 1 and rec.graceTurnsLeft == s.left
 			Check("LAPSE_PAUSE", ok and "PASS" or "CHECK", "Volunteer record " .. s.id .. " grace=" .. Str(rec.graceTurnsLeft) ..
@@ -1923,7 +1945,28 @@ CMD.scn_t31 = function(me, p)
 	Focus(st, spot:GetX(), spot:GetY(), me, u:GetID(), p.stamp)
 	ScnSave(st)
 	Check("T31", "INFO", "record " .. rec.id .. ": the " .. UnitTypeName(u) .. " in mutiny (the camera selects it) stands at " ..
-		spot:GetX() .. "," .. spot:GetY() .. " next to 2 Barbarian Warriors: attack one, then End Turn")
+		spot:GetX() .. "," .. spot:GetY() .. " next to 2 Barbarian Warriors: attack one, then End Turn (they are removed before their own turn)")
+end
+
+-- 0.7.2 (re-test 0.7 step 6): after your fight both Barbarians attacked the
+-- Spearman in their turn (27 -> 57 -> 88), and the mutiny's 20 at the next
+-- turn start killed it before the check. Once the Spearman has fought, the
+-- Barbarians are removed at the next player's GameEvents.PlayerTurnStarted
+-- (the first hook after you end the turn, before the Barbarians act; never
+-- a unit of yours, so no selection problem), so only your fight counts:
+-- about 30 + 20 damage, the unit lives to the verdict.
+local function OnTurnStartedT31(pid)
+	local st = ScnLoad()
+	local s = st.s10
+	if type(s) ~= "table" or st.me == nil or pid == st.me or s.combat == nil or s.barbGone ~= nil then return end
+	local n = 0
+	for _, uid in ipairs(s.b or {}) do
+		local b = FindUnit(s.barb, uid)
+		if b ~= nil and pcall(function() Players[s.barb]:GetUnits():Destroy(b) end) then n = n + 1 end
+	end
+	s.barbGone = n
+	ScnSave(st)
+	Check("T31", "INFO", n .. " Barbarian Warrior(s) removed after the fight, before their turn: only your fight counts")
 end
 
 -- GameEvents.OnCombatOccurred (registered after EFV's own handler): what EFV
@@ -2172,10 +2215,17 @@ local function EvalS12(st, store, t, manual)
 	local xp, nxt = XPInfo(u)
 	local n = PromoCount(u, promos)
 	local d = UnitDamage(u)
-	local ok = xp == 50 and nxt == 90 and n == #promos and n > 0 and d == 30
+	-- 0.7.2 (re-test 0.7 step 5): each round after the arrival turn the
+	-- engine heals the unit 15 in your land (COMBAT_HEAL_LAND_FRIENDLY); that
+	-- is legitimate, only the promotion heal must be undone.
+	local late = math.max(0, t - ((tonumber(s.turn) or t) + 1))
+	local minD = math.max(0, 30 - 15 * late)
+	local dmgOk = d <= 30 and d >= minD
+	local ok = xp == 50 and nxt == 90 and n == #promos and n > 0 and dmgOk
 	s.done = ok and "PASS" or "CHECK"
 	Check("VET_RESTORE", s.done, VET_NAME .. ": XP " .. xp .. "/" .. nxt .. " (expected 50/90), promotions " .. n .. "/" .. #promos ..
-		", damage " .. d .. " (expected 30)" .. (ok and ": level, XP and damage kept" or ""))
+		", damage " .. d .. " (expected " .. (late == 0 and "30" or (minD .. "-30: " .. late .. " round heal(s) of 15 in your land")) ..
+		")" .. (ok and ": level, XP and damage kept" or ""))
 end
 
 -- ---------------------------------------------------------------------------
@@ -2235,6 +2285,167 @@ local function EvalS13(st, store, t, manual)
 		st.s13 = nil
 		Check("FROM_LAND", "CHECK", "the Spearman standing in B's land was not sent to B in turn " .. Str(s.turn))
 	end
+end
+
+-- ---------------------------------------------------------------------------
+-- S14 (EFV_Dev 0.7.2-dev.1): mutiny death next to Barbarians. The 0.7.1
+-- report: a Volunteer Swordsman in its 4th mutiny turn (80 damage) was killed
+-- by a Barbarian Warrior, and the designer saw "a Warrior of mine, same VEF
+-- tooltip" on its tile. Two copies of the situation, each a Swordsman of
+-- yours in MUTINY at 80 damage (20 HP) as F's Volunteer (no open borders from
+-- F, so the lapse cannot be cancelled), on neutral land next to F's land and
+-- next to 2 Barbarian Warriors; one Warrior of C (your enemy) stands 2 tiles
+-- from copy 1 (IDs are per player: it may share an ID number with yours).
+-- Copy 1: leave it, the Barbarians kill it in their turn (or the mutiny's 20
+-- at the next turn start does). Copy 2 (selected): attack a Barbarian with it
+-- and it dies in the fight. MUT_DEATH (at the next turn start, per copy):
+-- the record is closed, the Swordsman is gone, and no unit of yours and no
+-- VEF record stands on or points at its tile. All unit IDs are logged.
+-- ---------------------------------------------------------------------------
+local function UnitsAt(x, y)
+	local out = {}
+	for pid = 0, 63 do
+		pcall(function()
+			if Players[pid] ~= nil then
+				for _, u in Players[pid]:GetUnits():Members() do
+					if u ~= nil and u:GetX() == x and u:GetY() == y then out[#out + 1] = u end
+				end
+			end
+		end)
+	end
+	table.sort(out, function(a, b)
+		if a:GetOwner() ~= b:GetOwner() then return a:GetOwner() < b:GetOwner() end
+		return a:GetID() < b:GetID()
+	end)
+	return out
+end
+
+local function UnitTag(u)
+	local id = u:GetID()
+	return "P" .. Str(u:GetOwner()) .. "/" .. Str(id) .. " (slot " .. Str(id % 65536) .. ") " .. UnitTypeName(u)
+end
+
+-- A neutral free land tile next to F's land (a neighbour owned by F) with
+-- two free neutral neighbours, at least minGap tiles from every plot of avoid.
+local function MutDeathSpot(F, capF, avoid, minGap)
+	for ring = 1, 8 do
+		for _, plot in ipairs(Ring(capF:GetX(), capF:GetY(), ring)) do
+			if FreeLand(plot) and Neutral(plot) and NotWonder(plot) then
+				local far = true
+				for _, a in ipairs(avoid) do
+					if Dist(plot:GetX(), plot:GetY(), a:GetX(), a:GetY()) < minGap then far = false end
+				end
+				local byF, adj = false, {}
+				for _, q in ipairs(Ring(plot:GetX(), plot:GetY(), 1)) do
+					if PlotOwner(q) == F then byF = true end
+					if FreeLand(q) and Neutral(q) then adj[#adj + 1] = q end
+				end
+				if far and byF and #adj >= 2 then return plot, adj[1], adj[2] end
+			end
+		end
+	end
+	return nil
+end
+
+CMD.scn_mutdeath = function(me, p)
+	local st = Session("MUT_DEATH", me)
+	if st == nil then return end
+	local F, C, barb = st.friend, st.enemy, BarbarianID()
+	local capF, cap = F and Capital(F), Capital(me)
+	if F == nil or capF == nil or cap == nil or barb == nil then
+		Check("MUT_DEATH", "CHECK", "F, its capital, your capital or the Barbarian player is missing"); return
+	end
+	if EFV_VolunteerBasis(me, F) ~= nil then
+		Check("MUT_DEATH", "CHECK", "F grants your Volunteers access (" .. Str(EFV_VolunteerBasis(me, F)) ..
+			"): the lapse would be cancelled; S14 needs F without open borders for you")
+		return
+	end
+	local store = EFV_Records.Load()
+	local copies, avoid, lines = {}, {}, {}
+	for i = 1, 2 do
+		local spot, b1p, b2p = MutDeathSpot(F, capF, avoid, 4)
+		if spot == nil then break end
+		avoid[#avoid + 1] = spot
+		local u = NewUnit("scn_mutdeath", me, "UNIT_SWORDSMAN", spot)
+		if u ~= nil then
+			local b1 = NewUnit("scn_mutdeath", barb, "UNIT_WARRIOR", b1p)
+			local b2 = NewUnit("scn_mutdeath", barb, "UNIT_WARRIOR", b2p)
+			pcall(function() u:SetDamage(80) end)
+			if i == 1 then pcall(function() UnitManager.FinishMoves(u) end) end   -- copy 1: nothing to order
+			local t = Turn()
+			local rec = MakeRecord(store, u, { force = FT_VOL, sender = me, recipient = F, basis = "FRIEND_OB", origin = cap,
+				dest = capF, deployedTurn = t - 15 })
+			if rec ~= nil then
+				rec.state, rec.lapsed, rec.lapseReason, rec.lapseTurn = ST.MUT, 1, "PARTNER", t - 6
+				rec.preLapseState, rec.graceTurnsLeft = ST.DEP, nil
+				rec.lastDamage, rec.damage = UnitDamage(u), UnitDamage(u)
+				EFV_Records.Touch(store)
+				copies[#copies + 1] = { id = rec.id, uid = u:GetID(), x = spot:GetX(), y = spot:GetY(),
+					b = { b1 and b1:GetID() or -1, b2 and b2:GetID() or -1 } }
+				lines[#lines + 1] = "copy " .. i .. ": record " .. rec.id .. " " .. UnitTag(u) .. " at " .. spot:GetX() .. "," ..
+					spot:GetY() .. " damage " .. UnitDamage(u) .. ", Barbarians " .. (b1 and UnitTag(b1) or "-") .. ", " ..
+					(b2 and UnitTag(b2) or "-")
+			end
+		end
+	end
+	if #copies == 0 then
+		EFV_Records.Commit(store)
+		Check("MUT_DEATH", "CHECK", "no neutral tile with two free neutral neighbours next to " .. PlayerName(F) .. "'s land")
+		return
+	end
+	local w = nil
+	if C ~= nil then
+		local c1 = Map.GetPlot(copies[1].x, copies[1].y)
+		local wp = FindPlot(c1:GetX(), c1:GetY(), 3, function(q) return Neutral(q) end, 2)
+		w = wp and NewUnit("scn_mutdeath", C, "UNIT_WARRIOR", wp) or nil
+		if w ~= nil then lines[#lines + 1] = "enemy Warrior " .. UnitTag(w) .. " at " .. wp:GetX() .. "," .. wp:GetY() end
+	end
+	EFV_Records.Commit(store)
+	st.s14 = { turn = Turn(), c = copies, barb = barb, w = w and w:GetID() or -1, wo = C or -1 }
+	local last = copies[#copies]
+	Focus(st, last.x, last.y, me, last.uid, p.stamp)
+	ScnSave(st)
+	for _, l in ipairs(lines) do Check("MUT_DEATH", "INFO", l) end
+	Check("MUT_DEATH", "INFO", #copies .. " Volunteer Swordsman(s) of yours in MUTINY at 80 damage next to " .. PlayerName(F) ..
+		"'s land: attack a Barbarian with the selected one (copy " .. #copies .. "), leave the other, then End Turn")
+end
+
+local function EvalS14(st, store, t, manual)
+	local s = st.s14
+	if type(s) ~= "table" or t <= s.turn then return end
+	st.s14 = nil
+	local c = Sub(st, "cleanup")
+	for i, cp in ipairs(s.c or {}) do
+		local rec = EFV_Records.Get(store, cp.id)
+		local u = FindUnit(st.me, cp.uid)
+		local here, bad = {}, {}
+		for _, v in ipairs(UnitsAt(cp.x, cp.y)) do
+			here[#here + 1] = UnitTag(v)
+			if v:GetOwner() == st.me then bad[#bad + 1] = "a unit of yours stands there: " .. UnitTag(v) end
+		end
+		-- No record may point at the tile's units or at a Warrior of yours near it.
+		for _, id in ipairs(EFV_Records.IDs(store)) do
+			local r = EFV_Records.Get(store, id)
+			if r ~= nil and r.onMapPlayerID ~= nil and r.id ~= cp.id then
+				local ru = FindUnit(r.onMapPlayerID, r.onMapUnitID or -1)
+				if ru ~= nil and ru:GetX() == cp.x and ru:GetY() == cp.y then
+					bad[#bad + 1] = "record " .. r.id .. " tracks " .. UnitTag(ru) .. " on this tile"
+				end
+			end
+		end
+		if rec ~= nil then bad[#bad + 1] = "record " .. cp.id .. " still open (" .. Str(rec.state) .. ", unitType " .. Str(rec.unitType) .. ")" end
+		if u ~= nil then bad[#bad + 1] = "the Swordsman " .. UnitTag(u) .. " is still alive" end
+		Check("MUT_DEATH", #bad == 0 and "PASS" or "FAIL", "copy " .. i .. " (record " .. cp.id .. ", " .. cp.x .. "," .. cp.y ..
+			"): " .. (#bad == 0 and "record closed, Swordsman gone" or table.concat(bad, "; ")) .. "; on the tile now: " ..
+			(#here > 0 and table.concat(here, ", ") or "nothing"))
+		for _, bid in ipairs(cp.b or {}) do
+			local b = FindUnit(s.barb, bid)
+			if b ~= nil then c[#c + 1] = { o = s.barb, u = bid, ut = UnitTypeName(b) } end
+		end
+	end
+	local w = FindUnit(s.wo or -1, s.w or -1)
+	if w ~= nil then c[#c + 1] = { o = s.wo, u = s.w, ut = UnitTypeName(w) } end
+	Check("MUT_DEATH", "INFO", #c .. " test unit(s) are removed when you end this turn")
 end
 
 -- ---------------------------------------------------------------------------
@@ -2646,6 +2857,7 @@ local function Evaluate(me, manual)
 	EvalS11(st, store, t, manual)
 	EvalS12(st, store, t, manual)
 	EvalS13(st, store, t, manual)
+	if not manual then EvalS14(st, store, t, manual) end
 	EFV_Records.Commit(store)
 	ScnSave(st)
 	if manual then Check("CHECK_NOW", "INFO", "evaluated") end
@@ -2672,6 +2884,12 @@ local function OnTurnEnded(turn)
 	if not ok then Log("scn", "ERROR end-of-turn cleanup: " .. Str(err)) end
 end
 
+local function OnTurnStarted(pid)
+	local ok, err = pcall(OnTurnStartedT31, pid)
+	if not ok then Log("scn", "ERROR S10 Barbarian removal: " .. Str(err)) end
+end
+
+GameEvents.PlayerTurnStarted.Add(OnTurnStarted)
 GameEvents.PlayerTurnStartComplete.Add(OnTurnStartComplete)
 GameEvents.OnCombatOccurred.Add(OnCombat)
 GameEvents.OnGameTurnEnded.Add(OnTurnEnded)

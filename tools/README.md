@@ -72,8 +72,10 @@ powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs      # onl
 ## summarize_efv_log.py: result of the final in-game session
 
 ```
-python tools\summarize_efv_log.py [--log PATH] [--db PATH] [-v]
+python tools\summarize_efv_log.py [--retest | --s14] [--log PATH] [--db PATH] [-v]
 ```
+
+`--retest` reads the short 0.7 re-test (`EFV/TESTING_RETEST_0.7.md`) and `--s14` the mutiny-death check (`EFV/TESTING_S14.md`). Every mode ends with the error count and the "Badge audit" line of VEF Dev Tools 0.7.2-dev.1.
 
 Reads `Lua.log` after the session in `EFV/TESTING_FINAL.md` and prints one line per step, for example `Step  7  PASS   Grace (S3): ...`. A step is PASS, CHECK (look at it) or `-` (not run). It uses the `[EFV][CHECK]` lines written by the VEF Dev Tools scenario buttons, plus a few of the mod's own lines: the versions, every send with its fee (compared with the expected fee from the game database), Entrust, and the number of game loads. The last line counts error lines. `-v` also prints every CHECK line. Quit the game before running it.
 

@@ -127,7 +127,16 @@ function FAKE_UI.Enable()
 		LookAtPlotScreenPosition = function() end,
 		SelectUnit = function(u) FAKE_UI.selectedUnit = u end,
 		DeselectAllUnits = function() FAKE_UI.selectedUnit = nil end,
+		-- Colors.lua:6: hex literal -> engine colour value. The fake returns
+		-- the literal as a signed int32 tagged in FAKE_UI.colorValues, so a
+		-- test can tell a converted tint from a raw literal.
+		GetColorValueFromHexLiteral = function(hex)
+			local v = (hex >= 2147483648) and (hex - 4294967296) or hex
+			FAKE_UI.colorValues[v] = hex
+			return v
+		end,
 	}
+	FAKE_UI.colorValues = {}
 	FAKE.localPlayer = 0
 	-- Capture decision (RazeCity, U03 / U04): city commands are recorded in
 	-- FAKE_UI.cityCommands; FAKE_UI.canKeep = false makes CanStartCommand
@@ -160,8 +169,17 @@ function FAKE_UI.Enable()
 	FAKE_UI.pendingUnitCommands = {}
 	FAKE_UI.canPromote = true
 	FAKE_UI.promoteHeal = 50
+	-- Re-test 0.7 step 5 (in game): PROMOTE is not offered to a unit with no
+	-- movement points left (arrival turn after FinishMoves: nothing offered;
+	-- next turn at full moves: both promotions at once, so the promotion
+	-- itself does not use the moves). FAKE_UI.promoteNeedsMoves = false
+	-- turns the rule off.
+	FAKE_UI.promoteNeedsMoves = true
 	UnitManager.CanStartCommand = function(u, cmd, bTest, bResults)
 		if cmd ~= UnitCommandTypes.PROMOTE or u == nil or not FAKE_UI.canPromote then
+			return false, {}
+		end
+		if FAKE_UI.promoteNeedsMoves and (u:GetMovesRemaining() or 0) <= 0 then
 			return false, {}
 		end
 		local exp = u:GetExperience()

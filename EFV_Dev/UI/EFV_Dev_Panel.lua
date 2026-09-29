@@ -23,7 +23,7 @@ include("InstanceManager")
 -- must keep working even if EFV's UI module fails to load.
 local m_UIShared = pcall(include, "EFV_UIShared")
 include("EFV_Config")
--- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText EFV_UI_TrackerState EFV_SortedKeys
+-- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText EFV_UI_TrackerState EFV_SortedKeys EFV_UI_RecordsFor EFV_UI_TrackedUnit
 
 local PREFIX = "[EFV][Dev][UI]"
 local m_ButtonIM = InstanceManager:new("DevButtonInstance", "Button", Controls.ButtonStack)
@@ -622,9 +622,16 @@ local function VetLevelCheck()
 		end)
 		pcall(function() dmg = u:GetDamage() end)
 		pcall(function() name = Locale.Lookup(u:GetName()) end)
-		local pass = lvl == 3 and xp == 50 and nxt == 90 and dmg == 30
+		-- 0.7.2 (re-test 0.7 step 5): the level must be back in the arrival
+		-- turn (S12 turn + 1); a later turn is reported, and its damage may
+		-- be lower by the engine's heal of 15 per round in your land.
+		local turn = -1
+		pcall(function() turn = Game.GetCurrentGameTurn() end)
+		local late = math.max(0, turn - ((tonumber(s.turn) or turn) + 1))
+		local pass = lvl == 3 and xp == 50 and nxt == 90 and late == 0 and dmg == 30
 		UICheck("VET_RESTORE_LEVEL", pass and "PASS" or "CHECK", "level " .. Str(lvl) .. " (expected 3), XP " .. Str(xp) .. "/" .. Str(nxt) ..
-			", damage " .. Str(dmg) .. "; unit panel name '" .. Str(name) .. "'")
+			", damage " .. Str(dmg) .. ", " .. (late == 0 and "in the arrival turn" or (late .. " turn(s) after the arrival turn (expected the arrival turn)")) ..
+			"; unit panel name '" .. Str(name) .. "'")
 	end
 	Send(BaseParams("scn_check"))
 end
@@ -647,8 +654,82 @@ local function LapseTextCheck()
 	end
 end
 
+-- ---------------------------------------------------------------------------
+-- Badge audit (EFV_Dev 0.7.2-dev.1, always on; 0.7.1 report "the Volunteer
+-- Swordsman turned into a Warrior, same VEF tooltip"). At every turn start of
+-- the local player and 0.3 s after Events.UnitAddedToMap / UnitRemovedFromMap
+-- / UnitKilledInCombat, asks VEF's flag wrapper for every flag showing a VEF
+-- tag (LuaEvents.EFV_BadgeAuditRequest -> EFV_BadgeAuditReport rows, see
+-- EFV_UnitFlagManager) and checks the tracker's on-map rows: each tag must
+-- sit on the live unit (owner AND ID AND type) of an on-map record. Logs
+-- "[EFV][CHECK] BADGE_AUDIT PASS|FAIL": always at a turn start, after unit
+-- events only when the result changed or failed.
+-- ---------------------------------------------------------------------------
+local m_AuditDue = nil
+local m_AuditWhy = ""
+local m_AuditForce = false
+local m_AuditLast = nil
+local m_AuditReplied = false
+
+local function RowTag(r)
+	return "flag P" .. Str(r.fp) .. "/" .. Str(r.fu) .. " (unit " .. (r.up ~= nil and ("P" .. Str(r.up) .. "/" .. Str(r.uu) ..
+		" " .. Str(r.ut)) or "none") .. (r.rid ~= nil and (", record " .. Str(r.rid) .. " " .. Str(r.rs) .. " " .. Str(r.rt)) or "") .. ")"
+end
+
+local function OnAuditReport(rows)
+	m_AuditReplied = true
+	local bad, ok = {}, 0
+	for _, r in ipairs(rows or {}) do
+		if r.bad ~= nil then bad[#bad + 1] = RowTag(r) .. ": " .. Str(r.bad) else ok = ok + 1 end
+	end
+	local onMap, waiting = 0, {}
+	pcall(function()
+		for _, rec in ipairs(EFV_UI_RecordsFor(LocalID())) do
+			if rec.state == EFV_Config.ST_DEPLOYED or rec.state == EFV_Config.ST_GRACE or rec.state == EFV_Config.ST_MUTINY then
+				onMap = onMap + 1
+				if EFV_UI_TrackedUnit(rec) == nil then waiting[#waiting + 1] = Str(rec.id) end
+			end
+		end
+	end)
+	local text = ok .. " VEF tag(s), each on its record's live unit; tracker: " .. onMap .. " on-map row(s)" ..
+		(#waiting > 0 and (", " .. #waiting .. " waiting for the turn start with the unit gone (record " ..
+			table.concat(waiting, ",") .. ")") or "")
+	local verdict = #bad == 0 and "PASS" or "FAIL"
+	if #bad > 0 then text = table.concat(bad, "; ") .. "; " .. text end
+	if m_AuditForce or verdict == "FAIL" or text ~= m_AuditLast then
+		UICheck("BADGE_AUDIT", verdict, "(" .. m_AuditWhy .. ") " .. text)
+		m_AuditLast = text
+	end
+	m_AuditForce = false
+end
+
+local function ScheduleAudit(why, force)
+	if m_AuditDue == nil then
+		m_AuditDue = m_Clock + 0.3
+		m_AuditWhy = why
+	end
+	if force then
+		m_AuditForce = true
+		m_AuditWhy = why
+	end
+end
+
+local function RunAudit()
+	m_AuditDue = nil
+	m_AuditReplied = false
+	LuaEvents.EFV_BadgeAuditRequest()
+	if not m_AuditReplied and m_AuditForce then
+		UICheck("BADGE_AUDIT", "INFO", "(" .. m_AuditWhy .. ") no answer from VEF's flag wrapper (badges off or another mod replaces the unit flags)")
+		m_AuditForce = false
+	end
+end
+
 local function OnUpdate(dt)
 	m_Clock = m_Clock + (tonumber(dt) or 0)
+	if m_AuditDue ~= nil and m_Clock >= m_AuditDue then
+		local ok, err = pcall(RunAudit)
+		if not ok then Log("badge audit error: " .. Str(err)) end
+	end
 	if m_FocusWait ~= nil and m_Clock >= m_FocusWait.nextAt then
 		m_FocusWait.nextAt = m_Clock + 0.3
 		local st = ScnState()
@@ -734,6 +815,7 @@ local BUTTONS = {
 	{ label = "S11 Entrust city",       scn = "scn_entrust" },
 	{ label = "S12 Veteran return",     scn = "scn_vetret" },
 	{ label = "S13 Unit in B's land",   scn = "scn_inland" },
+	{ label = "S14 Mutiny death",       scn = "scn_mutdeath" },
 	{ label = "Go to scenario",         ui = "GoTo" },
 	{ label = "Check now",              cmd = "scn_check" },
 	{ header = "Units (selected unit, or extra rec=<id>; Type/Amount fields)" },
@@ -889,6 +971,13 @@ local function Initialize()
 	Subscribe("Events.LoadGameViewStateDone", function() return Events.LoadGameViewStateDone end, AttachLaunchButton)
 	Subscribe("Events.UnitSelectionChanged", function() return Events.UnitSelectionChanged end, OnSelectionChanged)
 	Subscribe("Events.PlayerTurnActivated", function() return Events.PlayerTurnActivated end, OnSelectionChanged)
+	Subscribe("LuaEvents.EFV_BadgeAuditReport", function() return LuaEvents.EFV_BadgeAuditReport end, OnAuditReport)
+	Subscribe("Events.PlayerTurnActivated (audit)", function() return Events.PlayerTurnActivated end, function(pid)
+		if pid == LocalID() then ScheduleAudit("turn start", true) end
+	end)
+	Subscribe("Events.UnitAddedToMap (audit)", function() return Events.UnitAddedToMap end, function() ScheduleAudit("unit added") end)
+	Subscribe("Events.UnitRemovedFromMap (audit)", function() return Events.UnitRemovedFromMap end, function() ScheduleAudit("unit removed") end)
+	Subscribe("Events.UnitKilledInCombat (audit)", function() return Events.UnitKilledInCombat end, function() ScheduleAudit("unit killed") end)
 	RebuildTargets()
 	Log("ready (Ctrl+Shift+D); EFV_UIShared loaded=" .. tostring(m_UIShared and EFV_UI_ReadStore ~= nil))
 end

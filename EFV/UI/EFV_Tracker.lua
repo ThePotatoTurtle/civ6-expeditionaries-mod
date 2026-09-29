@@ -43,7 +43,9 @@
 --   * "ALERT_NEGATIVE" sound when an EFV GRACE / MUTINY / MUTINY_DEATH /
 --     VOLUNTEER_LAPSE / ACCESS_LAPSE notification arrives for the local
 --     player (at most once per turn);
---   * stale-copy dismissal (T21: AlwaysUnique copies stack): for the local
+--   * stale-copy dismissal (T21: AlwaysUnique copies stack; 0.7.2 policy:
+--     only resolved warnings and older copies of the same record, see
+--     SweepStale; never a notification of another type): for the local
 --     player, GRACE / MUTINY notifications are grouped by data EFV_RecordID;
 --     only the newest copy of a record that is still in GRACE / MUTINY stays,
 --     every other copy (older turns, returned / dead / closed records) is
@@ -128,7 +130,8 @@ local function Hashes()
 		return m_Hash
 	end
 	local h = {}
-	for _, name in ipairs({ "GRACE", "MUTINY", "MUTINY_DEATH", "VOLUNTEER_LAPSE", "ACCESS_LAPSE", "LAPSE_PAUSED" }) do
+	for _, name in ipairs({ "GRACE", "MUTINY", "MUTINY_DEATH", "VOLUNTEER_LAPSE", "ACCESS_LAPSE", "LAPSE_PAUSED",
+			"EXPIRY_SOON", "SPAWN_BLOCKED", "REROUTED" }) do
 		local typeName = EFV_Config.NOTIF[name]
 		local row = typeName and GameInfo.Types[typeName] or nil
 		h[name] = row and row.Hash or nil
@@ -365,7 +368,8 @@ end
 
 -- ---------------------------------------------------------------------------
 -- RefreshSortHeader() / OnSortClicked(col)   (0.7.1)
--- Header label i = column name + " " + sort mark (EFV_UI_TrackerSortMark).
+-- Header label i = column name, + " " + sort mark (EFV_UI_TrackerSortMark)
+-- for the sorted column only (0.7.2).
 -- A click: m_Sort = EFV_UI_TrackerSortClick(m_Sort, col), labels updated,
 -- rows rebuilt (RefreshPanel(true)).
 -- Params:  col 1..6 (SORT_HEADERS order).
@@ -374,7 +378,8 @@ end
 -- ---------------------------------------------------------------------------
 local function RefreshSortHeader()
 	for i, h in ipairs(SORT_HEADERS) do
-		Controls[h[1] .. "Label"]:SetText(L(h[2]) .. " " .. L(EFV_UI_TrackerSortMark(m_Sort, i)))
+		local mark = EFV_UI_TrackerSortMark(m_Sort, i)
+		Controls[h[1] .. "Label"]:SetText(L(h[2]) .. (mark ~= nil and (" " .. L(mark)) or ""))
 	end
 	return nil
 end
@@ -505,31 +510,62 @@ end
 
 -- ---------------------------------------------------------------------------
 -- SweepStale(localID)
--- D9 stale-copy dismissal. Reads the local player's notifications; groups
--- EFV GRACE / MUTINY copies by GetValue("EFV_RecordID"); keeps only the
--- newest copy (highest EFV_Turn, then highest ID) of a record that is still
--- in GRACE / MUTINY for the local player; dismisses every other copy.
--- LAPSE_PAUSED copies form their own group per record and are kept (newest
--- only) while the record's lapse is still paused (note 29).
--- Copies without a readable EFV_RecordID are left alone.
+-- D9 stale-copy dismissal, widened by the 0.7.2 designer policy: VEF clears
+-- one of its notifications only when what it warns about is over, or when a
+-- newer copy for the SAME record replaces it; everything else stays until
+-- the player dismisses it. Reads the local player's notifications and looks
+-- only at the EFV types of SWEEP_GROUP that carry a numeric EFV_RecordID
+-- (every other notification, EFV or not, is never touched). Per (group,
+-- record) the newest copy (highest EFV_Turn, then highest ID) stays while
+-- the record is still in the situation SWEEP_ALIVE names for that group;
+-- every other copy is dismissed:
+--   A  GRACE / MUTINY        record in GRACE or MUTINY (one group: a GRACE
+--                            copy goes once the MUTINY copy arrives)
+--   P  LAPSE_PAUSED          ... and its lapse still paused (note 29)
+--   L  ACCESS_ / VOLUNTEER_LAPSE  lapse still on (lapsed, GRACE / MUTINY)
+--   E  EXPIRY_SOON           record still DEPLOYED
+--   S  SPAWN_BLOCKED         record still waiting to arrive (OUTBOUND /
+--                            RETURNING)
+--   R  REROUTED              record still in transit
+-- Records are the local player's (sender or recipient); a record that is
+-- gone (arrived home, closed) makes its copies stale.
 -- Params:  localID player ID.
 -- Returns: number of Dismiss calls.
--- PLAN 3.6; D9; T21. APIs: U15, A51.
+-- PLAN 3.6; D9; T21; 0.7.2 notification policy. APIs: U15, A51.
 -- ---------------------------------------------------------------------------
+local SWEEP_GROUP = {
+	GRACE = "A", MUTINY = "A", LAPSE_PAUSED = "P", ACCESS_LAPSE = "L", VOLUNTEER_LAPSE = "L",
+	EXPIRY_SOON = "E", SPAWN_BLOCKED = "S", REROUTED = "R",
+}
+local function InAlert(rec)
+	return rec.state == EFV_Config.ST_GRACE or rec.state == EFV_Config.ST_MUTINY
+end
+local function InTransit(rec)
+	return rec.state == EFV_Config.ST_OUTBOUND or rec.state == EFV_Config.ST_RETURNING
+end
+local SWEEP_ALIVE = {
+	A = InAlert,
+	P = function(rec) return InAlert(rec) and rec.lapsed == 1 and rec.lapsePaused == 1 end,
+	L = function(rec) return InAlert(rec) and rec.lapsed == 1 end,
+	E = function(rec) return rec.state == EFV_Config.ST_DEPLOYED end,
+	S = InTransit,
+	R = InTransit,
+}
+
 local function SweepStale(localID)
 	if localID == nil or localID < 0 then
 		return 0
 	end
 	local h = Hashes()
-	if h.GRACE == nil and h.MUTINY == nil then
-		return 0
-	end
-	local live, livePaused = {}, {}
-	for _, rec in ipairs(EFV_UI_AlertRecords(localID)) do
-		live[rec.id] = true
-		if rec.lapsed == 1 and rec.lapsePaused == 1 then
-			livePaused[rec.id] = true
+	local groupOf = {}
+	for _, name in ipairs(EFV_SortedKeys(SWEEP_GROUP)) do
+		if h[name] ~= nil then
+			groupOf[h[name]] = SWEEP_GROUP[name]
 		end
+	end
+	local recs = {}
+	for _, rec in ipairs(EFV_UI_RecordsFor(localID)) do
+		recs[rec.id] = rec
 	end
 	local entries, newest = {}, {}
 	local okList, list = pcall(function() return NotificationManager.GetList(localID) end)
@@ -542,17 +578,16 @@ local function SweepStale(localID)
 			if p == nil then
 				return
 			end
-			local t = p:GetType()
-			local paused = (h.LAPSE_PAUSED ~= nil and t == h.LAPSE_PAUSED)
-			if t ~= h.GRACE and t ~= h.MUTINY and not paused then
-				return
+			local group = groupOf[p:GetType()]
+			if group == nil then
+				return   -- not a swept EFV type: never touched
 			end
 			local rid = p:GetValue("EFV_RecordID")
 			if type(rid) ~= "number" then
 				return
 			end
-			local key = (paused and "P" or "A") .. tostring(rid)
-			local e = { nid = nid, rid = rid, key = key, paused = paused,
+			local key = group .. tostring(rid)
+			local e = { nid = nid, rid = rid, key = key, group = group,
 				turn = tonumber(p:GetValue("EFV_Turn")) or -1 }
 			entries[#entries + 1] = e
 			local best = newest[key]
@@ -563,14 +598,15 @@ local function SweepStale(localID)
 	end
 	local dismissed = 0
 	for _, e in ipairs(entries) do
-		local alive = e.paused and livePaused[e.rid] or (not e.paused and live[e.rid])
+		local rec = recs[e.rid]
+		local alive = rec ~= nil and SWEEP_ALIVE[e.group](rec)
 		if not (alive and newest[e.key] == e) then
 			local ok = pcall(function() NotificationManager.Dismiss(localID, e.nid) end)
 			if ok then
 				dismissed = dismissed + 1
 			end
-			EFV_Log(3, LOG_TAG, "dismiss stale id=%s rec=%s turn=%s live=%s", tostring(e.nid), tostring(e.rid),
-				tostring(e.turn), tostring(live[e.rid] == true))
+			EFV_Log(3, LOG_TAG, "dismiss stale id=%s group=%s rec=%s turn=%s live=%s", tostring(e.nid), e.group,
+				tostring(e.rid), tostring(e.turn), tostring(alive == true))
 		end
 	end
 	return dismissed
@@ -614,8 +650,9 @@ local function OnNotificationAdded(pid, nid)
 			EFV_Log(3, LOG_TAG, "alert sound id=%s", tostring(nid))
 		end
 		SweepStale(localID)
-	elseif t ~= nil and h.LAPSE_PAUSED ~= nil and t == h.LAPSE_PAUSED then
-		-- Paused lapse (note 29): no alert sound, only the older-copy sweep.
+	elseif t ~= nil and (t == h.LAPSE_PAUSED or t == h.EXPIRY_SOON or t == h.SPAWN_BLOCKED or t == h.REROUTED) then
+		-- Paused lapse (note 29) and the 0.7.2 persistent warnings: no alert
+		-- sound, only the older-copy sweep.
 		SweepStale(localID)
 	end
 	RefreshAlerts()
@@ -630,7 +667,8 @@ local function OnRefreshTrigger()
 end
 
 -- Turn activation of the local player: also sweep stale copies (a record
--- that returned or died leaves ExpiresEndOfTurn=0 copies behind).
+-- that returned, died or got out of the situation leaves ExpiresEndOfTurn=0
+-- copies behind; they go at the next turn start at the latest).
 local function OnPlayerTurnActivated(pid, isFirstTime)
 	if m_ViewReady and pid == LocalPlayer() then
 		SweepStale(pid)

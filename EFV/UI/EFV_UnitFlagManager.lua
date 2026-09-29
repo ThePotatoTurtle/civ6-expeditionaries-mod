@@ -15,7 +15,8 @@
 -- ReligionIconBacking, always empty on military units) for a badge: the
 -- sender's civ emblem tinted gold (EXP) / green (VOL) / light blue (CS),
 -- with the EFV_UI_StatusTooltip tooltip (0.7, FIXPLAN_0.7 item 4). No XML,
--- no other overrides.
+-- no other overrides. 0.7.2: a badge only on the flag's own live unit that a
+-- record names (BadgeRecord); dev audit hook LuaEvents.EFV_BadgeAuditRequest.
 -- Base code always runs first and outside EFV's pcalls; the first EFV error
 -- restores the base look of every badged flag and turns badges off for the
 -- session. EFV_Config.FLAG_FLAG_BADGES = false (and dropping the
@@ -80,10 +81,17 @@ local LOG_TAG = "UIFlags"
 -- (Icons_Civilizations.xml:28; Icons_CityStates.xml:4,19). ReligionIcon has
 -- IconSize 22, so only atlases with a 22 px size work. The text label
 -- (LOC_EFV_BADGE_*) heads the tooltip.
+-- 0.7.2 (re-test 0.7 step 3: the emblem was dark and the same for all three
+-- types): the hex literal was passed to SetColor as is. The engine wants the
+-- value from UI.GetColorValueFromHexLiteral (every tint in Colors.lua:6-17 is
+-- built that way; METER_HP_GOOD there is our green 0xFF4BE810); a raw
+-- 0xFFxxxxxx literal is above the int32 range and draws dark. TintOf
+-- converts once per badge and falls back to the literal only when the
+-- converter is missing.
 local BADGES = {
-	EXPEDITIONARY    = { color = 0xFF3CC8FF, label = "LOC_EFV_BADGE_EXP" },   -- gold
-	VOLUNTEER        = { color = 0xFF4BE810, label = "LOC_EFV_BADGE_VOL" },   -- green
-	CS_EXPEDITIONARY = { color = 0xFFFFC878, label = "LOC_EFV_BADGE_CS" },    -- light blue
+	EXPEDITIONARY    = { hex = 0xFF3CC8FF, label = "LOC_EFV_BADGE_EXP" },   -- gold
+	VOLUNTEER        = { hex = 0xFF4BE810, label = "LOC_EFV_BADGE_VOL" },   -- green
+	CS_EXPEDITIONARY = { hex = 0xFFFFC878, label = "LOC_EFV_BADGE_CS" },    -- light blue
 }
 local UNKNOWN_ICON = "ICON_CIVILIZATION_UNKNOWN"
 local FALLBACK_ICONS = { UNKNOWN_ICON, "ICON_CITYSTATE_MILITARISTIC" }
@@ -95,6 +103,15 @@ local BASE_UpdateReligion = nil  -- set when the wrapper is installed
 local m_Off = false              -- true after the first EFV error: base behaviour
 local m_Badged = {}              -- "pid:uid" -> { pid, uid } of flags showing a badge
 local m_Sig = nil                -- "rev:turn" of the last full refresh
+
+-- Engine colour value of a badge's tint (cached in badge.color).
+local function TintOf(badge)
+	if badge.color == nil then
+		local conv = UI.GetColorValueFromHexLiteral
+		badge.color = (conv ~= nil) and conv(badge.hex) or badge.hex
+	end
+	return badge.color
+end
 
 local function Key(pid, uid)
 	return tostring(pid) .. ":" .. tostring(uid)
@@ -153,17 +170,70 @@ local function EmblemIcon(senderID)
 	return "ICON_" .. civType
 end
 
+-- The flag's own key (base UnitFlag.Initialize: m_Player = Players[pid],
+-- m_UnitID = uid). nil parts when the flag object lacks them.
+local function FlagKey(flag)
+	local pid, uid = nil, flag.m_UnitID
+	pcall(function()
+		if flag.m_Player ~= nil then
+			pid = flag.m_Player:GetID()
+		end
+	end)
+	return pid, uid
+end
+
+-- 0.7.2 identity rule (0.7.1 report: "the Volunteer Swordsman turned into a
+-- Warrior"): the base UnitFlag.GetUnit resolves the flag's stored ID with
+-- FindID, which matches only the slot (Session C) and still returns a dead
+-- unit's object (Session F). A badge therefore needs all of: the unit found
+-- is the flag's own (same owner and full ID), it is the live unit of the
+-- record (EFV_UnitMatches: owner, ID, type or an upgrade, not GONE_*), and
+-- the record is on the map. Returns the record or nil.
+local function BadgeRecord(flag, pUnit)
+	local pid, uid = pUnit:GetOwner(), pUnit:GetID()
+	local fPid, fUid = FlagKey(flag)
+	if (fPid ~= nil and fPid ~= pid) or (fUid ~= nil and fUid ~= uid) then
+		return nil, "FLAG_KEY"
+	end
+	local rec = EFV_UI_RecordForUnit(pid, uid)
+	if rec == nil or not BADGE_STATES[rec.state] or BADGES[rec.forceType] == nil then
+		return nil, "NO_RECORD"
+	end
+	local same, why = EFV_UnitMatches(pUnit, rec.onMapPlayerID, rec.onMapUnitID, rec.unitType)
+	if not same then
+		return nil, why
+	end
+	return rec
+end
+
 local function EFV_ApplyBadge(flag)
 	local pUnit = flag:GetUnit()
 	local inst = flag.m_Instance
-	if pUnit == nil or inst == nil then
+	if inst == nil then
+		return
+	end
+	if pUnit == nil then
+		-- The flag's unit is gone (the base leaves the tag as it was): take
+		-- a VEF badge off.
+		local fPid, fUid = FlagKey(flag)
+		if fPid ~= nil and m_Badged[Key(fPid, fUid)] ~= nil and inst.ReligionIconBacking ~= nil then
+			inst.ReligionIconBacking:SetHide(true)
+			m_Badged[Key(fPid, fUid)] = nil
+		end
 		return
 	end
 	local pid, uid = pUnit:GetOwner(), pUnit:GetID()
-	local rec = EFV_UI_RecordForUnit(pid, uid)
-	local badge = (rec ~= nil and BADGE_STATES[rec.state]) and BADGES[rec.forceType] or nil
+	local rec = BadgeRecord(flag, pUnit)
+	local badge = rec ~= nil and BADGES[rec.forceType] or nil
 	if badge == nil or inst.ReligionIcon == nil or inst.ReligionIconBacking == nil then
-		m_Badged[Key(pid, uid)] = nil
+		local fPid, fUid = FlagKey(flag)
+		if m_Badged[Key(pid, uid)] ~= nil or (fPid ~= nil and m_Badged[Key(fPid, fUid)] ~= nil) then
+			-- It carried a badge: the base result (called just before) stands.
+			m_Badged[Key(pid, uid)] = nil
+			if fPid ~= nil then
+				m_Badged[Key(fPid, fUid)] = nil
+			end
+		end
 		return
 	end
 	local icon = EmblemIcon(rec.senderID)
@@ -174,7 +244,7 @@ local function EFV_ApplyBadge(flag)
 			end
 		end
 	end
-	inst.ReligionIcon:SetColor(badge.color)
+	inst.ReligionIcon:SetColor(TintOf(badge))
 	inst.ReligionIconBacking:SetToolTipString("[" .. Locale.Lookup(badge.label) .. "] " .. EFV_UI_StatusTooltip(rec))
 	inst.ReligionIconBacking:SetHide(false)
 	m_Badged[Key(pid, uid)] = { pid, uid }
@@ -210,6 +280,85 @@ local function EFV_RefreshAllBadges(force)
 			UnitFlag.UpdateReligion(f)
 		end
 	end
+end
+
+-- ---------------------------------------------------------------------------
+-- Dev audit hook (0.7.2; EFV_Dev "Badge audit"; nothing fires it in normal
+-- play): LuaEvents.EFV_BadgeAuditRequest() answers
+-- LuaEvents.EFV_BadgeAuditReport(rows), one row per flag that shows a VEF
+-- tag: every flag this wrapper decorated (m_Badged) and every live unit's
+-- flag whose religion tag is visible although the unit carries no religion
+-- (only VEF uses that slot then). Row: { fp, fu = the flag's key; up, uu,
+-- ut = its unit (owner, ID, type); rid, rt, rs = the record found for the
+-- flag's key; bad = nil or why the tag is on the wrong unit }.
+-- ---------------------------------------------------------------------------
+local function AuditRow(fp, fu)
+	local f = GetUnitFlag(fp, fu)
+	local inst = f and f.m_Instance or nil
+	if inst == nil or inst.ReligionIconBacking == nil or inst.ReligionIconBacking:IsHidden() then
+		return nil
+	end
+	local row = { fp = fp, fu = fu }
+	local pUnit = f:GetUnit()
+	if pUnit ~= nil then
+		row.up, row.uu = pUnit:GetOwner(), pUnit:GetID()
+		local r = GameInfo.Units[pUnit:GetType()]
+		row.ut = r and r.UnitType or nil
+		local okR, religious = pcall(function() return pUnit:GetReligionType() > 0 and pUnit:GetReligiousStrength() > 0 end)
+		if okR and religious then
+			return nil   -- the base religion tag
+		end
+	end
+	local rec = EFV_UI_RecordForUnit(fp, fu)
+	if rec ~= nil then
+		row.rid, row.rt, row.rs = rec.id, rec.unitType, rec.state
+	end
+	if pUnit == nil then
+		row.bad = "the flag has no unit"
+	elseif row.up ~= fp or row.uu ~= fu then
+		row.bad = "the flag's unit is another unit"
+	elseif rec == nil or not BADGE_STATES[rec.state] then
+		row.bad = "no on-map record for this unit"
+	else
+		local same, why = EFV_UnitMatches(pUnit, rec.onMapPlayerID, rec.onMapUnitID, rec.unitType)
+		if not same then
+			row.bad = "not the record's live unit (" .. tostring(why) .. ")"
+		end
+	end
+	return row
+end
+
+local function OnAuditRequest()
+	local rows, seen = {}, {}
+	local function Add(fp, fu)
+		local k = Key(fp, fu)
+		if seen[k] then
+			return
+		end
+		seen[k] = true
+		local ok, row = pcall(AuditRow, fp, fu)
+		if ok and row ~= nil then
+			rows[#rows + 1] = row
+		elseif not ok then
+			rows[#rows + 1] = { fp = fp, fu = fu, bad = "audit error: " .. tostring(row) }
+		end
+	end
+	for _, k in ipairs(EFV_SortedKeys(m_Badged)) do
+		Add(m_Badged[k][1], m_Badged[k][2])
+	end
+	for pid = 0, 63 do
+		pcall(function()
+			local pPlayer = Players[pid]
+			if pPlayer ~= nil then
+				for _, pU in pPlayer:GetUnits():Members() do
+					if pU ~= nil then
+						Add(pid, pU:GetID())
+					end
+				end
+			end
+		end)
+	end
+	LuaEvents.EFV_BadgeAuditReport(rows)
 end
 
 -- Any listed event: poll EFV_Rev / turn. UnitDamageChanged also re-applies a
@@ -279,6 +428,7 @@ elseif EFV_Config.FLAG_FLAG_BADGES and UnitFlag ~= nil and UnitFlag.UpdateReligi
 		if not ok then
 			EFV_Fail("Subscribe", err)
 		end
+		pcall(function() LuaEvents.EFV_BadgeAuditRequest.Add(OnAuditRequest) end)
 	end
 
 	function Unsubscribe()
@@ -290,6 +440,7 @@ elseif EFV_Config.FLAG_FLAG_BADGES and UnitFlag ~= nil and UnitFlag.UpdateReligi
 				Events[name].Remove(OnPoll)
 			end
 			Events.UnitDamageChanged.Remove(OnUnitDamage)
+			LuaEvents.EFV_BadgeAuditRequest.Remove(OnAuditRequest)
 		end)
 	end
 

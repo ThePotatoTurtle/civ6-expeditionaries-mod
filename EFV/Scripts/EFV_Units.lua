@@ -414,7 +414,12 @@ end
 --      the damage of step 4 is the job's floor against the promotion heal).
 --      Begin false or failing -> 3a / 3b run now, then step 4 again;
 --   5. UnitManager.FinishMoves -> EFV_Records.AddPending(store, ownerID,
---      newID, turn).
+--      newID, turn). Route B (0.7.2): no pending entry; the job owes the
+--      arrival-turn exhaust instead (job.ex, paid by EFV_Veteran when the
+--      level is back in the arrival turn), because the owner's PROMOTE is
+--      not offered to a unit without movement points (re-test 0.7 step 5:
+--      "no wanted promotion offered" on the arrival turn at 0 moves, both
+--      promotions taken at once the next turn at full moves).
 -- Formation is NOT restored (D3). Logs "[Restore] ... route=B|classic".
 -- Each restore step runs in its own pcall; a failed step is logged as ERROR
 -- and the remaining steps still run. Once the unit exists it is returned.
@@ -546,7 +551,9 @@ function EFV_Units.Recreate(store, ownerID, rec, plot, turn)
 	if not okM then
 		EFV_Log(1, "Restore", "id=%s FinishMoves failed err=%s", rid, ErrText(errM))
 	end
-	if store ~= nil then
+	if store ~= nil and route == "B" then
+		EFV_Log(2, "Restore", "id=%s route B: arrival exhaust left to the veteran job", rid)
+	elseif store ~= nil then
 		EFV_Records.AddPending(store, ownerID, newID, turn)
 	else
 		EFV_Log(1, "Restore", "id=%s no store: pending exhaust not queued", rid)

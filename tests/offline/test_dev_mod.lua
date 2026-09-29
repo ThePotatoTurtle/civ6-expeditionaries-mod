@@ -476,6 +476,63 @@ test("final S4: Volunteer lapse paused on valid land, countdown holds, recall se
 	H.clean()
 end)
 
+-- Re-test 0.7 step 4 (S2 + S4 in one turn, then End Turn): the paused lapse
+-- started at grace 5, but the Volunteer then left B's land during the
+-- player's turn (50,33 -> 50,34 -> 50,35 -> 51,36), so the countdown ran
+-- 5 -> 4 as designed (pause = on B's or your land only). S4 ends only the
+-- declared friendship; B's open-borders deal from S0 stays.
+local function S2S4(S)
+	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1, "VOLUNTEER", 999)
+	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 11), 4, S.c4, "CS_EXPEDITIONARY", 999)
+	Arrive()
+	Dev("scn_expire_cs")
+	Dev("scn_lapse")
+	H.ok(EFV_HasOpenBordersFrom(0, 1), "S4 leaves B's open borders alone")
+	H.endTurn()
+	local vol
+	for _, r in ipairs(H.records()) do if r.forceType == "VOLUNTEER" then vol = r end end
+	return vol
+end
+
+test("0.7.2 S4 (re-test step 4): S2 + S4 in one turn, End Turn: paused at grace 5, the Volunteer is held, next turn still 5", function()
+	local S = Setup()
+	local vol = S2S4(S)
+	H.ok(CheckLine("EXPIRE", "PASS"))
+	H.ok(CheckLine("LAPSE", "PASS"))
+	H.eq(vol.graceTurnsLeft, 5); H.eq(vol.lapsePaused, 1)
+	local u = Players[0]:GetUnits():FindID(vol.onMapUnitID)
+	H.eq(u:GetMovesRemaining(), 0, "held for this turn")
+	H.ok(H.hasLine("is held on"))
+	H.endTurn()
+	H.ok(CheckLine("LAPSE_PAUSE", "PASS"))
+	H.eq(EFV_Records.Get(EFV_Records.Load(), vol.id).graceTurnsLeft, 5, "countdown did not move")
+	H.clean()
+end)
+
+test("0.7.2 S4: the Volunteer moved off B's land before the turn start -> grace 5 -> 4 (correct), LAPSE_PAUSE says not verified", function()
+	local S = Setup()
+	local vol = S2S4(S)
+	local u = Players[0]:GetUnits():FindID(vol.onMapUnitID)
+	local off = nil
+	local best = 99
+	for i = 0, Map.GetPlotCount() - 1 do
+		local p = Map.GetPlotByIndex(i)
+		local d = H.dist(p, u)
+		if d < best and p:GetOwner() < 0 and not p:IsWater() and p:GetUnitCount() == 0 then off, best = p, d end
+	end
+	H.notnil(off, "a neutral tile near B's land")
+	H.moveUnit(u, off:GetX(), off:GetY())   -- the re-test: walked off during the player's turn
+	H.endTurn()
+	local r = EFV_Records.Get(EFV_Records.Load(), vol.id)
+	H.eq(r.graceTurnsLeft, 4, "off valid land the countdown runs")
+	H.isnil(r.lapsePaused)
+	H.ok(H.hasLine("[Lapse] resumed id=" .. vol.id))
+	H.ok(CheckLine("LAPSE_PAUSE", "CHECK"))
+	H.ok(H.hasLine("not verified: Volunteer record " .. vol.id .. " left the valid land"))
+	H.ok(H.hasLine("grace 5 -> 4 (correct off valid land)"))
+	H.clean()
+end)
+
 test("final S5: upgrade relink, normal upgrade (no unique unit for the civ)", function()
 	Setup()
 	Dev("scn_upgrade", { stamp = 7 })
@@ -617,18 +674,60 @@ test("final S10 (0.7 item 10): the test units are removed at OnGameTurnEnded, ne
 		removedAt[#removedAt + 1] = { owner = unit.owner, hook = hook, turn = FAKE.turn }
 		return realRemove(unit, why)
 	end
+	local t0 = FAKE.turn
 	H.endTurn()
 	H.ok(CheckLine("T31", "PASS"))
 	H.ok(H.unitAlive(u), "the Spearman is still there after the verdict (removing it at PTSC broke SelectedUnit.lua:195)")
-	H.len(H.unitsOf(63, "UNIT_WARRIOR"), 2, "Barbarians too")
-	H.len(removedAt, 0, "nothing removed during the turn start")
+	-- 0.7.2: the Barbarians went at the first AI PlayerTurnStarted after the
+	-- fight (turn t0, before their own turn); nothing of yours was removed.
+	H.len(H.unitsOf(63, "UNIT_WARRIOR"), 0, "Barbarians removed before their turn")
+	H.len(removedAt, 2)
+	for _, r in ipairs(removedAt) do
+		H.eq(r.owner, 63, "only Barbarians"); H.eq(r.turn, t0, "in the fight's round, not at your next turn start")
+	end
 	H.ok(H.hasLine("removed when you end this turn"))
 	H.endTurn()
 	FAKE.RemoveUnit = realRemove
 	H.ok(not H.unitAlive(u), "removed at the end of that turn")
-	H.len(H.unitsOf(63, "UNIT_WARRIOR"), 0)
-	H.ok(H.hasLine("removed 3 of 3 test unit(s)"))
+	H.ok(H.hasLine("removed 1 of 1 test unit(s)"))
 	H.isnil(H.prop("EFV_DEV_SCN").cleanup, "list cleared")
+	H.clean()
+end)
+
+-- Re-test 0.7 step 6: after the player's attack (0 -> 27) both Barbarians
+-- attacked in their turn (27 -> 57 -> 88) and the mutiny's 20 at the next
+-- turn start killed the Spearman before the check ("the unit or its record
+-- is gone"). 0.7.2 removes them before their turn.
+test("0.7.2 S10: the Barbarians cannot attack after your fight; the Spearman lives to the T31 PASS", function()
+	Setup()
+	Dev("scn_t31")
+	local u = H.unitsOf(0, "UNIT_SPEARMAN")[1]
+	H.combat(u, H.unitsOf(63, "UNIT_WARRIOR")[1], 30, 27)
+	H.ok(CheckLine("T31_EVENT", "PASS"))
+	local barbAttacks = 0
+	H.endTurn({ heal = 10, act = function(p)
+		if p ~= 63 then return end
+		for _, b in ipairs(H.unitsOf(63, "UNIT_WARRIOR")) do
+			barbAttacks = barbAttacks + 1
+			H.combat(b, u, 31, 5)
+		end
+	end })
+	H.eq(barbAttacks, 0, "no Barbarian left to attack")
+	H.ok(H.hasLine("Barbarian Warrior(s) removed after the fight"))
+	H.ok(H.unitAlive(u))
+	H.ok(CheckLine("T31", "PASS"))
+	H.ok(H.hasLine("damage 47"), "27 + 20")
+	H.ok(not H.hasLine("the unit or its record is gone"))
+	H.clean()
+end)
+
+test("0.7.2 S10: no fight yet -> the Barbarians stay (you can still attack next turn)", function()
+	Setup()
+	Dev("scn_t31")
+	H.endTurn()
+	H.len(H.unitsOf(63, "UNIT_WARRIOR"), 2)
+	H.ok(H.hasLine("no fight with the Spearman in mutiny yet"))
+	H.ok(not H.hasLine("Barbarian Warrior(s) removed"))
 	H.clean()
 end)
 
@@ -639,6 +738,80 @@ test("final S10: damage applied after the combat event -> T31_EVENT CHECK", func
 	local u = H.unitsOf(0, "UNIT_SPEARMAN")[1]
 	H.combat(u, H.unitsOf(63, "UNIT_WARRIOR")[1], 30, 25)
 	H.ok(CheckLine("T31_EVENT", "CHECK"))
+end)
+
+-- S14 (EFV_Dev 0.7.2-dev.1): the 0.7.1 report "the Volunteer Swordsman in
+-- mutiny turned into a Warrior when a Barbarian Warrior came". Two copies of
+-- the situation; the verdict checks the tile and every record after the deaths.
+local function S14Copies()
+	local st = H.prop("EFV_DEV_SCN")
+	H.notnil(st.s14, "S14 state")
+	local out = {}
+	for _, cp in ipairs(st.s14.c) do
+		out[#out + 1] = { cp = cp, u = FAKE.units[cp.uid], b = { FAKE.units[cp.b[1]], FAKE.units[cp.b[2]] } }
+	end
+	return out, st.s14
+end
+
+test("0.7.2 S14: two Volunteer Swordsmen in MUTINY at 80 next to Barbarians; killed in the round -> MUT_DEATH PASS each", function()
+	local S = Setup()
+	Dev("scn_mutdeath", { stamp = 14 })
+	local copies, s14 = S14Copies()
+	H.len(copies, 2, "two copies")
+	for i, c in ipairs(copies) do
+		H.eq(c.u.typeName, "UNIT_SWORDSMAN"); H.eq(c.u.owner, 0); H.eq(c.u.damage, 80)
+		H.ok(Map.GetPlot(c.u.x, c.u.y):GetOwner() < 0, "neutral tile")
+		local r = EFV_Records.Get(EFV_Records.Load(), c.cp.id)
+		H.eq(r.forceType, "VOLUNTEER"); H.eq(r.state, "MUTINY"); H.eq(r.lapsed, 1); H.eq(r.recipientID, H.prop("EFV_DEV_SCN").friend, "F")
+		H.eq(r.lastDamage, 80)
+		H.eq(c.b[1].owner, 63); H.eq(c.b[2].owner, 63)
+		H.eq(H.dist(c.b[1], c.u), 1); H.eq(H.dist(c.b[2], c.u), 1)
+	end
+	H.ok(H.dist(copies[1].u, copies[2].u) >= 4, "copies apart")
+	H.notnil(FAKE.units[s14.w], "an enemy Warrior of C nearby")
+	H.eq(FAKE.units[s14.w].owner, H.prop("EFV_DEV_SCN").enemy, "C")
+	H.eq(copies[1].u.moves, 0, "copy 1 needs no orders"); H.ok(copies[2].u.moves > 0, "copy 2 can attack")
+	H.ok(H.hasLine("attack a Barbarian with the selected one (copy 2)"))
+	-- Copy 2: you attack a Barbarian and die (20 HP left).
+	H.combat(copies[2].u, copies[2].b[1], 10, 20)
+	FAKE.CombatKill(copies[2].u)
+	-- Copy 1: a Barbarian attacks in its turn, kills it and advances.
+	H.endTurn({ act = function(pid)
+		if pid ~= 63 then return end
+		local b, u = copies[1].b[1], copies[1].u
+		H.combat(b, u, 20, 5)
+		FAKE.CombatKill(u)
+		H.moveUnit(b, copies[1].cp.x, copies[1].cp.y)
+	end })
+	H.ok(CheckLine("MUT_DEATH", "PASS"))
+	H.len(H.lines("[EFV][CHECK] MUT_DEATH PASS"), 2, "one verdict per copy")
+	H.ok(not H.hasLine("[EFV][CHECK] MUT_DEATH FAIL"))
+	H.ok(H.hasLine("on the tile now: P63/"), "the Barbarian that advanced is named")
+	for _, c in ipairs(copies) do H.isnil(EFV_Records.Get(EFV_Records.Load(), c.cp.id)) end
+	H.ok(H.hasLine("test unit(s) are removed when you end this turn"))
+	H.clean()
+end)
+
+test("0.7.2 S14: a unit of yours on the dead Swordsman's tile (the reported glitch) -> MUT_DEATH FAIL naming it", function()
+	local S = Setup()
+	Dev("scn_mutdeath")
+	local copies = S14Copies()
+	local u = copies[1].u
+	FAKE.CombatKill(u)
+	H.unit(0, "UNIT_WARRIOR", copies[1].cp.x, copies[1].cp.y)
+	H.endTurn()
+	H.ok(CheckLine("MUT_DEATH", "FAIL"))
+	H.ok(H.hasLine("a unit of yours stands there: P0/"))
+	H.ok(H.hasLine("UNIT_WARRIOR"))
+end)
+
+test("0.7.2 S14: not killed in the round -> the mutiny's 20 at the turn start ends it; still PASS", function()
+	local S = Setup()
+	Dev("scn_mutdeath")
+	H.endTurn()
+	H.len(H.lines("[EFV][CHECK] MUT_DEATH PASS"), 2)
+	H.ok(H.hasLine("[Mutiny] death id="), "EFV's own mutiny death")
+	H.clean()
 end)
 
 test("final S11: C has only its capital -> a new small city is founded for C, weakened, Tanks next to it", function()
@@ -685,7 +858,7 @@ test("final panel: scenario buttons send stamped requests; Go to scenario looks 
 	H.ok(type(p.stamp) == "number" and p.stamp > 0, "stamp")
 	for _, label in ipairs({ "S1 Arrive next turn", "S2 Expire CS unit (off its land)", "S3 Grace/mutiny step", "S4 Lapse on/off",
 		"S5 Upgrade test", "S6 Veteran copies", "S7 Killed unit", "S8 Relink guard", "S9 Crowded arrival", "S10 Mutiny combat",
-		"S11 Entrust city", "S12 Veteran return", "S13 Unit in B's land", "Go to scenario", "Check now",
+		"S11 Entrust city", "S12 Veteran return", "S13 Unit in B's land", "S14 Mutiny death", "Go to scenario", "Check now",
 		"Shot 1 Send picker", "Shot 2 Arrival", "Shot 3 Tracker", "Shot 4 Entrust", "Shot 5 Mutiny" }) do
 		H.notnil(FAKE_UI.FindButton(label), label)
 	end
@@ -815,7 +988,9 @@ test("0.7 S12: veteran return, route B end to end: level 3, two promotions, 50/9
 	Pump({ vet, panel }, 12)
 	H.eq(u:GetExperience():GetLevel(), 3)
 	H.ok(CheckLine("VET_RESTORE_LEVEL", "PASS"), "UI level check")
-	H.ok(H.hasLine("level 3 (expected 3), XP 50/90, damage 30"))
+	H.ok(H.hasLine("level 3 (expected 3), XP 50/90, damage 30, in the arrival turn"),
+		"0.7.2 (re-test step 5): one End Turn is enough, the level is back in the arrival turn")
+	H.eq(u:GetMovesRemaining(), 0, "0.7.2: exhausted once the level is back")
 	H.ok(H.hasLine("unit panel name"), "the UI-side name is logged (item 9 evidence)")
 	H.ok(CheckLine("VET_RESTORE", "PASS"), "gameplay verdict after the panel's Check now")
 	H.ok(H.hasLine("XP 50/90 (expected 50/90), promotions 2/2, damage 30"))

@@ -645,6 +645,114 @@ test("D9 UI: MUTINY replaces the GRACE copy; MUTINY_DEATH plays the sound and cl
 	H.clean()
 end)
 
+-- ---------------------------------------------------------------------------
+-- 0.7.2 notification policy (designer): VEF never dismisses a notification it
+-- did not create, and clears its own only when what they warn about is over
+-- (or a newer copy for the same record replaces them). ExpiresEndOfTurn 1
+-- only on one-off news.
+-- ---------------------------------------------------------------------------
+local function SendRaw(pid, typeName, data)
+	return NotificationManager.SendNotification(pid, GameInfo.Types[typeName].Hash, data)
+end
+local function NotifByID(nid)
+	for _, n in ipairs(FAKE.notifications) do if n.id == nid then return n end end
+	return nil
+end
+
+test("0.7.2 notifications: the sweep never dismisses a non-VEF notification, a VEF one without a record, or a loss notice", function()
+	local S, tr = BootUI()
+	local id
+	G(function() id = Deploy(S, { elapsed = 3 }) end)
+	Events.LoadGameViewStateDone()
+	local T = FAKE.turn
+	-- Unrelated game notifications, one even carrying an EFV_RecordID of a
+	-- record that no longer exists.
+	local keep = {
+		SendRaw(0, "NOTIFICATION_UNIT_PROMOTION_AVAILABLE", {}),
+		SendRaw(0, "NOTIFICATION_CITY_LOW_AMENITIES", { EFV_RecordID = 999, EFV_Turn = T }),
+		SendRaw(0, "NOTIFICATION_BARBARIANS_SIGHTED", { EFV_RecordID = id, EFV_Turn = T - 5 }),
+		-- VEF types the sweep must leave to the player: one-off news and losses.
+		SendRaw(0, "EFV_NOTIF_ARRIVED", { EFV_RecordID = 999, EFV_Turn = T }),
+		SendRaw(0, "EFV_NOTIF_MUTINY_DEATH", { EFV_RecordID = 999, EFV_Turn = T }),
+		SendRaw(0, "EFV_NOTIF_UNIT_LOST", { EFV_RecordID = 999, EFV_Turn = T }),
+		SendRaw(0, "EFV_NOTIF_MERGED", { EFV_RecordID = 999, EFV_Turn = T }),
+		SendRaw(0, "EFV_NOTIF_REVERTED", { EFV_RecordID = 999, EFV_Turn = T }),
+		-- A swept VEF type without a readable record ID.
+		SendRaw(0, "EFV_NOTIF_GRACE", { EFV_Turn = T }),
+		-- Another player's copy of a stale GRACE (the sweep is local-player only).
+		SendRaw(1, "EFV_NOTIF_GRACE", { EFV_RecordID = 999, EFV_Turn = T }),
+	}
+	-- Control: a GRACE copy of a closed record is swept.
+	local stale = SendRaw(0, "EFV_NOTIF_GRACE", { EFV_RecordID = 999, EFV_Turn = T })
+	for _, nid in ipairs(keep) do Events.NotificationAdded(0, nid) end
+	Events.NotificationAdded(0, stale)
+	Events.PlayerTurnActivated(0, true)
+	for i, nid in ipairs(keep) do
+		H.ok(not NotifByID(nid).dismissed, "kept #" .. i .. " " .. NotifByID(nid).typeName)
+	end
+	H.ok(NotifByID(stale).dismissed == true, "control: the stale GRACE copy is swept")
+	H.clean()
+end)
+
+test("0.7.2 notifications: EXPIRY_SOON, lapse, SPAWN_BLOCKED and REROUTED stay until resolved; one copy per record", function()
+	local S, tr = BootUI()
+	local idE, idL, idS
+	G(function()
+		idE = Deploy(S, { elapsed = 3 })
+		idL = Deploy(S, { forceType = "VOLUNTEER", elapsed = 3 })
+		idS = Deploy(S, { elapsed = 3 })
+		EditRecord(idL, function(r) r.state = "GRACE"; r.graceTurnsLeft = 4; r.lapsed = 1; r.lapseReason = "PARTNER" end)
+		EditRecord(idS, function(r) r.state = "OUTBOUND"; r.arrivalTurn = FAKE.turn end)
+	end)
+	Events.LoadGameViewStateDone()
+	local T = FAKE.turn
+	local e1 = SendRaw(0, "EFV_NOTIF_EXPIRY_SOON", { EFV_RecordID = idE, EFV_Turn = T - 2 })
+	local e2 = SendRaw(0, "EFV_NOTIF_EXPIRY_SOON", { EFV_RecordID = idE, EFV_Turn = T })
+	local l1 = SendRaw(0, "EFV_NOTIF_ACCESS_LAPSE", { EFV_RecordID = idL, EFV_Turn = T })
+	local s1 = SendRaw(0, "EFV_NOTIF_SPAWN_BLOCKED", { EFV_RecordID = idS, EFV_Turn = T })
+	local r1 = SendRaw(0, "EFV_NOTIF_REROUTED", { EFV_RecordID = idS, EFV_Turn = T })
+	for _, nid in ipairs({ e1, e2, l1, s1, r1 }) do Events.NotificationAdded(0, nid) end
+	Events.PlayerTurnActivated(0, true)
+	H.ok(NotifByID(e1).dismissed == true, "older EXPIRY_SOON copy of the same record replaced")
+	for _, nid in ipairs({ e2, l1, s1, r1 }) do
+		H.ok(not NotifByID(nid).dismissed, NotifByID(nid).typeName .. " kept while the situation lasts")
+	end
+	-- Many turn starts later, nothing changed: still there (no turn-based clearing).
+	for _ = 1, 3 do Events.PlayerTurnActivated(0, true) end
+	for _, nid in ipairs({ e2, l1, s1, r1 }) do
+		H.ok(not NotifByID(nid).dismissed, NotifByID(nid).typeName .. " not cleared by time")
+	end
+	-- Resolved: service ended (RETURNING), lapse cancelled (DEPLOYED), unit arrived (DEPLOYED).
+	G(function()
+		EditRecord(idE, function(r) r.state = "RETURNING"; r.arrivalTurn = FAKE.turn + 2 end)
+		EditRecord(idL, function(r) r.state = "DEPLOYED"; r.lapsed = nil; r.graceTurnsLeft = nil end)
+		EditRecord(idS, function(r) r.state = "DEPLOYED" end)
+	end)
+	Events.PlayerTurnActivated(0, true)
+	for _, nid in ipairs({ e2, l1, s1, r1 }) do
+		H.ok(NotifByID(nid).dismissed == true, NotifByID(nid).typeName .. " cleared once resolved")
+	end
+	H.clean()
+end)
+
+test("0.7.2 notifications: ExpiresEndOfTurn 1 only on one-off news; warnings and losses persist", function()
+	H.world{}
+	H.loadEFV()
+	local sql = __py_read("EFV/Data/EFV_Notifications.sql")
+	local expect = {
+		DEPARTED = 1, ARRIVED = 1, RETURNING = 1, RETURNED = 1, ENTRUSTED = 1, REQUEST_FAILED = 1, LAPSE_CANCELLED = 1,
+		SPAWN_BLOCKED = 0, EXPIRY_SOON = 0, GRACE = 0, MUTINY = 0, MUTINY_DEATH = 0, REROUTED = 0, VOLUNTEER_LAPSE = 0,
+		ACCESS_LAPSE = 0, UNIT_LOST = 0, MERGED = 0, REVERTED = 0, LAPSE_PAUSED = 0,
+	}
+	local n = 0
+	for name, want in pairs(expect) do
+		local got = string.match(sql, "%('EFV_NOTIF_" .. name .. "',%s*'[%u_]+',%s*(%d),")
+		H.eq(tonumber(got), want, name .. " ExpiresEndOfTurn")
+		n = n + 1
+	end
+	H.eq(n, 19, "every VEF notification type has a decision")
+end)
+
 test("D9 UI: right-click opens the minimal list, alert rows first and red; row click focuses; ESC closes", function()
 	local S, tr = BootUI()
 	local p = H.neutralPlot(30, 5)
