@@ -49,7 +49,7 @@ EFV_Dev = {}
 -- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3; rebuilt for
 -- the EFV 1.0.0 release without changes: 1.0.0.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.1.1"
+EFV_Dev.VERSION = "1.0.1.2"
 EFV_Dev.FOR_EFV = "1.0.1"
 
 -- ---------------------------------------------------------------------------
@@ -2564,6 +2564,19 @@ local function ShotPrep(cmd, me, p)
 		local g = t:GetGoldBalance()
 		if g < 2000 then t:ChangeGoldBalance(2000 - g) end
 	end)
+	-- Screenshots: give every major civ and city-state at least 10 Iron so no
+	-- "won't heal" (strategic resource) warning shows on lent Legions or
+	-- Swordsmen, whoever owns them.
+	local iron = GameInfo.Resources["RESOURCE_IRON"]
+	if iron ~= nil then
+		for _, pid in ipairs(SortedIDs(function(i) return IsMajorID(i) or IsCityStateID(i) end)) do
+			pcall(function()
+				local r = Players[pid]:GetResources()
+				local have = r:GetResourceAmount(iron.Index)
+				if have < 10 then r:ChangeResourceAmount(iron.Index, 10 - have) end
+			end)
+		end
+	end
 	return st
 end
 
