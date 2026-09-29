@@ -3,7 +3,8 @@
 -- Context:  UI, context of EFV_Tracker.xml (AddUserInterfaces InGame).
 --           Controls: AlertBanner (BannerButton, BannerLabel), TrackerPanel
 --           (TrackerWindow, TrackerTitle, TrackerCloseButton, TrackerHeader
---           > SortUnit/Partner/Force/State/Turns/DestButton + ..Label,
+--           > SortUnit/Partner/Force/State/Turns/DestButton > ..Stack >
+--           ..Label + ..Hint,
 --           TrackerScroll, TrackerStack, TrackerEmptyLabel, TrackerSummary);
 --           instances EFV_TrackerRowInstance (RowButton, AlertHighlight,
 --           UnitLabel, PartnerLabel, ForceLabel, StateLabel, TurnsLabel,
@@ -26,8 +27,9 @@
 --     a click on a header label sorts by that column, A-Z / ascending, then
 --     Z-A / descending, then back to the default order (one column at a
 --     time; EFV_UI_TrackerSortClick / _SortRows); while sorted, every row
---     is sorted (alerts are no longer pinned, their highlight stays). Each
---     label shows a sort mark (EFV_UI_TrackerSortMark). The state is the
+--     is sorted (alerts are no longer pinned, their highlight stays). The
+--     sorted label shows an arrow (EFV_UI_TrackerSortMark), every other
+--     header the faded "sortable" pair (EFV_UI_TrackerSortHint, 0.7.3). The state is the
 --     Lua variable m_Sort only (per session, never saved). Row click: own unit on
 --     the map -> UI.SelectUnit + UI.LookAtPlot; partner-owned unit -> camera
 --     only, and only when the tile is visible; in transit -> camera on the
@@ -369,7 +371,9 @@ end
 -- ---------------------------------------------------------------------------
 -- RefreshSortHeader() / OnSortClicked(col)   (0.7.1)
 -- Header label i = column name, + " " + sort mark (EFV_UI_TrackerSortMark)
--- for the sorted column only (0.7.2).
+-- for the sorted column only (0.7.2). Every other column shows its faded
+-- "sortable" pair SortXHint (EFV_UI_TrackerSortHint, 0.7.3); the label /
+-- hint stack is re-laid out after the text change.
 -- A click: m_Sort = EFV_UI_TrackerSortClick(m_Sort, col), labels updated,
 -- rows rebuilt (RefreshPanel(true)).
 -- Params:  col 1..6 (SORT_HEADERS order).
@@ -380,6 +384,8 @@ local function RefreshSortHeader()
 	for i, h in ipairs(SORT_HEADERS) do
 		local mark = EFV_UI_TrackerSortMark(m_Sort, i)
 		Controls[h[1] .. "Label"]:SetText(L(h[2]) .. (mark ~= nil and (" " .. L(mark)) or ""))
+		Controls[h[1] .. "Hint"]:SetHide(not EFV_UI_TrackerSortHint(m_Sort, i))
+		Controls[h[1] .. "Stack"]:CalculateSize()
 	end
 	return nil
 end

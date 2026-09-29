@@ -24,6 +24,7 @@
 -- functions over the UI store; the panel only renders their rows).
 -- 0.7.1 (tracker column sort): EFV_UI_TRACKER_SORT_COLS,
 -- EFV_UI_TrackerSortClick, EFV_UI_TrackerSortRows, EFV_UI_TrackerSortMark.
+-- 0.7.3: EFV_UI_TrackerSortHint (the "sortable" mark on unsorted headers).
 -- 0.5.2 (fee ruling, band 1 free): EFV_UI_FeeText.
 -- 0.7 (INTERFACES note 33): EFV_UI_PickerRowText, EFV_UI_PickerHeaderText
 -- (one formatted line per picker row; EFV_UI_FeeCell removed);
@@ -929,9 +930,10 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_UI_TrackerSortMark(sort, col) -> text key or nil   (added 0.7.1)
--- The indicator next to header column col: LOC_EFV_TRACKER_SORT_ASC /
--- _DESC (arrow font icons, 0.7.2) for the sorted column; nil (no mark) for
--- every other column (0.7.2: the 0.7.1 "sortable" mark is gone).
+-- The arrow appended to the label of header column col: LOC_EFV_TRACKER_SORT_ASC
+-- / _DESC (arrow font icons, 0.7.2) for the sorted column; nil for every
+-- other column (those show the faded "sortable" pair instead, see
+-- EFV_UI_TrackerSortHint).
 -- ---------------------------------------------------------------------------
 function EFV_UI_TrackerSortMark(sort, col)
 	if sort ~= nil and sort.col == col then
@@ -942,6 +944,20 @@ function EFV_UI_TrackerSortMark(sort, col)
 		end
 	end
 	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TrackerSortHint(sort, col) -> boolean   (added 0.7.3)
+-- True when header column col shows the "sortable" mark (SortXHint in
+-- EFV_Tracker.xml: PressureUp / PressureDown textures at 40% alpha,
+-- designer's candidate B): every column except the sorted one, which carries
+-- its single arrow (EFV_UI_TrackerSortMark) instead. Exactly one of the two
+-- marks shows on each column. Pure.
+-- Params:  sort { col, dir } or nil; col 1..6.
+-- Returns: boolean.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TrackerSortHint(sort, col)
+	return EFV_UI_TrackerSortMark(sort, col) == nil
 end
 
 -- ---------------------------------------------------------------------------

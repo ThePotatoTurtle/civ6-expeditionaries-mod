@@ -130,7 +130,6 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Requires Gathering Storm.
 - VEF replaces the unit flag script (UnitFlagManager) with a thin wrapper to show its flag tags. Mods that replace the same script with a higher load order, such as Gift It To Me, win: the tags disappear, but everything else still works. Replacements with a lower load order are overridden, except CQUI and Better Builder Charges Tracking, which VEF loads underneath its wrapper.
 - CQUI should work but has not been tested.
-- Multiplayer should work (every change goes through synchronised game requests) but has not been tested. Only single player has been played.
 - VEF is saved with your game. Don't remove it in the middle of a game: units on the way exist only in the mod's records.
 
 ## Future plans

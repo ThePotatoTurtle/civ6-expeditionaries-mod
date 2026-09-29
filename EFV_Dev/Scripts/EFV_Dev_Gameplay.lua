@@ -44,10 +44,11 @@ EFV_Dev = {}
 -- the 0.7 re-test S12 / S13 and the Workshop Shot buttons: 0.7.0-dev.1;
 -- rebuilt for EFV 0.7.1-dev without changes: 0.7.1-dev.1; re-test 0.7
 -- fixes (S4 holds the Volunteer, S10 removes the Barbarians after your
--- fight, S12 checks the arrival turn): 0.7.2-dev.1); a
+-- fight, S12 checks the arrival turn): 0.7.2-dev.1; rebuilt for EFV
+-- 0.7.3-dev without changes: 0.7.3-dev.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "0.7.2-dev.1"
-EFV_Dev.FOR_EFV = "0.7.2-dev"
+EFV_Dev.VERSION = "0.7.3-dev.1"
+EFV_Dev.FOR_EFV = "0.7.3-dev"
 
 -- ---------------------------------------------------------------------------
 -- Helpers

@@ -205,7 +205,7 @@ test("tracker sort: click cycle per column asc -> desc -> default; another colum
 		H.eq(EFV_UI_TrackerSortMark(s, col), "LOC_EFV_TRACKER_SORT_DESC")
 		s = EFV_UI_TrackerSortClick(s, col)
 		H.deq(s, { col = nil, dir = 0 }, "third click: default order")
-		H.isnil(EFV_UI_TrackerSortMark(s, col), "0.7.2: no mark on an unsorted column")
+		H.isnil(EFV_UI_TrackerSortMark(s, col), "no arrow on an unsorted column")
 		H.deq(EFV_UI_TrackerSortClick(s, col), { col = col, dir = 1 }, "fourth click starts over")
 	end
 	-- only one column at a time: another column always starts ascending
@@ -215,6 +215,31 @@ test("tracker sort: click cycle per column asc -> desc -> default; another colum
 	for col = 1, 6 do
 		H.eq(EFV_UI_TrackerSortMark(s, col), col == 5 and "LOC_EFV_TRACKER_SORT_ASC" or nil)
 	end
+	-- 0.7.3 (designer, candidate B): the faded "sortable" pair shows on every
+	-- column but the sorted one; the sorted column has its single arrow only.
+	for col = 1, 6 do
+		H.eq(EFV_UI_TrackerSortHint(nil, col), true, "no sort: sortable mark on column " .. col)
+		H.eq(EFV_UI_TrackerSortHint({ col = nil, dir = 0 }, col), true, "default order: sortable mark on column " .. col)
+		H.isnil(EFV_UI_TrackerSortMark(nil, col), "no sort: no arrow on column " .. col)
+	end
+	for sorted = 1, 6 do
+		for _, dir in ipairs({ 1, -1 }) do
+			local st = { col = sorted, dir = dir }
+			local shown = 0
+			for col = 1, 6 do
+				local hint, mark = EFV_UI_TrackerSortHint(st, col), EFV_UI_TrackerSortMark(st, col)
+				if col == sorted then
+					H.eq(hint, false, "sorted column " .. col .. ": no sortable mark")
+					H.eq(mark, dir == 1 and "LOC_EFV_TRACKER_SORT_ASC" or "LOC_EFV_TRACKER_SORT_DESC", "sorted column: one arrow")
+				else
+					H.eq(hint, true, "unsorted column " .. col .. " keeps the sortable mark")
+					H.isnil(mark, "unsorted column " .. col .. ": no arrow")
+				end
+				if hint then shown = shown + 1 end
+			end
+			H.eq(shown, 5, "sortable mark on the five unsorted columns")
+		end
+	end
 	H.deq(EFV_UI_TrackerSortClick(s, 9), s, "unknown column: unchanged")
 	for _, key in ipairs({ "LOC_EFV_TRACKER_SORT_ASC", "LOC_EFV_TRACKER_SORT_DESC", "LOC_EFV_TRACKER_SORT_TT" }) do
 		H.ne(Locale.Lookup(key), key, key .. " has a text")
@@ -223,9 +248,14 @@ test("tracker sort: click cycle per column asc -> desc -> default; another colum
 	-- 0.7.1 U+02C6 / U+02C7 glyphs), which exist in Base FontIcons.xml.
 	H.eq(Locale.Lookup("LOC_EFV_TRACKER_SORT_ASC"), "[ICON_PressureUp]")
 	H.eq(Locale.Lookup("LOC_EFV_TRACKER_SORT_DESC"), "[ICON_PressureDown]")
+	-- 0.7.3: each header has its faded PressureUp / PressureDown pair (40% alpha)
 	local xml = __py_read("EFV/UI/EFV_Tracker.xml")
-	H.ok(string.find(xml, 'ID="SortStateButton" Size="186,24"', 1, true) ~= nil and
-		string.find(xml, 'ID="SortTurnsButton" Size="64,24"', 1, true) ~= nil, "Turns header moved 14 px left to fit the arrow")
+	for _, n in ipairs({ "Unit", "Partner", "Force", "State", "Turns", "Dest" }) do
+		local hint = string.match(xml, '<Container ID="Sort' .. n .. 'Hint"[^>]*>.-</Container>')
+		H.notnil(hint, n .. " header has a sortable mark")
+		H.ok(string.find(hint, 'Texture="PressureUp" Color="255,255,255,102"', 1, true) ~= nil and
+			string.find(hint, 'Texture="PressureDown" Color="255,255,255,102"', 1, true) ~= nil, n .. ": up + down pair at 40%")
+	end
 	H.clean()
 end)
 
@@ -290,8 +320,18 @@ test("tracker panel: header click sorts the rows, marks follow, alerts stay red,
 	local C = tr.Controls
 	local function Mark(key) return Locale.Lookup(key) end
 	local function TurnsHeader() return C.SortTurnsLabel:GetText() end
-	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"), "no mark at load (0.7.2)")
+	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"), "no arrow at load")
 	H.eq(C.SortUnitLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_UNIT"))
+	-- 0.7.3: the faded sortable pair shows on all headers but the sorted one
+	local HINTS = { "SortUnitHint", "SortPartnerHint", "SortForceHint", "SortStateHint", "SortTurnsHint", "SortDestHint" }
+	local function Hints()
+		local out = {}
+		for i, id in ipairs(HINTS) do out[i] = not C[id]:IsHidden() end
+		return out
+	end
+	local ALL = { true, true, true, true, true, true }
+	local TURNS_SORTED = { true, true, true, true, false, true }
+	H.deq(Hints(), ALL, "sortable mark on every header at load")
 	C.BannerButton:RClick()
 	local function Col()
 		local cells = {}
@@ -305,17 +345,21 @@ test("tracker panel: header click sorts the rows, marks follow, alerts stay red,
 	C.SortTurnsButton:Click()
 	H.deq(Col(), { "1", "4!", "15", "-" }, "ascending; the mutiny row keeps its highlight")
 	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_ASC"))
+	H.deq(Hints(), TURNS_SORTED, "ascending: Turns has the arrow only, the others the sortable mark")
 	C.SortTurnsButton:Click()
 	H.deq(Col(), { "-", "15", "4!", "1" }, "descending")
 	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS") .. " " .. Mark("LOC_EFV_TRACKER_SORT_DESC"))
+	H.deq(Hints(), TURNS_SORTED, "descending: Turns has the arrow only")
 	C.SortTurnsButton:Click()
 	H.deq(Col(), { "4!", "15", "-", "1" }, "third click: default order")
 	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"))
+	H.deq(Hints(), ALL, "default order: the sortable mark is back on Turns")
 	-- another column: Partner A-Z ("To <civ 1>" x3 by id, "To <civ 2>"), Turns mark back to neutral
 	C.SortTurnsButton:Click()
 	C.SortPartnerButton:Click()
 	H.eq(TurnsHeader(), Locale.Lookup("LOC_EFV_TRACKER_COL_TURNS"), "one column at a time")
 	H.eq(C.SortPartnerLabel:GetText(), Locale.Lookup("LOC_EFV_TRACKER_COL_PARTNER") .. " " .. Mark("LOC_EFV_TRACKER_SORT_ASC"))
+	H.deq(Hints(), { true, false, true, true, true, true }, "Partner sorted: its mark swapped for the arrow, Turns back to sortable")
 	local p1, p2 = Locale.Lookup("LOC_EFV_TRACKER_TO", EFV_UI_PlayerName(1)), Locale.Lookup("LOC_EFV_TRACKER_TO", EFV_UI_PlayerName(2))
 	local want = (string.lower(p1) < string.lower(p2)) and { "15", "4!", "1", "-" } or { "-", "15", "4!", "1" }
 	H.deq(Col(), want, "partner A-Z, same partner by record id")

@@ -40,11 +40,11 @@ end
 -- and the header's columns { key, width, style } in order.
 local function Columns()
 	local xml = __py_read("EFV/UI/EFV_Tracker.xml")
-	local header = string.match(xml, '<Stack ID="TrackerHeader".-</Stack>')
+	local header = string.match(xml, '<Stack ID="TrackerHeader".-</Stack>%s*<ScrollPanel')
 	local row = string.match(xml, '<Instance Name="EFV_TrackerRowInstance">.-</Instance>')
 	local hcols, rcols = {}, {}
 	-- 0.7.1: each header column is a click target (Button) holding its label.
-	for w, style, key in string.gmatch(header, '<Button ID="Sort%w+Button" Size="(%d+),%d+"[^>]*><Label [^>]-Style="([%w_]+)"[^>]-String="LOC_EFV_TRACKER_COL_(%u+)"') do
+	for w, style, key in string.gmatch(header, '<Button ID="Sort%w+Button" Size="(%d+),%d+"[^>]*>%s*<Stack ID="Sort%w+Stack"[^>]*>%s*<Label [^>]-Style="([%w_]+)"[^>]-String="LOC_EFV_TRACKER_COL_(%u+)"') do
 		hcols[#hcols + 1] = { key = key, width = tonumber(w), style = style }
 	end
 	for w, id, tw in string.gmatch(row, '<Container Size="(%d+),%d+"><Label ID="(%w+)"[^>]-TruncateWidth="(%d+)"') do
@@ -136,6 +136,49 @@ end)
 -- ===========================================================================
 -- Item 5: header / footer look, matching columns
 -- ===========================================================================
+-- 0.7.3 (designer, candidate B): each header label plus its mark fits its
+-- column. Label widths are Myriad Pro Semibold-MOD 14 (BodyTextDark14)
+-- advances measured with the font of workshop/ui_icons/make_sort_icons.py,
+-- plus a 2 px glow / rounding margin. Unsorted: label + stack padding + the
+-- 30 px faded pair; sorted: label + space (3 px) + 22 px arrow font icon.
+-- Both end at least 2 px before the next column starts.
+local LABEL_PX = { UNIT = 26, PARTNER = 45, FORCE = 33, STATE = 31, TURNS = 34, DEST = 72 }
+local LABEL_EN = { UNIT = "Unit", PARTNER = "Partner", FORCE = "Force", STATE = "State", TURNS = "Turns", DEST = "Destination" }
+local HEADER_ID = { UNIT = "Unit", PARTNER = "Partner", FORCE = "Force", STATE = "State", TURNS = "Turns", DEST = "Dest" }
+local GLOW_PX, SPACE_PX, ARROW_PX, GAP_PX = 2, 3, 22, 2
+
+test("look: every header label plus its sort mark (sortable pair or arrow) fits its column", function()
+	BootUI(false)
+	local xml, hcols = Columns()
+	H.len(hcols, 6)
+	for _, c in ipairs(hcols) do
+		H.eq(Locale.Lookup("LOC_EFV_TRACKER_COL_" .. c.key), LABEL_EN[c.key], c.key .. ": the label the widths were measured for")
+		local n = HEADER_ID[c.key]
+		local pad = tonumber(string.match(xml, '<Stack ID="Sort' .. n .. 'Stack"[^>]-Padding="(%d+)"'))
+		local hintW = tonumber(string.match(xml, '<Container ID="Sort' .. n .. 'Hint"[^>]-Size="(%d+),'))
+		H.notnil(pad, n .. " stack padding"); H.notnil(hintW, n .. " hint width")
+		local label = LABEL_PX[c.key] + GLOW_PX
+		local unsorted = label + pad + hintW
+		local sorted = label + SPACE_PX + ARROW_PX
+		H.ok(unsorted + GAP_PX <= c.width, string.format("%s unsorted: %d + %d + %d (+%d gap) <= %d",
+			c.key, label, pad, hintW, GAP_PX, c.width))
+		H.ok(sorted + GAP_PX <= c.width, string.format("%s sorted: %d + %d + %d (+%d gap) <= %d",
+			c.key, label, SPACE_PX, ARROW_PX, GAP_PX, c.width))
+	end
+	-- the hint pair: two 16 px textures overlapping by 2 px = 30 px
+	local hint = string.match(xml, '<Container ID="SortTurnsHint"[^>]*>.-</Container>')
+	H.ok(string.find(hint, '<Image Size="16,17" Texture="PressureUp"', 1, true) ~= nil and
+		string.find(hint, '<Image Offset="14,0" Size="16,17" Texture="PressureDown"', 1, true) ~= nil, hint)
+	-- the header row ends before the scroll bar (panel 960 wide)
+	local total = 0
+	for _, c in ipairs(hcols) do total = total + c.width end
+	local scrollW = tonumber(string.match(xml, '<ScrollPanel ID="TrackerScroll"[^>]-Size="(%d+),'))
+	local panelW = tonumber(string.match(xml, '<Container ID="TrackerPanel"[^>]-Size="(%d+),'))
+	H.eq(panelW, 960, "panel width unchanged")
+	H.ok(6 + total <= scrollW - 11, string.format("header ends at %d, scroll bar starts at %d", 6 + total, scrollW - 11))
+	H.clean()
+end)
+
 test("look: header columns match the row columns; dark header and summary, summary 33 px up", function()
 	BootUI(false)
 	local xml, hcols, rcols = Columns()
@@ -145,10 +188,9 @@ test("look: header columns match the row columns; dark header and summary, summa
 	local total = 0
 	for i = 1, 6 do
 		H.eq(hcols[i].key, order[i])
-		-- 0.7.2 (designer): the Turns header starts 14 px left of its column to
-		-- fit "Turns" plus the arrow font icon (State header 186, Turns 64).
-		local shift = (order[i] == "STATE" and -14) or (order[i] == "TURNS" and 14) or 0
-		H.eq(hcols[i].width, rcols[i].width + shift, order[i] .. " header width = row width" .. (shift ~= 0 and " (0.7.2 shift)" or ""))
+		-- 0.7.3: header and row columns line up again (the 0.7.2 Turns shift
+		-- is gone; Turns is wide enough for its label plus the mark).
+		H.eq(hcols[i].width, rcols[i].width, order[i] .. " header width = row width")
 		H.eq(hcols[i].style, "BodyTextDark14", order[i] .. " header style")
 		H.eq(rcols[i].truncate, rcols[i].width - 6, rcols[i].id .. " TruncateWidth = width - 6")
 		total = total + rcols[i].width
@@ -163,7 +205,7 @@ test("look: header columns match the row columns; dark header and summary, summa
 	H.ok(string.find(summary, 'Style="BodyTextDark14"', 1, true) ~= nil, summary)
 	H.ok(string.find(summary, 'Offset="22,33"', 1, true) ~= nil, summary)
 	H.ok(string.find(summary, "Color=", 1, true) == nil, "no light colour override: " .. summary)
-	for _ in string.gmatch(string.match(xml, '<Stack ID="TrackerHeader".-</Stack>'), 'Color=') do
+	for _ in string.gmatch(string.match(xml, '<Stack ID="TrackerHeader".-</Stack>%s*<ScrollPanel'), '<Label [^>]-Color=') do
 		H.ok(false, "header label with a Color override")
 	end
 	-- The scroll area ends above the summary line (window 500 high).

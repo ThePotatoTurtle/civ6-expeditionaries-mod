@@ -14,21 +14,26 @@
        player is in GRACE or MUTINY; click cycles camera focus.
      Everything starts hidden. Owner: WP2.2 (alerts), WP7.2 (full panel),
      0.7 WP4 (look: FIXPLAN_0.7 items 5, 6).
-     Column widths (0.7): Unit 170, Partner 140, Force 200, State 200,
-     Turns 50, Destination 150 (+ 6 left padding) = 916 = row width, each
+     Column widths (0.7.3): Unit 154, Partner 134, Force 200, State 200,
+     Turns 72, Destination 150 (+ 6 left padding) = 916 = row width, each
      row label TruncateWidth = column width - 6 (State fits "Lapse: Grace 5
-     (paused)", Force fits "City-State Expeditionary"). Panel 960 wide
+     (paused)", Force fits "City-State Expeditionary", Partner fits "From
+     Gran Colombia", Unit fits "Mechanized Infantry"). Panel 960 wide
      (fits the 1280 px minimum resolution). The header stack sits at the
-     rows' text offset (16 + 6). Header labels and TrackerSummary use
+     rows' text offset (16 + 6), and each header column has the same width
+     as its row column. Header labels and TrackerSummary use
      BodyTextDark14 (dark on the light WindowFrameTitle body); the summary
      sits 33 px above the bottom edge (0.7.1: 3 px higher), clear of the
      frame border (TrackerScroll ends at 76 + 360 = 436).
      0.7.1: each header column is a plain Button (SortXButton, same width as
-     the row column) holding its label (SortXLabel); a click sorts by that
-     column (A-Z, Z-A, default), and the label carries the sort mark (Lua).
-     0.7.2: the mark is a 22 px arrow font icon, so the Turns header starts
-     14 px left of its column (State header 186, Turns header 64 wide; the
-     rows keep 200 / 50) to fit "Turns" plus the arrow.
+     the row column); a click sorts by that column (A-Z, Z-A, default).
+     0.7.3 (designer, candidate B of workshop/ui_icons): the button holds a
+     stack (SortXStack, padding 4) of the label (SortXLabel) and the
+     "sortable" mark SortXHint = the PressureUp / PressureDown textures side
+     by side (2 px overlap, 30x17) at 40% alpha. The hint shows on every
+     unsorted column; the sorted column hides it and its label carries a
+     single full-colour arrow font icon (Lua). Turns grew 50 -> 72 for
+     "Turns" + mark (34 + 4 + 30 = 68 px); Unit gave 16, Partner 6.
      The scroll bar uses the base ScrollVerticalBacking / ScrollThumbAlt
      pattern (UnitPanel.xml, TradeRouteChooser.xml) in the header's dark
      blue (BodyTextBlue 6,53,92; lighter track, solid thumb).
@@ -47,12 +52,42 @@
 			<Label ID="TrackerTitle" Style="WindowHeader" Anchor="C,T" Offset="0,12" String="{LOC_EFV_TRACKER_TITLE:upper}"/>
 			<Button ID="TrackerCloseButton" Anchor="R,T" Style="CloseButtonLarge" Offset="-8,-5"/>
 			<Stack ID="TrackerHeader" Anchor="L,T" Offset="22,50" StackGrowth="Right">
-				<Button ID="SortUnitButton" Size="170,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortUnitLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_UNIT"/></Button>
-				<Button ID="SortPartnerButton" Size="140,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortPartnerLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_PARTNER"/></Button>
-				<Button ID="SortForceButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortForceLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_FORCE"/></Button>
-				<Button ID="SortStateButton" Size="186,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortStateLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/></Button>
-				<Button ID="SortTurnsButton" Size="64,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortTurnsLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/></Button>
-				<Button ID="SortDestButton" Size="150,24" ToolTip="LOC_EFV_TRACKER_SORT_TT"><Label ID="SortDestLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_DEST"/></Button>
+				<Button ID="SortUnitButton" Size="154,24" ToolTip="LOC_EFV_TRACKER_SORT_TT">
+					<Stack ID="SortUnitStack" Anchor="L,C" StackGrowth="Right" Padding="4">
+						<Label ID="SortUnitLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_UNIT"/>
+						<Container ID="SortUnitHint" Anchor="L,C" Size="30,17"><Image Size="16,17" Texture="PressureUp" Color="255,255,255,102"/><Image Offset="14,0" Size="16,17" Texture="PressureDown" Color="255,255,255,102"/></Container>
+					</Stack>
+				</Button>
+				<Button ID="SortPartnerButton" Size="134,24" ToolTip="LOC_EFV_TRACKER_SORT_TT">
+					<Stack ID="SortPartnerStack" Anchor="L,C" StackGrowth="Right" Padding="4">
+						<Label ID="SortPartnerLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_PARTNER"/>
+						<Container ID="SortPartnerHint" Anchor="L,C" Size="30,17"><Image Size="16,17" Texture="PressureUp" Color="255,255,255,102"/><Image Offset="14,0" Size="16,17" Texture="PressureDown" Color="255,255,255,102"/></Container>
+					</Stack>
+				</Button>
+				<Button ID="SortForceButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT">
+					<Stack ID="SortForceStack" Anchor="L,C" StackGrowth="Right" Padding="4">
+						<Label ID="SortForceLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_FORCE"/>
+						<Container ID="SortForceHint" Anchor="L,C" Size="30,17"><Image Size="16,17" Texture="PressureUp" Color="255,255,255,102"/><Image Offset="14,0" Size="16,17" Texture="PressureDown" Color="255,255,255,102"/></Container>
+					</Stack>
+				</Button>
+				<Button ID="SortStateButton" Size="200,24" ToolTip="LOC_EFV_TRACKER_SORT_TT">
+					<Stack ID="SortStateStack" Anchor="L,C" StackGrowth="Right" Padding="4">
+						<Label ID="SortStateLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_STATE"/>
+						<Container ID="SortStateHint" Anchor="L,C" Size="30,17"><Image Size="16,17" Texture="PressureUp" Color="255,255,255,102"/><Image Offset="14,0" Size="16,17" Texture="PressureDown" Color="255,255,255,102"/></Container>
+					</Stack>
+				</Button>
+				<Button ID="SortTurnsButton" Size="72,24" ToolTip="LOC_EFV_TRACKER_SORT_TT">
+					<Stack ID="SortTurnsStack" Anchor="L,C" StackGrowth="Right" Padding="4">
+						<Label ID="SortTurnsLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_TURNS"/>
+						<Container ID="SortTurnsHint" Anchor="L,C" Size="30,17"><Image Size="16,17" Texture="PressureUp" Color="255,255,255,102"/><Image Offset="14,0" Size="16,17" Texture="PressureDown" Color="255,255,255,102"/></Container>
+					</Stack>
+				</Button>
+				<Button ID="SortDestButton" Size="150,24" ToolTip="LOC_EFV_TRACKER_SORT_TT">
+					<Stack ID="SortDestStack" Anchor="L,C" StackGrowth="Right" Padding="4">
+						<Label ID="SortDestLabel" Anchor="L,C" Style="BodyTextDark14" String="LOC_EFV_TRACKER_COL_DEST"/>
+						<Container ID="SortDestHint" Anchor="L,C" Size="30,17"><Image Size="16,17" Texture="PressureUp" Color="255,255,255,102"/><Image Offset="14,0" Size="16,17" Texture="PressureDown" Color="255,255,255,102"/></Container>
+					</Stack>
+				</Button>
 			</Stack>
 			<ScrollPanel ID="TrackerScroll" Anchor="L,T" Offset="16,76" Size="930,360" Vertical="1" AutoScrollBar="1">
 				<Stack ID="TrackerStack" StackGrowth="Bottom" Padding="2"/>
@@ -69,11 +104,11 @@
 		<GridButton ID="RowButton" Size="916,30" Style="ButtonControl">
 			<Box ID="AlertHighlight" Size="parent,parent" Color="170,30,30,90" Hidden="1"/>
 			<Stack StackGrowth="Right" Anchor="L,C" Offset="6,0">
-				<Container Size="170,24"><Label ID="UnitLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="164"/></Container>
-				<Container Size="140,24"><Label ID="PartnerLabel" Anchor="L,C" Style="FontNormal14" TruncateWidth="134"/></Container>
+				<Container Size="154,24"><Label ID="UnitLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="148"/></Container>
+				<Container Size="134,24"><Label ID="PartnerLabel" Anchor="L,C" Style="FontNormal14" TruncateWidth="128"/></Container>
 				<Container Size="200,24"><Label ID="ForceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="194"/></Container>
 				<Container Size="200,24"><Label ID="StateLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="194"/></Container>
-				<Container Size="50,24"><Label ID="TurnsLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="44"/></Container>
+				<Container Size="72,24"><Label ID="TurnsLabel"    Anchor="L,C" Style="FontNormal14" TruncateWidth="66"/></Container>
 				<Container Size="150,24"><Label ID="PlaceLabel"   Anchor="L,C" Style="FontNormal14" TruncateWidth="144"/></Container>
 			</Stack>
 		</GridButton>
