@@ -118,14 +118,17 @@ test("look: every State text and Force label fits its tracker column (8 px per c
 	end
 	local seen = {}
 	for _, rec in ipairs(recs) do
-		local text = EFV_UI_TrackerState(rec, turn)
-		if not seen[text] then
-			seen[text] = true
-			Fits(text, stateCol, "state")
+		-- the sender's labels and the recipient's (Inbound / Departed)
+		for _, viewer in ipairs({ rec.senderID, rec.recipientID }) do
+			local text = EFV_UI_TrackerState(rec, turn, viewer)
+			if not seen[text] then
+				seen[text] = true
+				Fits(text, stateCol, "state")
+			end
 		end
 	end
 	H.ok(seen["Lapse: Grace 5 (paused)"] and seen["Lapse: Mutiny 5 (paused)"] and seen["Service ended"]
-		and seen["Blocked"], "all state kinds rendered")
+		and seen["Blocked"] and seen["Inbound"] and seen["Departed"], "all state kinds rendered")
 	for _, ft in ipairs({ "EXPEDITIONARY", "VOLUNTEER", "CS_EXPEDITIONARY" }) do
 		Fits(Locale.Lookup(EFV_ForceLabelKey(ft)), forceCol, "force")
 	end
@@ -276,12 +279,17 @@ test("hooks: LuaEvents.EFV_EntrustExpand expands the picker once; no-op before a
 end)
 
 test("hooks: LuaEvents.EFV_EntrustExpand does nothing on a disabled Entrust button", function()
-	local S = H.baseScenario()
-	H.war(0, 4)
+	H.baseScenario()
+	-- a living major that only the human fights (a city-state's city would
+	-- be open to any partner since the 2026-09-30 ruling)
+	FAKE.NewPlayer(5, { gold = 0 })
+	local c5 = H.city(5, 60, 12, { capital = true, name = "LOC_CITY_E" })
+	H.city(5, 64, 16, { name = "LOC_CITY_E2" })
+	H.war(0, 5)
 	H.loadEFV()
-	Capture(4, S.c4)
+	Capture(5, c5)
 	local env = EntrustUI()
-	OpenPopup(S.c4)
+	OpenPopup(c5)
 	H.ok(env.Controls.EntrustMainButton:IsDisabled())
 	LuaEvents.EFV_EntrustExpand()
 	H.ok(env.Controls.EFV_RecipientStack:IsHidden(), "stays closed")

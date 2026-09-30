@@ -53,7 +53,7 @@ While one of your units is in grace or mutiny, a red banner shows at the top of 
 VEF warnings (grace, mutiny, lapse, service ending, delayed arrival, rerouted unit) stay in your notification list until the problem is over or you dismiss them. Losses stay until you dismiss them. Plain news, such as a unit leaving, arriving or coming home, clears at the end of the turn.
 
 ### Entrust
-When you capture a city, the capture screen (Keep / Raze) gets an Entrust... button. It gives the city for good to an ally, teammate or declared friend who was at war with the city's former owner when you took it. For a Free City any partner qualifies. It works for capitals and city-state cities too.
+When you capture a city, the capture screen (Keep / Raze) gets an Entrust... button. It gives the city for good to an ally, teammate or declared friend who was at war with the city's old owner when you took it. If the old owner was a city-state or has been knocked out of the game, any of them can take it. The same goes for a Free City. It works for capitals too.
 
 1. Click Entrust... to see the partners who can take the city.
 2. Click a partner, then click it again to confirm. The city changes hands at once, as a gift, with its buildings, districts, wonders and population. Your units inside are moved out.
@@ -67,31 +67,30 @@ If nobody qualifies, the button is greyed out and the tooltip says why. Entrust 
 - Expeditionary Force: an ally, a teammate or a declared friend.
 - Volunteers: a teammate, an ally, or a declared friend who grants you open borders. Open borders without friendship do not count, and neither does friendship without open borders.
 - City-State Expeditionary: any city-state you have met.
-- Entrust: an ally, a teammate or a declared friend who was at war with the city's former owner when you took it (any partner for a Free City).
+- Entrust: an ally, a teammate or a declared friend who was at war with the city's old owner when you took it (any of them if the old owner was a city-state, a Free City, or has been knocked out of the game).
 - Expeditionary Force and Volunteers: you and the partner must be at war with the same enemy (Barbarians and Free Cities don't count), and not at war with each other.
 - City-State Expeditionary needs no shared enemy. You can lend a unit to any city-state you have met, for example to help it in a war of its own, as long as you are not at war with it.
 
-This table shows who can receive units. "Not listed" means that player doesn't appear in the destination list at all. "No" means its cities are listed but greyed out, with the reason in the tooltip.
+This table shows who can receive units. "Yes" means you can send. "No" means the player's cities are listed but greyed out, with the reason in the tooltip. "Hidden" means the player doesn't appear in the destination list at all. "-" means that option doesn't apply to this kind of player. "any" in the "Shares an enemy" column means it doesn't matter.
 
 | The recipient is | Shares an enemy with you | Expeditionary | Volunteers | City-State Expeditionary |
 |---|---|---|---|---|
-| Teammate | yes | Yes | Yes | Not listed |
-| Teammate | no | No: no shared enemy | No: no shared enemy | Not listed |
-| Ally | yes | Yes | Yes | Not listed |
-| Ally | no | No: no shared enemy | No: no shared enemy | Not listed |
-| Declared friend who gives you open borders | yes | Yes | Yes | Not listed |
-| Declared friend who gives you open borders | no | No: no shared enemy | No: no shared enemy | Not listed |
-| Declared friend without open borders | yes | Yes | No: needs open borders | Not listed |
-| Declared friend without open borders | no | No: no shared enemy | No: needs open borders, no shared enemy | Not listed |
-| Other major civ (met, no alliance or friendship) | doesn't matter | Not listed | Not listed | Not listed |
-| Major civ you are at war with | doesn't matter | Not listed | Not listed | Not listed |
-| City-state you have met | doesn't matter | Not listed | Not listed | Yes |
-| City-state you are at war with | doesn't matter | Not listed | Not listed | No: at war with you |
-| City-state you haven't met | doesn't matter | Not listed | Not listed | Not listed |
+| Teammate | yes | Yes | Yes | - |
+| Ally | yes | Yes | Yes | - |
+| Ally | no | No: no shared enemy | No: no shared enemy | - |
+| Declared friend who gives you open borders | yes | Yes | Yes | - |
+| Declared friend who gives you open borders | no | No: no shared enemy | No: no shared enemy | - |
+| Declared friend without open borders | yes | Yes | No: needs open borders | - |
+| Declared friend without open borders | no | No: no shared enemy | No: needs open borders, no shared enemy | - |
+| Other major civ (met, no alliance or friendship) | any | Hidden: not a partner | Hidden: not a partner | - |
+| Major civ you are at war with | any | Hidden: at war with you | Hidden: at war with you | - |
+| City-state you have met | any | - | - | Yes |
+| City-state you are at war with | any | - | - | No: at war with you |
+| City-state you haven't met | any | - | - | Hidden: not met |
 
 - A shared enemy is a major civ or a city-state that you and the recipient are both at war with. Barbarians and the Free Cities never count, and they can't receive units.
 - The unit must stand in your own territory, or in the recipient's territory. From the recipient's land it can only go to that recipient's cities.
-- Entrust has its own rule: the city goes to an ally, teammate or declared friend who was at war with the city's former owner when you took it (any of them for a Free City).
+- Entrust has its own rule: the city goes to an ally, teammate or declared friend who was at war with the city's old owner when you took it. If the old owner was a city-state, a Free City, or has been knocked out of the game, any of them can take it.
 
 ### Which units can go
 Land and naval combat units, including Warrior Monks and Nihangs. The unit must:
@@ -163,18 +162,13 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - A matching grievance penalty for the new owner of an entrusted city. The game offers mods no way to add grievances today, so this waits for one.
 
 ## Known issues
-- The AI never sends units or entrusts cities, but it uses the units it receives.
-- Veterans controlled by the AI (for example an Expeditionary unit while an AI ally commands it) restart at level 1. They keep their promotions, and your own units keep their level when they come home. Experience above the next promotion is dropped, so there is no free promotion on arrival.
-- When a veteran comes home to you, VEF gives its promotions back through the game's own promote command. The game allows one promotion per turn, so a unit with four promotions needs about four turns to get them all back. There is no time limit. Only if the unit changes hands to the AI, or you send it off again before it is done, does it get the rest of its promotions the old way and restart at level 1. If one of them can't be taken back, the unit is left with a promotion ready for you to pick yourself.
-- Entrust gives the new owner no grievance penalty. The capturer takes the normal penalty, but the game offers mods no way to add grievances.
-- Entrust keeps the city for you first (that ends the capture decision) and then hands it over. If the handover is refused, for example because the partner was eliminated or went to war with you in the meantime, the city stays yours and a notification says why.
-- A unit whose owner has none of its strategic resource does not heal. That is a Gathering Storm rule and it also applies to lent units: a host without Iron can't heal a lent Swordsman. It covers units that need the resource only to be built, like the Swordsman, as well as units that use it up every turn. The destination list warns before you send such a unit, and the tracker and the flag tag warn while it happens.
-- When the host upgrades a lent unit, the game replaces it with a new unit on the same tile, and VEF follows it there. If the host moves the upgraded unit away in the same turn, VEF can't prove it is the same unit and reports it lost. The same goes for a city-state unit levied by its suzerain: VEF follows it only when it can be told apart from the city-state's own units of the same type.
-- Anything a deployed Expeditionary unit gained after its host's last city fell is lost when the host is eliminated.
-- A mutinying unit does not heal, but the game may briefly show a "+HP" animation before VEF takes the healing back.
-- A unit VEF places on the map does not heal in the turn it appears (a game rule).
-- City-State Expeditionary units are run by the normal city-state AI. If the suzerain levies one, VEF keeps tracking it and it still goes home after its 10 turns. Levies were tested in game, but following a lent unit through a levy has not been yet.
-- Grace and mutiny notifications can be dismissed, but they come back every turn while the unit is in danger.
+- The AI never sends units or entrusts cities. It does use the units it receives.
+- Veterans get their level back only when they come home to a human player. The game allows one promotion per turn, so a unit with four promotions needs about four turns. A veteran controlled by the AI (for example an Expeditionary unit while an AI ally commands it) restarts at level 1 but keeps its promotions.
+- Entrust adds no grievance penalty for the new owner. The capturer takes the normal penalty; the game gives mods no way to add grievances.
+- A unit whose owner has none of its strategic resource doesn't heal. This is a Gathering Storm rule and covers lent units too (a host without Iron can't heal a lent Swordsman). VEF warns you before you send and while it happens.
+- If the host upgrades a lent unit and moves it away in the same turn, VEF can't be sure it's the same unit and reports it lost. The same applies to a city-state unit levied by its suzerain when it can't be told apart from the city-state's own units.
+- If the host is eliminated, anything a deployed Expeditionary unit gained after the host's last city fell is lost.
+- A mutinying unit may briefly show a "+HP" animation before VEF takes the healing back.
 
 ## Changelog
 - 1.0.2: Changed: city-states can receive units without a shared enemy.

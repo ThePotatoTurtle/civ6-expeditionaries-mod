@@ -258,7 +258,7 @@
 		</Row>
 		<!-- entrust -->
 		<Row Tag="LOC_EFV_REASON_ENTRUST_NO_PARTNER" Language="en_US">
-			<Text>Nobody can take this city: none of your allies, teammates or declared friends was at war with {1_Name} when you captured it.</Text>
+			<Text>Nobody could take this city when you captured it from {1_Name}. It needs an ally, teammate or declared friend at war with {1_Name}. If {1_Name} was a city-state or has been knocked out of the game, any of them can take it.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_REASON_ENTRUST_STALE" Language="en_US">
 			<Text>A city can only be entrusted in the capture decision, on the turn you captured it.</Text>
@@ -328,6 +328,11 @@
 		<Row Tag="LOC_EFV_STATE_RETURNING" Language="en_US">
 			<Text>Returning, arrives in {1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
 		</Row>
+		<!-- The recipient's wording of RETURNING (tracker row tooltip).
+		     {1_Num}: turns until the unit is home -->
+		<Row Tag="LOC_EFV_STATE_DEPARTED" Language="en_US">
+			<Text>Departed, home in {1_Num} {1_Num : plural 1?turn; other?turns;}</Text>
+		</Row>
 		<!-- appended after the state text of a lapsed Volunteer (rec.lapseReason) -->
 		<Row Tag="LOC_EFV_LAPSE_WAR" Language="en_US">
 			<Text>(lapsed: no common war)</Text>
@@ -393,7 +398,7 @@
 			<Text>Give {1_City} to {2_Civ} for good. Click once, then click again to confirm.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ENTRUST_TT" Language="en_US">
-			<Text>Give this city to a partner who is at war with its former owner. You take the normal penalty for capturing it; in this version the recipient takes none. There is no loyalty protection: if the new owner cannot hold the city, it may flip.</Text>
+			<Text>Give this city to an ally, teammate or declared friend at war with its former owner. If the former owner was a city-state or has been knocked out of the game, any of them can take it. You take the normal penalty for capturing it; in this version the recipient takes none. There is no loyalty protection: if the new owner cannot hold the city, it may flip.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ENTRUST_TT_RECIPIENTS" Language="en_US">
 			<Text>Can receive it: {1_List}</Text>
@@ -488,6 +493,13 @@
 		</Row>
 		<Row Tag="LOC_EFV_TRACKER_ST_RETURNING" Language="en_US">
 			<Text>Returning</Text>
+		</Row>
+		<!-- Recipient's labels for OUTBOUND / RETURNING (unit sent to the viewer) -->
+		<Row Tag="LOC_EFV_TRACKER_ST_INBOUND" Language="en_US">
+			<Text>Inbound</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_ST_DEPARTED" Language="en_US">
+			<Text>Departed</Text>
 		</Row>
 		<Row Tag="LOC_EFV_TRACKER_ST_BLOCKED" Language="en_US">
 			<Text>Blocked</Text>

@@ -16,7 +16,9 @@
 -- Snapshot shape (store.entrust["p"..plotIndex], INTERFACES "Entrust
 -- snapshot"): { capturerID, oldOwnerID, turn, recipients = { pid... },
 -- partners = { pid... } }. recipients = partners at war with the old owner
--- at the moment of capture (EFV_EntrustCandidates, shared with the UI);
+-- at the moment of capture, or every partner when the old owner is the Free
+-- Cities, a city-state or no longer alive (EFV_EntrustSkipsWarCheck; ruling
+-- 2026-09-30) (EFV_EntrustCandidates, shared with the UI);
 -- partners = every eligible partner then (only for the disabled-button
 -- tooltip). Empty arrays come back nil from a property round trip;
 -- EFV_Records.Load normalises both to {}.
@@ -121,8 +123,9 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_Entrust.EligibleRecipients(capturerID, oldOwnerID) -> recipients
 -- Sorted alive majors P ~= capturer with EFV_PartnerBasis(capturer, P) ~=
--- nil (friends included; D2 applies only to Volunteers) and (old owner is
--- the Free Cities or P at war with oldOwnerID). Thin wrapper of the shared
+-- nil (friends included; D2 applies only to Volunteers) and (P at war with
+-- oldOwnerID, or EFV_EntrustSkipsWarCheck(oldOwnerID): Free Cities, a
+-- city-state, or an old owner no longer alive). Thin wrapper of the shared
 -- EFV_EntrustCandidates (EFV_Rules).
 -- Params:  capturerID, oldOwnerID player IDs.
 -- Returns: dense ascending array of player IDs.
@@ -166,6 +169,7 @@ function EFV_Entrust.OnCityConquered(capturerID, oldOwnerID, cityID, x, y)
 		end
 		local turn = CurrentTurn()
 		local recipients, partners = EFV_EntrustCandidates(capturerID, oldOwnerID)
+		local _, skipWhy = EFV_EntrustSkipsWarCheck(oldOwnerID)
 		store.entrust[key] = {
 			capturerID = capturerID,
 			oldOwnerID = oldOwnerID,
@@ -174,9 +178,9 @@ function EFV_Entrust.OnCityConquered(capturerID, oldOwnerID, cityID, x, y)
 			partners = partners,
 		}
 		EFV_Records.MarkDirty(store, EFV_Config.PROP.ENTRUST)
-		EFV_Log(2, LOG_TAG, "snapshot %s at=%s,%s city=%s capturer=%d oldOwner=%s oldKind=%s turn=%d recipients=[%s] partners=[%s]",
+		EFV_Log(2, LOG_TAG, "snapshot %s at=%s,%s city=%s capturer=%d oldOwner=%s oldKind=%s noWarCheck=%s turn=%d recipients=[%s] partners=[%s]",
 			key, tostring(x), tostring(y), tostring(cityID), capturerID, tostring(oldOwnerID),
-			tostring(EFV_PlayerKind(oldOwnerID)), turn, ListText(recipients), ListText(partners))
+			tostring(EFV_PlayerKind(oldOwnerID)), tostring(skipWhy or "no"), turn, ListText(recipients), ListText(partners))
 	end)
 	if not ok then
 		EFV_Log(1, LOG_TAG, "OnCityConquered failed: %s", tostring(err))

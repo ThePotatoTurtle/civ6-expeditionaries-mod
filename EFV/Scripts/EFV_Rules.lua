@@ -577,7 +577,7 @@ end
 -- them made any two majors share an enemy (1.0.0 bug: Expeditionary to a
 -- friend with no wars was allowed, and the Volunteer WAR lapse never
 -- fired). Free Cities count only for Entrust's "at war with the old owner"
--- (EFV_EntrustCandidates). A city-state counts when both sides are really
+-- (EFV_EntrustSkipsWarCheck). A city-state counts when both sides are really
 -- at war with it. Used by the Expeditionary and Volunteer send checks
 -- (RecipientInfo; City-State sends skip it since 1.0.2) in both contexts
 -- and by the Volunteer lapse (EFV_VolunteerLapseReason).
@@ -641,14 +641,63 @@ end
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
+-- EFV_EntrustSkipsWarCheck(oldOwnerID) -> bool, why
+-- Whether any partner may take a city captured from oldOwnerID, with no
+-- "at war with the old owner" test (designer ruling 2026-09-30, "Entrust
+-- after a city-state or last-city capture"; Free Cities since Phase 6):
+--   "FREE_CITIES"  EFV_PlayerKind == "FREE_CITIES" (at war with everyone);
+--   "CITY_STATE"   EFV_PlayerKind == "CITY_STATE", alive or not. The kind
+--                  comes from IsBarbarian / the Free Cities ID / IsMajor on
+--                  Players[id], which stays non-nil after elimination (the
+--                  Session D/F logs read IsAlive=false on it). Whether
+--                  IsMajor still answers on a dead player is unobserved,
+--                  but the result does not depend on it: a dead player
+--                  reads as CITY_STATE or fails IsAlive below, so every
+--                  dead old owner skips the war test either way;
+--   "ELIMINATED"   not Players[oldOwnerID]:IsAlive() (or no player object),
+--                  or the old owner has no city left (GetCities():Members()
+--                  is empty). Session F T20: inside the synchronous
+--                  GameEvents.CityConquered for the owner's LAST city,
+--                  IsAlive() is already false, so the capture-time snapshot
+--                  sees the elimination. The no-city test covers the other
+--                  order (the event fires after the city changed hands but
+--                  before the engine marks the player dead), so the result
+--                  does not depend on that timing. Nobody can be at war with
+--                  a dead player: without this the city could never be
+--                  entrusted.
+-- Otherwise false (a living major with a city left: the war test applies).
+-- Params:  oldOwnerID player ID.
+-- Returns: boolean, reason string or nil.
+-- APIs: A42 (IsAlive, IsMajor via EFV_PlayerKind), A43, A45 (GetCities).
+-- ---------------------------------------------------------------------------
+function EFV_EntrustSkipsWarCheck(oldOwnerID)
+	if type(oldOwnerID) ~= "number" or oldOwnerID < 0 then
+		return false, nil
+	end
+	local kind = EFV_PlayerKind(oldOwnerID)
+	if kind == "FREE_CITIES" or kind == "CITY_STATE" then
+		return true, kind
+	end
+	if not IsAlive(oldOwnerID) then
+		return true, "ELIMINATED"
+	end
+	local okC, nCities = pcall(function() return #SortedCities(oldOwnerID) end)
+	if okC and nCities == 0 then
+		return true, "ELIMINATED"
+	end
+	return false, nil
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_EntrustCandidates(capturerID, oldOwnerID) -> recipients, partners
 -- Capture-time eligibility (spec 12.2). partners = every alive player P
 -- (ascending ID, P ~= capturer, P ~= old owner) with EFV_PartnerBasis(
 -- capturer, P) ~= nil: a major civ that is a teammate, ally or declared
 -- friend of the capturer and not at war with it (spec 2; the D2 open-borders
 -- rule is for Volunteers only). recipients = the partners at war with the
--- city's pre-capture owner; when that owner is the Free Cities every partner
--- qualifies ("Free Cities count as at war with everyone"). Capitals and any
+-- city's pre-capture owner, or every partner when EFV_EntrustSkipsWarCheck(
+-- oldOwnerID) (the Free Cities, a city-state alive or not, or an owner no
+-- longer alive, e.g. eliminated by this very capture). Capitals and any
 -- kind of captured city (major, city-state, Free City) are allowed: nothing
 -- here looks at the city.
 -- Params:  capturerID, oldOwnerID player IDs.
@@ -660,11 +709,11 @@ function EFV_EntrustCandidates(capturerID, oldOwnerID)
 	if type(capturerID) ~= "number" or type(oldOwnerID) ~= "number" then
 		return recipients, partners
 	end
-	local oldIsFree = (EFV_PlayerKind(oldOwnerID) == "FREE_CITIES")
+	local anyPartner = EFV_EntrustSkipsWarCheck(oldOwnerID)
 	for _, p in ipairs(EFV_SortedAlivePlayers()) do
 		if p ~= capturerID and p ~= oldOwnerID and EFV_PartnerBasis(capturerID, p) ~= nil then
 			partners[#partners + 1] = p
-			if oldIsFree or AtWar(p, oldOwnerID) then
+			if anyPartner or AtWar(p, oldOwnerID) then
 				recipients[#recipients + 1] = p
 			end
 		end

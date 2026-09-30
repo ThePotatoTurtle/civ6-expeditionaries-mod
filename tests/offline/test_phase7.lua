@@ -171,6 +171,53 @@ test("tracker rows: in-transit rows show the destination / return city; on-map r
 	H.clean()
 end)
 
+test("tracker rows: recipient view reads Inbound / Departed; the sender's view is unchanged", function()
+	local S = BootUI({ tracker = false })
+	local T = FAKE.turn
+	local out = MakeRec(S, { state = "OUTBOUND", arrivalTurn = T + 2 })
+	local ret = MakeRec(S, { state = "RETURNING", arrivalTurn = T + 3, returnCityID = S.c0b.id, returnX = S.c0b.x, returnY = S.c0b.y })
+	local ret1 = MakeRec(S, { state = "RETURNING", arrivalTurn = T + 1, returnCityID = S.c0b.id, returnX = S.c0b.x, returnY = S.c0b.y })
+	local blk = MakeRec(S, { state = "OUTBOUND", arrivalTurn = T, spawnFailCount = 2 })
+	local dep = MakeRec(S, { deployedTurn = T - 5 })
+	local function ById(localID)
+		local byId = {}
+		for _, r in ipairs(EFV_UI_TrackerRows(localID, T)) do byId[r.id] = r end
+		return byId
+	end
+	-- sender (player 0): unchanged labels and sentences
+	local s = ById(0)
+	H.eq(s[out].state, "Outbound"); H.eq(s[ret].state, "Returning")
+	H.ok(string.find(s[out].tooltip, Locale.Lookup("LOC_EFV_STATE_OUTBOUND", 2), 1, true) ~= nil, s[out].tooltip)
+	H.ok(string.find(s[ret].tooltip, Locale.Lookup("LOC_EFV_STATE_RETURNING", 3), 1, true) ~= nil, s[ret].tooltip)
+	H.ok(string.find(s[ret].tooltip, "Departed", 1, true) == nil, "no recipient wording for the sender")
+	-- recipient (player 1): Inbound / Departed
+	local r = ById(1)
+	H.eq(r[out].state, Locale.Lookup("LOC_EFV_TRACKER_ST_INBOUND")); H.eq(r[out].state, "Inbound")
+	H.eq(r[ret].state, Locale.Lookup("LOC_EFV_TRACKER_ST_DEPARTED")); H.eq(r[ret].state, "Departed")
+	H.eq(r[out].turns, 2); H.eq(r[ret].turns, 3)
+	H.eq(r[blk].state, "Blocked", "a blocked arrival reads Blocked for both sides")
+	H.eq(r[dep].state, "Deployed", "on-map states are not renamed")
+	H.ok(string.find(r[out].tooltip, "In transit, arrives in 2 turns", 1, true) ~= nil, "Inbound keeps the transit sentence")
+	H.ok(string.find(r[ret].tooltip, Locale.Lookup("LOC_EFV_STATE_DEPARTED", 3), 1, true) ~= nil, r[ret].tooltip)
+	H.ok(string.find(r[ret].tooltip, "Departed, home in 3 turns", 1, true) ~= nil, "plural rendered: " .. r[ret].tooltip)
+	H.ok(string.find(r[ret1].tooltip, "Departed, home in 1 turn", 1, true) ~= nil, "singular rendered: " .. r[ret1].tooltip)
+	H.ok(string.find(r[ret].tooltip, "Returning", 1, true) == nil, r[ret].tooltip)
+	-- no viewer given (flag badge, unit panel, dev panel): the sender's wording
+	local rec = EFV_UI_RecordsFor(1)[2]
+	H.eq(rec.id, ret)
+	H.eq(EFV_UI_TrackerState(rec, T), "Returning")
+	H.eq(EFV_UI_StateText(rec, T), Locale.Lookup("LOC_EFV_STATE_RETURNING", 3))
+	H.eq(EFV_UI_StateText(rec, T, 1), Locale.Lookup("LOC_EFV_STATE_DEPARTED", 3))
+	H.eq(EFV_UI_StateText(rec, T, 0), Locale.Lookup("LOC_EFV_STATE_RETURNING", 3))
+	-- State column sort on the recipient's side follows the displayed labels
+	local sorted = EFV_UI_TrackerSortRows(EFV_UI_TrackerRows(1, T), { col = 4, dir = 1 })
+	local labels = {}
+	for _, row in ipairs(sorted) do labels[#labels + 1] = row.state end
+	H.deq(labels, { "Blocked", "Departed", "Departed", "Deployed", "Inbound" }, "A to Z by the shown label")
+	H.deq(Ids(sorted), { blk, ret, ret1, dep, out }, "equal labels keep ascending id")
+	H.clean()
+end)
+
 test("tracker rows: sort MUTINY, GRACE (by id), DEPLOYED, OUTBOUND, RETURNING; fewest turns first, unlimited last", function()
 	local S = BootUI({ tracker = false })
 	local T = FAKE.turn

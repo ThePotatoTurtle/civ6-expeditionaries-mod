@@ -35,7 +35,7 @@
 --
 -- Text-key argument contract used here (for WP1.6):
 --   LOC_EFV_STATE_OUTBOUND / _DEPLOYED / _DEPLOYED_VOLUNTEER / _GRACE /
---     _MUTINY / _RETURNING               {1_Num} turns
+--     _MUTINY / _RETURNING / _DEPARTED   {1_Num} turns
 --   LOC_EFV_STATE_DEPLOYED_EXPIRED, _DEPLOYED_VOLUNTEER_READY, _BLOCKED  none
 --   LOC_EFV_LAPSE_WAR / _PARTNER         none (appended to lapsed VOL state)
 --   LOC_EFV_STATE_GRACE_PAUSED / _MUTINY_PAUSED {1_Num} (paused lapse, 0.5.1)
@@ -459,6 +459,14 @@ local function IsPausedLapse(rec)
 		and (rec.state == EFV_Config.ST_GRACE or rec.state == EFV_Config.ST_MUTINY)
 end
 
+-- True when viewerID (a player ID, nil = no viewer given) is the record's
+-- recipient and not its sender: the unit was sent to the viewer. Used for
+-- the recipient wording of units in transit (Inbound / Departed).
+local function RecipientView(rec, viewerID)
+	return type(viewerID) == "number" and viewerID >= 0
+		and rec.recipientID == viewerID and rec.senderID ~= viewerID
+end
+
 -- ---------------------------------------------------------------------------
 -- EFV_UI_StateText(rec, turn) -> text
 -- Localized one-line state: "In transit, arrives in N" / "Deployed, N turns
@@ -469,11 +477,15 @@ end
 -- == 1: the Volunteer stands on the sender's or the recipient's land,
 -- INTERFACES note 29) reads "Grace N (paused): recall it now ..." /
 -- "Mutiny N (paused): ..." (LOC_EFV_STATE_GRACE_PAUSED / _MUTINY_PAUSED).
--- Params:  rec record, turn number (current turn; nil = now).
+-- Recipient view (viewerID = the recipient): a RETURNING unit reads
+-- "Departed, home in N" (LOC_EFV_STATE_DEPARTED); OUTBOUND keeps the
+-- "In transit" sentence.
+-- Params:  rec record, turn number (current turn; nil = now), viewerID
+--          player ID or nil (nil = the sender's wording).
 -- Returns: string.
 -- PLAN 3.1, 2.9 (mutiny N formula); spec 14.4, 14.5. APIs: A17, A25, U17.
 -- ---------------------------------------------------------------------------
-function EFV_UI_StateText(rec, turn)
+function EFV_UI_StateText(rec, turn, viewerID)
 	if type(rec) ~= "table" then
 		return ""
 	end
@@ -486,6 +498,9 @@ function EFV_UI_StateText(rec, turn)
 			text = SafeLookup("LOC_EFV_STATE_BLOCKED")
 		else
 			local key = (st == EFV_Config.ST_OUTBOUND) and "LOC_EFV_STATE_OUTBOUND" or "LOC_EFV_STATE_RETURNING"
+			if st == EFV_Config.ST_RETURNING and RecipientView(rec, viewerID) then
+				key = "LOC_EFV_STATE_DEPARTED"
+			end
 			text = SafeLookup(key, math.max(0, n))
 		end
 	elseif st == EFV_Config.ST_DEPLOYED then
@@ -596,11 +611,12 @@ end
 -- LOC_EFV_FLAG_TT with {1_Force} {2_Unit} {3_Sender} {4_Recipient}
 -- {5_State} (state text includes the remaining turns; spec 14.4). Reused by
 -- the flag badge, the unit-panel status button and the tracker.
--- Params:  rec record.
+-- Params:  rec record; viewerID player ID or nil (passed to
+--          EFV_UI_StateText; the tracker passes the local player).
 -- Returns: string.
 -- PLAN 3.1; spec 14.4. APIs: U17, A62.
 -- ---------------------------------------------------------------------------
-function EFV_UI_StatusTooltip(rec)
+function EFV_UI_StatusTooltip(rec, viewerID)
 	if type(rec) ~= "table" then
 		return ""
 	end
@@ -612,7 +628,7 @@ function EFV_UI_StatusTooltip(rec)
 	end)
 	local text = SafeLookup("LOC_EFV_FLAG_TT", force, unitName,
 		EFV_UI_PlayerName(rec.senderID), EFV_UI_PlayerName(rec.recipientID),
-		EFV_UI_StateText(rec, CurrentTurn()))
+		EFV_UI_StateText(rec, CurrentTurn(), viewerID))
 	-- Heal-gate warning (designer ruling "Strategic-resource heal gate",
 	-- 0.6.0): a unit on the map whose owner has none of its resource.
 	if rec.state == EFV_Config.ST_DEPLOYED or rec.state == EFV_Config.ST_GRACE or rec.state == EFV_Config.ST_MUTINY then
@@ -672,6 +688,13 @@ local TRACKER_STATE_KEYS = {
 	RETURNING = "LOC_EFV_TRACKER_ST_RETURNING",
 }
 
+-- The same labels seen by the recipient (the unit was sent to the viewer):
+-- a unit on its way reads Inbound, one going back to its owner Departed.
+local TRACKER_STATE_KEYS_RECIPIENT = {
+	OUTBOUND  = "LOC_EFV_TRACKER_ST_INBOUND",
+	RETURNING = "LOC_EFV_TRACKER_ST_DEPARTED",
+}
+
 local function InTransit(rec)
 	return rec.state == EFV_Config.ST_OUTBOUND or rec.state == EFV_Config.ST_RETURNING
 end
@@ -717,11 +740,14 @@ end
 -- Mutiny / Returning / Blocked (arrival due, no free tile); a lapsed
 -- Volunteer (GRACE / MUTINY after a lapse) shows "Lapse: <state>", and
 -- "Lapse: <state> N (paused)" while it stands on valid land (note 29).
--- Params:  rec record, turn current turn.
+-- Recipient view (viewerID = the recipient, not the sender): Outbound reads
+-- Inbound and Returning reads Departed; the sender's view is unchanged.
+-- Params:  rec record, turn current turn, viewerID player ID or nil (nil =
+--          the sender's labels).
 -- Returns: string ("" for no record).
 -- PLAN 3.6; spec 14.5. APIs: U17.
 -- ---------------------------------------------------------------------------
-function EFV_UI_TrackerState(rec, turn)
+function EFV_UI_TrackerState(rec, turn, viewerID)
 	if type(rec) ~= "table" then
 		return ""
 	end
@@ -733,6 +759,8 @@ function EFV_UI_TrackerState(rec, turn)
 	elseif st == EFV_Config.ST_DEPLOYED and rec.forceType ~= EFV_Config.FT_VOL
 			and EFV_UI_TrackerTurns(rec, turn) == 0 then
 		text = SafeLookup("LOC_EFV_TRACKER_ST_EXPIRED")
+	elseif TRACKER_STATE_KEYS_RECIPIENT[st] ~= nil and RecipientView(rec, viewerID) then
+		text = SafeLookup(TRACKER_STATE_KEYS_RECIPIENT[st])
 	elseif TRACKER_STATE_KEYS[st] ~= nil then
 		text = SafeLookup(TRACKER_STATE_KEYS[st])
 	else
@@ -787,8 +815,9 @@ end
 --   { rec, id, alert = "MUTINY" / "GRACE" / nil, sent = bool (local is the
 --     sender), own = bool (local controls the unit on the map), transit =
 --     bool, group, turns = n or nil, unit, partner ("To X" / "From X"),
---     force, state (EFV_UI_TrackerState), turnsText ("-" when nil), place
---     (EFV_UI_TrackerPlace), tooltip (EFV_UI_StatusTooltip + click hint) }
+--     force, state (EFV_UI_TrackerState, recipient labels on received
+--     rows), turnsText ("-" when nil), place (EFV_UI_TrackerPlace), tooltip
+--     (EFV_UI_StatusTooltip with the local player as viewer + click hint) }
 -- sorted MUTINY, GRACE (ascending id), then DEPLOYED, OUTBOUND, RETURNING
 -- (fewest turns first, unlimited last, then id). Deterministic.
 -- Params:  localID player ID; turn current turn (nil = now).
@@ -834,10 +863,10 @@ function EFV_UI_TrackerRows(localID, turn)
 			unit = unitName,
 			partner = SafeLookup(sent and "LOC_EFV_TRACKER_TO" or "LOC_EFV_TRACKER_FROM", EFV_UI_PlayerName(partnerID)),
 			force = forceKey and SafeLookup(forceKey) or tostring(rec.forceType),
-			state = EFV_UI_TrackerState(rec, turn),
+			state = EFV_UI_TrackerState(rec, turn, localID),
 			turnsText = (turns ~= nil) and tostring(turns) or "-",
 			place = place,
-			tooltip = EFV_UI_StatusTooltip(rec) .. "[NEWLINE][NEWLINE]" .. hint,
+			tooltip = EFV_UI_StatusTooltip(rec, localID) .. "[NEWLINE][NEWLINE]" .. hint,
 		}
 	end
 	table.sort(rows, RowLess)

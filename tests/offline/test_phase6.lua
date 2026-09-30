@@ -4,7 +4,10 @@
 -- INTERFACES note 31), plus the 0.6.0 heal-gate warning (designer ruling
 -- "Strategic-resource heal gate").
 -- Base scenario: 0 human, 1 ally, 2 declared friend, 3 enemy (at war with
--- 0, 1, 2 and the city-state 4), 62 Free Cities.
+-- 0, 1, 2 and the city-state 4), 62 Free Cities. Designer ruling 2026-09-30:
+-- a city-state old owner (alive or not) or one knocked out of the game needs
+-- no war with the recipient (EFV_EntrustSkipsWarCheck); LoneEnemy() gives a
+-- living major (5) that only the human fights.
 
 local N = function(name) return "EFV_NOTIF_" .. name end
 
@@ -37,6 +40,28 @@ local function FailedText(pid)
 	return n and n.data[ParameterTypes.SUMMARY] or ""
 end
 
+-- A living major (5) at war with the human only: its partners (1 ally, 2
+-- friend) are not at war with it, so they cannot take its city. It keeps a
+-- second city, so taking the first does not knock it out. Returns the city
+-- to capture.
+local function LoneEnemy()
+	FAKE.NewPlayer(5, { gold = 0 })
+	local c = H.city(5, 60, 12, { capital = true, name = "LOC_CITY_E" })
+	H.city(5, 64, 16, { name = "LOC_CITY_E2" })
+	H.war(0, 5)
+	return c
+end
+
+-- Capture of the old owner's LAST city: the engine has already marked it
+-- dead inside GameEvents.CityConquered (Session F T20).
+local function CaptureLast(oldOwner, city)
+	local x, y, oldID = city.x, city.y, city.id
+	CityManager.TransferCity(city, 0, CityTransferTypes.BY_COMBAT)
+	H.kill(oldOwner)
+	GameEvents.CityConquered(0, oldOwner, oldID, x, y)
+	return CityManager.GetCityAt(x, y)
+end
+
 -- ---------------------------------------------------------------------------
 -- Capture-time eligibility snapshot (spec 12.2)
 -- ---------------------------------------------------------------------------
@@ -53,24 +78,27 @@ test("P6.1 snapshot: ally and friend at war with the old owner qualify; partners
 	H.clean()
 end)
 
-test("P6.2 snapshot: partners not at war with the old owner -> no recipient, partners kept for the tooltip", function()
-	local S = H.baseScenario()
-	H.war(0, 4)                              -- the human fights the city-state alone
+test("P6.2 snapshot: partners not at war with a living major old owner -> no recipient, partners kept for the tooltip", function()
+	H.baseScenario()
+	local c5 = LoneEnemy()                   -- the human fights 5 alone
 	H.loadEFV()
-	Capture(4, S.c4)
-	local snap = Snap(S.c4)
+	Capture(5, c5)
+	local snap = Snap(c5)
 	H.deq(snap.recipients, {})
 	H.deq(snap.partners, { 1, 2 })
 	H.deq(EFV_EntrustSnapshotReasons(snap, 0, FAKE.turn), { "ENTRUST_NO_PARTNER" })
+	H.ok(H.hasLine("noWarCheck=no"))
+	Entrust(0, c5, 1)
+	H.eq(Owner(c5), 0, "still refused: 5 is alive, a major, and nobody else fights it")
 	H.clean()
 end)
 
-test("P6.2b snapshot: a city-state's city qualifies partners at war with that city-state", function()
+test("P6.2b snapshot: a city-state's city qualifies every partner, at war with it or not (ruling 2026-09-30)", function()
 	local S = H.baseScenario()
 	H.war(0, 4); H.war(1, 4)
 	H.loadEFV()
 	Capture(4, S.c4)
-	H.deq(Snap(S.c4).recipients, { 1 })
+	H.deq(Snap(S.c4).recipients, { 1, 2 })
 	H.clean()
 end)
 
@@ -111,12 +139,12 @@ test("snapshot: AI capturer -> none; a new capture at the same plot replaces the
 end)
 
 test("snapshot survives a reload (property round trip); empty lists normalised", function()
-	local S = H.baseScenario()
-	H.war(0, 4)
+	H.baseScenario()
+	local c5 = LoneEnemy()
 	H.loadEFV()
-	Capture(4, S.c4)
+	Capture(5, c5)
 	H.reloadEFV()
-	local snap = Snap(S.c4)
+	local snap = Snap(c5)
 	H.notnil(snap)
 	H.deq(snap.recipients, {}); H.deq(snap.partners, { 1, 2 })
 	H.clean()
@@ -210,13 +238,99 @@ test("re-validation: a city no longer owned by the capturer (liberated) -> STALE
 end)
 
 test("P6.2 request with no qualifying partner -> NO_PARTNER naming the former owner", function()
+	H.baseScenario()
+	local c5 = LoneEnemy()
+	H.loadEFV()
+	Capture(5, c5)
+	Entrust(0, c5, 1)
+	H.eq(Owner(c5), 0)
+	H.ok(string.find(FailedText(0), Locale.Lookup("LOC_EFV_REASON_ENTRUST_NO_PARTNER", EFV_PlayerName(5)), 1, true))
+	H.clean()
+end)
+
+-- ---------------------------------------------------------------------------
+-- Designer ruling 2026-09-30: no war test when the old owner is a city-state
+-- (alive or not) or has been knocked out (EFV_EntrustSkipsWarCheck)
+-- ---------------------------------------------------------------------------
+test("ruling: EFV_EntrustSkipsWarCheck by old owner (Free Cities, city-state alive or dead, major dead or cityless)", function()
+	H.baseScenario()
+	LoneEnemy()
+	H.loadEFV()
+	H.deq({ EFV_EntrustSkipsWarCheck(62) }, { true, "FREE_CITIES" })
+	H.deq({ EFV_EntrustSkipsWarCheck(4) }, { true, "CITY_STATE" })
+	H.deq({ EFV_EntrustSkipsWarCheck(3) }, { false }, "living major with a city: war test applies")
+	H.deq({ EFV_EntrustSkipsWarCheck(5) }, { false })
+	H.kill(4)
+	H.deq({ EFV_EntrustSkipsWarCheck(4) }, { true, "CITY_STATE" }, "a dead city-state is still recognised")
+	H.kill(3)
+	H.deq({ EFV_EntrustSkipsWarCheck(3) }, { true, "ELIMINATED" })
+	-- 5 loses both cities but is not marked dead yet (the other event
+	-- order): no city left counts as knocked out too
+	for _, c in ipairs(FAKE.CitiesOf(5)) do
+		CityManager.TransferCity(c, 0, CityTransferTypes.BY_COMBAT)
+	end
+	H.ok(Players[5]:IsAlive())
+	H.deq({ EFV_EntrustSkipsWarCheck(5) }, { true, "ELIMINATED" })
+	H.deq({ EFV_EntrustSkipsWarCheck(-1) }, { false })
+	H.clean()
+end)
+
+test("ruling: city-state old owner, alive, nobody else at war with it -> any partner can take the city", function()
+	local S = H.baseScenario()
+	H.city(4, 33, 24, { name = "LOC_CITY_CS2" })   -- keeps the city-state alive
+	H.war(0, 4)                              -- the human fights the city-state alone
+	H.loadEFV()
+	Capture(4, S.c4)
+	H.ok(Players[4]:IsAlive())
+	H.deq(Snap(S.c4).recipients, { 1, 2 })
+	H.ok(H.hasLine("noWarCheck=CITY_STATE"))
+	Entrust(0, S.c4, 2)
+	H.eq(Owner(S.c4), 2)
+	H.clean()
+end)
+
+test("ruling: city-state eliminated by the capture -> any partner can take the city", function()
 	local S = H.baseScenario()
 	H.war(0, 4)
 	H.loadEFV()
-	Capture(4, S.c4)
+	CaptureLast(4, S.c4)
+	H.deq(Snap(S.c4).recipients, { 1, 2 })
+	H.ok(H.hasLine("noWarCheck=CITY_STATE"))
 	Entrust(0, S.c4, 1)
-	H.eq(Owner(S.c4), 0)
-	H.ok(string.find(FailedText(0), Locale.Lookup("LOC_EFV_REASON_ENTRUST_NO_PARTNER", EFV_PlayerName(4)), 1, true))
+	H.eq(Owner(S.c4), 1)
+	H.clean()
+end)
+
+test("ruling: major eliminated by the capture of its last city -> any partner can take the city", function()
+	H.baseScenario()
+	FAKE.NewPlayer(5, { gold = 0 })
+	local c5 = H.city(5, 60, 12, { capital = true, name = "LOC_CITY_E" })
+	H.war(0, 5)                              -- 1 and 2 were never at war with 5
+	H.loadEFV()
+	CaptureLast(5, c5)
+	H.deq(Snap(c5).recipients, { 1, 2 })
+	H.ok(H.hasLine("noWarCheck=ELIMINATED"))
+	Entrust(0, c5, 2)
+	H.eq(Owner(c5), 2)
+	H.clean()
+end)
+
+test("ruling: Free City still qualifies every partner; a living major still needs the war", function()
+	H.baseScenario()
+	local fc = H.city(62, 50, 30, { name = "LOC_CITY_FREE" })
+	local c5 = LoneEnemy()
+	H.war(0, 62)
+	H.war(1, 5)                              -- the ally fights 5 too, the friend does not
+	H.loadEFV()
+	Capture(62, fc)
+	H.deq(Snap(fc).recipients, { 1, 2 })
+	H.ok(H.hasLine("noWarCheck=FREE_CITIES"))
+	Capture(5, c5)
+	H.deq(Snap(c5).recipients, { 1 }, "only the partner at war with the living major")
+	Entrust(0, c5, 2)
+	H.eq(Owner(c5), 0, "the friend is refused")
+	Entrust(0, c5, 1)
+	H.eq(Owner(c5), 1)
 	H.clean()
 end)
 
@@ -324,16 +438,16 @@ test("UI: popup reopened without a decision rebuilds (picker closed, nothing arm
 end)
 
 test("P6.2 UI: disabled button explains why (former owner named, partners not at war listed)", function()
-	local S = H.baseScenario()
-	H.war(0, 4)
+	H.baseScenario()
+	local c5 = LoneEnemy()
 	H.loadEFV()
-	Capture(4, S.c4)
+	Capture(5, c5)
 	local env = BootUI()
-	OpenPopup(S.c4)
+	OpenPopup(c5)
 	local b = env.Controls.EntrustMainButton
 	H.ok(b:IsDisabled())
 	H.eq(b.text, Locale.Lookup("LOC_EFV_ENTRUST_DISABLED_NO_PARTNER"))
-	local old = EFV_UI_PlayerName(4)
+	local old = EFV_UI_PlayerName(5)
 	H.ok(string.find(b.tooltip, Locale.Lookup("LOC_EFV_REASON_ENTRUST_NO_PARTNER", old), 1, true), b.tooltip)
 	H.ok(string.find(b.tooltip, Locale.Lookup("LOC_EFV_ENTRUST_NOT_AT_WAR",
 		EFV_UI_PlayerName(1) .. ", " .. EFV_UI_PlayerName(2), old), 1, true), b.tooltip)
