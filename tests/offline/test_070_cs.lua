@@ -256,11 +256,12 @@ test("war first seen at the owner's PTSC is deferred to the next boundary; no re
 	end
 	H.endTurn()                                       -- PTS(1) no war; PTSC(1) war -> deferred
 	H.ok(H.hasLine("[War] id=" .. id .. " deferred at the owner's PTSC"))
-	-- Handled at the next boundary (PTS(2) of the same round): reverted to the sender.
-	H.isnil(Rec(id), "record closed by the revert")
+	-- Handled at the next boundary (PTS(2) of the same round): sent home (1.0.4).
+	H.eq(Rec(id).state, "RETURNING", "sent home by the war")
+	H.eq(Rec(id).returnReason, "WAR")
 	H.ok(not H.unitAlive(u))
-	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1, "the unit is the sender's again")
-	H.ok(#removals >= 1, "the revert removed the recipient's unit")
+	H.len(H.unitsOf(1, "UNIT_SWORDSMAN"), 0, "taken from the recipient")
+	H.ok(#removals >= 1, "the send-home removed the recipient's unit")
 	H.eq(removals[1].hook, "PTS"); H.eq(removals[1].pid, 2); H.eq(removals[1].owner, 1)
 	for _, rm in ipairs(removals) do
 		H.ok(not (rm.hook == "PTSC" and rm.owner == rm.pid), "removal of a unit of " .. rm.pid .. " at its own PTSC")
@@ -281,7 +282,7 @@ test("war at PTSC of another player (not the owner) is still handled at once", f
 		if pid == 2 and not fired then fired = true; H.war(0, 1) end
 	end)
 	H.endTurn{ act = function(pid)
-		if pid == 2 then H.isnil(Rec(id), "reverted at PTSC(2): the unit is not player 2's") end
+		if pid == 2 then H.eq(Rec(id).state, "RETURNING", "sent home at PTSC(2): the unit is not player 2's") end
 	end }
 	H.ok(not H.hasLine("deferred at the owner's PTSC"))
 	H.clean()

@@ -6,7 +6,7 @@
 -- (CS_NOT_MET). Expeditionary to majors and Volunteers keep the
 -- shared-enemy rule (NO_COMMON_WAR). Lifecycle unchanged: a CS unit never
 -- lapses for want of a war, and a war between the sender and the city-state
--- still reverts it (spec 11).
+-- still sends it home (spec 11; 1.0.4: the return trip, no switch in place).
 --
 -- Scenario: 0 Rome (human), 1 England (friend + open borders), 5 Mali
 -- (friend, no wars), 3 Gaul (at war with Rome and England), 6 Rapa Nui
@@ -155,7 +155,7 @@ test("1.0.2: Expeditionary to majors and Volunteers keep the shared-enemy rule",
 	H.clean()
 end)
 
-test("1.0.2 lifecycle: a CS unit sent without a shared war serves on; a sender-CS war still reverts it", function()
+test("1.0.2 lifecycle: a CS unit sent without a shared war serves on; a sender-CS war sends it home (1.0.4)", function()
 	local S = Scenario()
 	H.loadEFV()
 	H.send(ROME, MyUnit(), KANDY, S.c7, CS, 999)
@@ -175,8 +175,14 @@ test("1.0.2 lifecycle: a CS unit sent without a shared war serves on; a sender-C
 	H.notnil(Players[KANDY]:GetUnits():FindID(r.onMapUnitID), "Kandy commands the unit")
 	H.war(ROME, KANDY)
 	H.endTurn()
-	H.len(H.records(), 0, "reverted at the next boundary (spec 11)")
-	H.len(H.notifs(ROME, "EFV_NOTIF_REVERTED"), 1)
-	H.len(H.unitsOf(ROME, "UNIT_SWORDSMAN"), 1, "the unit is Rome's again")
+	r = H.record()
+	H.eq(r.state, "RETURNING", "sent home at the next boundary (spec 11, 1.0.4)")
+	H.eq(r.returnReason, "WAR")
+	H.len(H.unitsOf(KANDY, "UNIT_SWORDSMAN"), 0, "taken from Kandy")
+	H.len(H.notifs(ROME, "EFV_NOTIF_RETURNING"), 1)
+	H.len(H.notifs(ROME, "EFV_NOTIF_REVERTED"), 0)
+	H.turns(r.arrivalTurn - FAKE.turn)
+	H.len(H.records(), 0)
+	H.len(H.unitsOf(ROME, "UNIT_SWORDSMAN"), 1, "the unit is back home with Rome")
 	H.clean()
 end)

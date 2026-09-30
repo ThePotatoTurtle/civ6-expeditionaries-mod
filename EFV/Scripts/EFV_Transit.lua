@@ -12,7 +12,8 @@
 --
 -- Return reasons (record.returnReason): "EXPIRED", "GRACE_RETURN",
 -- "MUTINY_RETURN", "RECALL", "RECIPIENT_GONE" (on-map EXP / CS of an
--- eliminated recipient), "WAR" (revert without a free tile), "CANCELLED"
+-- eliminated recipient), "WAR" (on-map EXP / CS whose sender and host went
+-- to war; the sender gets the RETURNING _WAR text, 1.0.4), "CANCELLED"
 -- (a cancelled transit with no free tile near its origin or home city,
 -- fallback B). "DEST_LOST" and outbound "RECIPIENT_GONE" / "WAR" only appear
 -- on RETURNING records from older saves (still handled by ArriveReturning).
@@ -44,6 +45,8 @@
 --     _KEPT        {1 unit, 2 sender civ, 3 city} (recipient of an orphan)
 --   SPAWN_BLOCKED  {1 unit, 2 city}
 --   RETURNING      {1 unit, 2 return city, 3 N transit turns}
+--     _WAR         {1 unit, 2 return city, 3 N transit turns, 4 recipient
+--                   civ} (sender; reason "WAR", 1.0.4)
 --     _CANCELLED   {1 unit, 2 destination, 3 reason text, 4 home city,
 --                   5 N transit turns, 6 refund text} (sender, fallback B)
 --   RETURNED       {1 unit, 2 city}
@@ -223,7 +226,8 @@ end
 -- measured from (fromX, fromY) = the associated recipient city (spec 10.2) or
 -- the origin tile of a cancelled transit (fallback B). Clears on-map, grace,
 -- mutiny and lapse fields (incl. lapsePaused). Queues EFV_NOTIF_RETURNING
--- (sender) unless quiet (the transit cancel sends its own _CANCELLED text).
+-- (sender; the _WAR text for reason "WAR", 1.0.4) unless quiet (the transit
+-- cancel sends its own _CANCELLED text).
 local function EnterReturning(store, rec, pCity, reason, fromX, fromY, turn, quiet)
 	local cx, cy = pCity:GetX(), pCity:GetY()
 	local band, d = nil, nil
@@ -257,8 +261,15 @@ local function EnterReturning(store, rec, pCity, reason, fromX, fromY, turn, qui
 	Touch(store)
 
 	if not quiet then
-		EFV_Notify.Queue(rec.senderID, EFV_Config.NOTIF.RETURNING, "LOC_" .. EFV_Config.NOTIF.RETURNING,
-			{ UnitName(rec), CityName(pCity), band }, cx, cy, Extra(rec, "RETURNING"))
+		local key = "LOC_" .. EFV_Config.NOTIF.RETURNING
+		local args = { UnitName(rec), CityName(pCity), band }
+		if reason == "WAR" then
+			-- 1.0.4: sent home because the sender and the host went to war.
+			key = key .. "_WAR"
+			args[4] = PlayerName(rec.recipientID)
+		end
+		EFV_Notify.Queue(rec.senderID, EFV_Config.NOTIF.RETURNING, key,
+			args, cx, cy, Extra(rec, "RETURNING"))
 	end
 	EFV_Log(2, "Return", "start id=%d reason=%s city=%s at=%d,%d band=%d arrival=%d",
 		rec.id, tostring(reason), tostring(rec.returnCityID), cx, cy, band, rec.arrivalTurn)
@@ -888,7 +899,7 @@ end
 -- EFV_SpawnValid passes: free, not enemy land, enterable) or else on the
 -- plots of EFV_Spawn.PickOrdered around it (nearest ring first, one synced
 -- RNG pick inside that ring, at most SPAWN_CREATE_TRIES plots). A nil Create
--- tries the next plot (the RevertToSender pattern).
+-- tries the next plot.
 -- Returns pNew, plot, ring, tries (pNew nil when nothing worked).
 local function PlaceNear(store, rec, cx, cy, domain, ownerID, label, turn, tryCentre)
 	local tries = 0

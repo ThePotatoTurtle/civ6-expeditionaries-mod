@@ -155,7 +155,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - Recall needs 10 turns deployed (or a lapse) and the unit on your land or the host's. Full health is not needed.
 
 ### War, elimination and losses
-- If you and the host go to war with each other: lent Expeditionary and City-State units switch back to you where they stand (or on a nearby tile, or they travel home if there is no room). Deployed Volunteers are simply your units and VEF stops tracking them. Units on the way are called back (see When a send is called off).
+- If you and the host go to war with each other, no matter who declared it: lent Expeditionary and City-State units leave the host and travel home, the same trip as at the end of their service. This also applies to units in grace or mutiny. Deployed Volunteers are simply your units and VEF stops tracking them. Units on the way are called back (see When a send is called off), and units already heading home still arrive.
 - If the host is eliminated: units on the way are called back to where they left, and you get half the fee back. Deployed Expeditionary units come home as they were when the host's last city fell (if VEF has no saved state for a unit, it is lost and you are told). A unit killed in that fight is lost, not sent home. Volunteers are not affected here; the normal lapse follows.
 - If you are eliminated: your deployed Expeditionary and City-State units stay with their hosts for good, and those still on the way arrive on schedule and become the host's own units. If the destination city has changed hands by then, they go to the host's nearest other city. Your Volunteers, deployed or on the way, and any unit on its way home are lost.
 - If a lent unit is killed or disbanded, you get a notification.
@@ -183,8 +183,10 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - If the host upgrades a lent unit and moves it away in the same turn, VEF can't be sure it's the same unit and reports it lost. The same applies to a city-state unit levied by its suzerain when it can't be told apart from the city-state's own units.
 - If the host is eliminated, anything a deployed Expeditionary unit gained after the host's last city fell is lost.
 - A mutinying unit may briefly show a "+HP" animation before VEF takes the healing back.
+- A host who declares war on you can use your lent units until the next turn starts.
 
 ## Changelog
+- Unreleased: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land.
 - 1.0.3: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so. Entrust no longer needs a partner at war with the old owner when that owner was a city-state or has been knocked out of the game, so a city-state or a civ's last city can be entrusted now. In the tracker, units lent to you show as Inbound while on their way and Departed once they head home.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.

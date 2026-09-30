@@ -79,68 +79,116 @@ local STANDARD = function() return MilitaryFormationTypes.STANDARD_FORMATION end
 -- ===========================================================================
 -- Spec 11 row 1: sender and recipient go to war
 -- ===========================================================================
-test("row 1 EXP: B declares war during its own turn -> reverted at the next boundary of the SAME round (DV16)", function()
+-- 1.0.4 (designer ruling 2026-09-30, option A): any war between the sender
+-- and the host, whoever declared it, sends a lent EXP / CS unit on the map
+-- home on the normal return trip. Nothing is switched in place any more.
+
+-- The sender's RETURNING notice carries the _WAR text naming the host.
+local function WarReturningText(rr, hostID)
+	return Has(Summary(Sent(0, "RETURNING")[1]), "LOC_EFV_NOTIF_RETURNING_WAR_SUMMARY",
+		EFV_UnitDisplayName("UNIT_SWORDSMAN", nil), EFV_CityName(CityManager.GetCityAt(rr.returnX, rr.returnY)),
+		rr.transitTurns, EFV_PlayerName(hostID))
+end
+
+test("row 1 EXP: the host declares war during its own turn -> sent home at the next boundary of the SAME round (DV16)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r, u = Deploy(S)
-	local x, y = u:GetX(), u:GetY()
-	local turnOfWar
 	H.endTurn({ act = function(p, T)
-		if p == 1 then H.war(1, 0); turnOfWar = T end
+		if p == 1 then H.war(1, 0) end
 		if p == 2 then
-			-- PTS(2) came after B's action: the unit is already the sender's.
-			H.len(H.records(), 0, "reverted before F's turn")
+			-- PTS(2) came after B's action: the unit has already left.
+			local rr = Rec(r.id)
+			H.eq(rr and rr.state, "RETURNING", "sent home before F's turn")
 		end
 	end })
-	H.eq(#H.unitsOf(0, "UNIT_SWORDSMAN"), 1)
-	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")[1]
-	H.eq(mine:GetX(), x); H.eq(mine:GetY(), y)
-	H.eq(mine.xp, 14); H.deq(H.promotionTypes(mine), { "PROMOTION_BATTLECRY" }) -- Session F T08 + FLAG_XP_CLAMP: a restored unit is level 1, XP above the first threshold (15) is lost (clamped to 14)
-	H.len(Sent(0, "REVERTED"), 1)
-	H.ok(Has(Summary(Sent(0, "REVERTED")[1]), "LOC_EFV_NOTIF_REVERTED_SUMMARY",
-		EFV_UnitDisplayName("UNIT_SWORDSMAN", nil), EFV_PlayerName(0), EFV_PlayerName(1)))
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
+	H.isnil(rr.onMapUnitID)
+	H.ok(not H.unitAlive(u))
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0, "not switched to the sender in place")
+	H.len(H.unitsOf(1, "UNIT_SWORDSMAN"), 0, "taken from the host")
+	H.len(Sent(0, "RETURNING"), 1)
+	H.ok(WarReturningText(rr, 1), "sender: RETURNING _WAR text")
+	H.ok(H.hasLine("[War] sent home id=" .. r.id))
 	H.clean()
 end)
 
-test("row 1 EXP: the unit's tile is taken -> nearest valid tile by the spawn search around it", function()
+test("row 1 EXP: the sender declares war -> sent home all the same; both notices (who declared does not matter)", function()
 	local S = H.baseScenario()
 	Players[1].human = true
 	H.loadEFV()
-	local r, u = Deploy(S)
-	local x, y = u:GetX(), u:GetY()
-	H.unit(1, "UNIT_BUILDER", x, y)                  -- a civilian of B shares the tile
+	local r = Deploy(S)
 	H.war(0, 1)
 	H.endTurn()
-	H.len(H.records(), 0)
-	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
-	H.len(mine, 1)
-	H.ok(Map.GetPlotDistance(x, y, mine[1]:GetX(), mine[1]:GetY()) >= 1, "not on the occupied tile")
-	H.ok(Map.GetPlotDistance(x, y, mine[1]:GetX(), mine[1]:GetY()) <= EFV_Config.SPAWN_SEARCH_MAX_RING)
-	H.len(Sent(0, "REVERTED"), 1); H.len(Sent(1, "REVERTED"), 1, "both players")
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0, "not switched to the sender in place")
+	H.len(H.unitsOf(1, "UNIT_SWORDSMAN"), 0, "taken from the host")
+	-- Both notices: the sender's RETURNING (war text), the host's one-off REVERTED.
+	H.len(Sent(0, "RETURNING"), 1); H.ok(WarReturningText(rr, 1), "sender: RETURNING _WAR text")
+	H.len(Sent(0, "REVERTED"), 0, "the sender gets RETURNING, not REVERTED")
+	H.len(Sent(1, "REVERTED"), 1, "the host is told once")
+	H.ok(Has(Summary(Sent(1, "REVERTED")[1]), "LOC_EFV_NOTIF_REVERTED_SUMMARY",
+		EFV_UnitDisplayName("UNIT_SWORDSMAN", nil), EFV_PlayerName(0), EFV_PlayerName(1)))
+	H.endTurn()
+	H.len(Sent(1, "REVERTED"), 1, "one-off: not sent again")
 	H.clean()
 end)
 
-test("row 1 EXP: no tile at all (every Create refused) -> return trip instead (DV15)", function()
+test("row 1 EXP: sent home by war -> the normal return trip, arrives with its promotions and level", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r = Deploy(S)
 	H.war(0, 1)
-	FAKE.createNil = function() return true end
 	H.endTurn()
-	FAKE.createNil = nil
 	local rr = Only()
-	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
-	H.isnil(rr.onMapUnitID)
-	H.len(H.unitsOf(1, "UNIT_SWORDSMAN"), 0, "taken from the recipient")
-	H.turns(rr.arrivalTurn - FAKE.turn)
+	H.eq(rr.state, "RETURNING")
+	H.eq(rr.transitTurns, EFV_Band(rr.returnX, rr.returnY, rr.destX, rr.destY), "band from the host city, as at a tour end")
+	H.ok(rr.arrivalTurn > FAKE.turn, "travel time, not at once")
+	H.turns(rr.arrivalTurn - FAKE.turn - 1)
+	H.len(H.records(), 1, "still on the way")
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0)
+	H.turns(1)
 	H.len(H.records(), 0)
-	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1, "back home")
-	H.eq(H.unitsOf(0, "UNIT_SWORDSMAN")[1].xp, 14) -- Session F T08 + FLAG_XP_CLAMP: a restored unit is level 1, XP above the first threshold (15) is lost (clamped to 14)
+	local home = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(home, 1, "back home")
+	H.ok(Map.GetPlotDistance(rr.returnX, rr.returnY, home[1]:GetX(), home[1]:GetY()) <= EFV_Config.SPAWN_SEARCH_MAX_RING,
+		"placed at the return city")
+	H.eq(home[1].xp, 14); H.deq(H.promotionTypes(home[1]), { "PROMOTION_BATTLECRY" }) -- Session F T08 + FLAG_XP_CLAMP: a restored unit is level 1, XP above the first threshold (15) is lost (clamped to 14)
+	H.len(Sent(0, "RETURNED"), 1)
 	H.clean()
 end)
 
-test("row 1 EXP: war while in MUTINY -> reverted (mutiny ends, damage kept)", function()
+test("row 1 EXP: war while in GRACE (expired outside valid land) -> sent home, grace ends", function()
 	local S = H.baseScenario()
+	Players[1].human = true
+	H.loadEFV()
+	local r, u = Deploy(S)
+	local p = H.neutralPlot(30, 5)
+	H.moveUnit(u, p:GetX(), p:GetY())
+	EditRecord(r.id, function(rec) rec.deployedTurn = FAKE.turn - 20 end)
+	H.endTurn()                                      -- expiry outside valid land -> GRACE
+	H.eq(Rec(r.id).state, "GRACE")
+	H.clearNotifs()
+	H.war(1, 0)
+	H.endTurn()
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
+	H.isnil(rr.graceTurnsLeft)
+	H.ok(not H.unitAlive(u))
+	H.len(Sent(0, "RETURNING"), 1); H.ok(WarReturningText(rr, 1))
+	H.len(Sent(1, "REVERTED"), 1)
+	H.len(Sent(1, "GRACE"), 0, "no grace countdown any more")
+	H.turns(rr.arrivalTurn - FAKE.turn)
+	H.len(H.records(), 0)
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1, "home")
+	H.clean()
+end)
+
+test("row 1 EXP: war while in MUTINY -> sent home (the mutiny ends, damage kept)", function()
+	local S = H.baseScenario()
+	Players[1].human = true
 	H.loadEFV()
 	local r, u = Deploy(S)
 	local p = H.neutralPlot(30, 5)
@@ -149,10 +197,31 @@ test("row 1 EXP: war while in MUTINY -> reverted (mutiny ends, damage kept)", fu
 	u.damage = 40
 	H.war(0, 1)
 	H.endTurn()
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
+	H.ok(not H.unitAlive(u))
+	H.len(Sent(0, "RETURNING"), 1); H.len(Sent(1, "REVERTED"), 1)
+	H.turns(rr.arrivalTurn - FAKE.turn)
 	H.len(H.records(), 0)
 	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
 	H.len(mine, 1); H.eq(mine[1].damage, 40)
 	H.len(Sent(0, "MUTINY_DEATH"), 0)
+	H.clean()
+end)
+
+test("row 1 VOL: a deployed Volunteer is unchanged: record closed, the unit stays where it is, no notice", function()
+	local S = H.baseScenario()
+	Players[1].human = true
+	H.loadEFV()
+	local r, u = Deploy(S, VOL)
+	local x, y = u:GetX(), u:GetY()
+	H.clearNotifs()
+	H.war(1, 0)
+	H.endTurn()
+	H.isnil(Rec(r.id), "record closed (DV6)")
+	H.ok(H.unitAlive(u)); H.eq(u.owner, 0)
+	H.eq(u:GetX(), x); H.eq(u:GetY(), y)
+	H.len(Sent(0, "RETURNING"), 0); H.len(Sent(0, "REVERTED"), 0); H.len(Sent(1, "REVERTED"), 0)
 	H.clean()
 end)
 
@@ -459,7 +528,7 @@ test("row 8 EXP survivor: record kept, MERGED to both, returns alone at expiry w
 	H.clean()
 end)
 
-test("row 8 EXP survivor then war: reverted as a single unit", function()
+test("row 8 EXP survivor then war: sent home, arrives as a single unit", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r, u = Deploy(S)
@@ -467,6 +536,9 @@ test("row 8 EXP survivor then war: reverted as a single unit", function()
 	H.endTurn()
 	H.war(0, 1)
 	H.endTurn()
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
+	H.turns(rr.arrivalTurn - FAKE.turn)
 	H.len(H.records(), 0)
 	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
 	H.len(mine, 1); H.eq(mine[1]:GetMilitaryFormation(), STANDARD())

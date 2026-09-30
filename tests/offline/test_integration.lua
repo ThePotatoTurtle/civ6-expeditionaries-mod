@@ -158,7 +158,7 @@ test("EFV_Spawn delegates to EFV_Rules; Valid reports the failing rule", functio
 	enemy.owner = 3                                   -- C is at war with B
 	ok, why = EFV_Spawn.Valid(enemy, "LAND", 1)
 	H.eq(why, "WAR_OWNER")
-	H.ok((EFV_Spawn.Valid(enemy, "LAND", 1, { ignoreWarOwner = true })), "war revert may use it")
+	H.ok((EFV_Spawn.Valid(enemy, "LAND", 1, { ignoreWarOwner = true })), "ignoreWarOwner admits it (no caller since 1.0.4)")
 	H.clean()
 end)
 

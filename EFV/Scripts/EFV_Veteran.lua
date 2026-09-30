@@ -297,7 +297,7 @@ function EFV_Veteran.Fallback(store, job, pUnit, why)
 			EFV_Log(1, TAG, "fallback id=%s uid=%s failed err=%s", tostring(job.rid), tostring(job.u), ErrText(err))
 		end
 		if why == "SNAPSHOT" then
-			-- A removal snapshot follows (send, return, revert): the unit
+			-- A removal snapshot follows (send, return): the unit
 			-- leaves the map, and exhausting it here would make the send
 			-- that asked for the snapshot fail NOT_FULL_MOVES.
 			job.ex = nil
@@ -528,7 +528,7 @@ end
 -- Completes the unit's open job before any removal snapshot: Sync, then
 -- Fallback("SNAPSHOT") if still open. Safe to call for any unit (no job ->
 -- nothing happens); never raises. Callers: EFV_Transit SendBody /
--- StartReturn (WP1), EFV_Lifecycle.RevertToSender (WP2).
+-- StartReturn (WP1; also the war send-home since 1.0.4).
 -- ---------------------------------------------------------------------------
 function EFV_Veteran.Settle(store, pUnit)
 	if type(store) ~= "table" or pUnit == nil or type(store.vet) ~= "table" or #store.vet == 0 then

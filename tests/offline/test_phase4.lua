@@ -10,7 +10,7 @@
 --   P4.4 valid return territory = the city-state's or the sender's tiles,
 --        NOT an ally's (still used by EXP-style checks; CS expiry ignores it);
 --   spec 11 rows for CS (WP5.1 brought forward, INTERFACES note 24):
---        sender-CS war -> revert / return, city-state eliminated -> return
+--        sender-CS war -> sent home (1.0.4), city-state eliminated -> return
 --        (in transit and from the snapshot);
 --   suzerain levy -> relink (RelinkLevied).
 -- The UI tests for "Send to City-State" moved to test_070_send.lua (0.7).
@@ -258,39 +258,47 @@ end)
 -- ===========================================================================
 -- Spec 11 rows for CS (WP5.1 brought forward)
 -- ===========================================================================
-test("CS spec 11: sender-CS war reverts the deployed unit to the sender in place (REVERTED)", function()
+test("CS spec 11: sender-CS war sends the deployed unit home on the return trip (1.0.4)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r, cu = SendAndArrive(S)
-	local x, y = cu:GetX(), cu:GetY()
 	H.war(0, 4)                                       -- e.g. the city-state joined its suzerain's war
-	H.endTurn()                                       -- reverted at the first boundary (DV16)
-	H.len(H.records(), 0, "record closed")
+	H.endTurn()                                       -- sent home at the first boundary (DV16)
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
 	H.ok(not H.unitAlive(cu))
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 0, "not switched in place")
+	H.len(Sent(0, "RETURNING"), 1)
+	H.ok(string.find(Summary(Sent(0, "RETURNING")[1]),
+		Locale.Lookup("LOC_EFV_NOTIF_RETURNING_WAR_SUMMARY", EFV_UnitDisplayName("UNIT_SWORDSMAN", nil),
+			EFV_CityName(CityManager.GetCityAt(rr.returnX, rr.returnY)), rr.band, EFV_PlayerName(4)), 1, true) ~= nil, "sender: the _WAR text")
+	H.len(Sent(0, "REVERTED"), 0)
+	H.ok(H.hasLine("[War] sent home id=" .. r.id))
+	H.turns(rr.arrivalTurn - FAKE.turn)
+	H.len(H.records(), 0)
 	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
-	H.len(mine, 1)
-	H.eq(mine[1]:GetX(), x); H.eq(mine[1]:GetY(), y)
+	H.len(mine, 1, "home")
 	H.deq(H.promotionTypes(mine[1]), { "PROMOTION_BATTLECRY" })
-	H.eq(mine[1]:GetOriginalOwner(), 0, "recreated for the sender")
-	H.len(Sent(0, "REVERTED"), 1)
-	H.ok(H.hasLine("[War] reverted id=" .. r.id))
+	H.len(Sent(0, "RETURNED"), 1)
 	H.clean()
 end)
 
-test("CS spec 11: revert whose same-tile Create returns nil uses the next candidate (Session D 3)", function()
+test("CS spec 11: sender-CS war while levied sends the unit home from the suzerain; the suzerain is told", function()
 	local S = H.baseScenario()
+	Players[1].human = true
 	H.loadEFV()
-	local r, cu = SendAndArrive(S)
-	local x, y = cu:GetX(), cu:GetY()
+	local r = SendAndArrive(S)
+	Levy(4, 1)
+	H.endTurn()                                       -- relinked to the suzerain's copy
+	r = Only()
+	H.eq(r.onMapPlayerID, 1)
 	H.war(0, 4)
-	FAKE.createNil = function(pid, px, py) return px == x and py == y end
 	H.endTurn()
-	H.len(H.records(), 0, "record closed")
-	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
-	H.len(mine, 1, "reverted, not sent on the return trip")
-	H.ok(Map.GetPlotDistance(x, y, mine[1]:GetX(), mine[1]:GetY()) >= 1, "spawn search around the old tile (at-war owner plots excluded)")
-	H.len(FAKE.createRefused, 1)
-	H.len(Sent(0, "REVERTED"), 1)
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "WAR")
+	H.len(H.unitsOf(1, "UNIT_SWORDSMAN"), 0, "the suzerain keeps no copy")
+	H.len(Sent(1, "REVERTED"), 1, "the suzerain held the unit")
+	H.len(Sent(0, "RETURNING"), 1)
 	H.clean()
 end)
 

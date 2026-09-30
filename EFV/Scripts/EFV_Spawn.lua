@@ -120,7 +120,7 @@ end
 -- Params:  cx, cy centre coordinates; domain "LAND" | "SEA"; newOwnerID
 --          player ID; label string (RNG log label, e.g. "arr" .. rec.id);
 --          opts optional "Spawn opts" (trailing, backward compatible; e.g.
---          ignoreWarOwner for the war revert).
+--          ignoreWarOwner, unused since 1.0.4).
 -- Returns: plot object or nil when no candidate exists.
 -- PLAN 2.6; spec 8; SPIKES 3 row 10. APIs: A07.
 -- ---------------------------------------------------------------------------

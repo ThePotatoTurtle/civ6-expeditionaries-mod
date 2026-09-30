@@ -34,6 +34,9 @@
          LOC_EFV_NOTIF_EXPIRY_SOON_CS_MESSAGE / _SUMMARY instead of _SENDER
          (same arguments; QueueAlert senderSuffix "_CS").
        RETURNING       1 Unit, 2 City (return city), 3 N transit turns
+         _WAR           1 Unit, 2 City (return city), 3 N transit turns,
+                        4 Recipient civ (sender of an EXP / CS unit sent home
+                        because the sender and the host went to war, 1.0.4)
          _CANCELLED     1 Unit, 2 City (destination), 3 Reason text, 4 Home
                         city, 5 N transit turns, 6 Refund text (sender of a
                         cancelled transit without a free tile, 2026-09-30)
@@ -48,7 +51,9 @@
        UNIT_LOST        1 Unit, 2 loss text = Locale.Lookup(LOC_EFV_LOSS_*) (added)
        MERGED           1 Unit (base text); variants _SURVIVOR / _ABSORBED /
                         _VOLUNTEER: 1 Unit, 2 Sender civ, 3 Recipient civ (Phase 5)
-       REVERTED         1 Unit, 2 Sender civ, 3 Recipient civ      (added)
+       REVERTED         1 Unit, 2 Sender civ, 3 Recipient civ      (added; since
+                        1.0.4 sent only to the player that held the unit:
+                        it went home because of the war)
        REQUEST_FAILED   1 reason text = Locale.Lookup(LOC_EFV_REASON_<code>, ...) (added)
        LAPSE_CANCELLED  1 Recipient civ, 2 Unit                    (added)
        LAPSE_PAUSED     1 Unit, 2 Recipient civ, 3 State text = Locale.Lookup(
@@ -757,6 +762,14 @@
 		<Row Tag="LOC_EFV_NOTIF_RETURNING_SUMMARY" Language="en_US">
 			<Text>{1_Unit} is returning to {2_City}. Arrives in {3_Num} {3_Num : plural 1?turn; other?turns;}.</Text>
 		</Row>
+		<!-- sender of an EXP / CS unit sent home by a sender-host war (1.0.4):
+		     1 Unit, 2 City, 3 N turns, 4 Recipient civ -->
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_WAR_MESSAGE" Language="en_US">
+			<Text>Unit Coming Home</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_WAR_SUMMARY" Language="en_US">
+			<Text>You and {4_Recipient} are now at war, so {1_Unit} has left their service. It is returning to {2_City} and arrives in {3_Num} {3_Num : plural 1?turn; other?turns;}.</Text>
+		</Row>
 		<Row Tag="LOC_EFV_NOTIF_RETURNED_MESSAGE" Language="en_US">
 			<Text>Unit Returned</Text>
 		</Row>
@@ -837,10 +850,10 @@
 			<Text>Your {1_Unit} serving with {3_Recipient} was merged into a Corps or Army. It is no longer a Volunteer: it will not be returned or recalled.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_REVERTED_MESSAGE" Language="en_US">
-			<Text>Lent Unit Reverted</Text>
+			<Text>Lent Unit Gone Home</Text>
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_REVERTED_SUMMARY" Language="en_US">
-			<Text>{1_Unit} has reverted to {2_Sender}, because {2_Sender} and {3_Recipient} are now at war.</Text>
+			<Text>{1_Unit} from {2_Sender} has left and is going home, because {2_Sender} and {3_Recipient} are now at war.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_REQUEST_FAILED_MESSAGE" Language="en_US">
 			<Text>Order Failed</Text>

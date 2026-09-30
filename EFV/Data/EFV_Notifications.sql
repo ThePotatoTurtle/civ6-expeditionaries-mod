@@ -54,7 +54,10 @@
 -- EFV_NOTIF_ACCESS_LAPSE      sender (lapse reason PARTNER)       HIGH       0        0        122 DIPLO_ALLIANCE_EXPIRED
 -- EFV_NOTIF_UNIT_LOST         sender (and recipient when NO_CITY) MID        0        0        53  UNIT_LOST
 -- EFV_NOTIF_MERGED            both                                MID        0        0        52  UNIT_DISBANDED
--- EFV_NOTIF_REVERTED          both                                HIGH       0        0        55  UNIT_CAPTURED
+-- EFV_NOTIF_REVERTED          unit holder (host; both until 1.0.3) HIGH       0        0        55  UNIT_CAPTURED
+--   REVERTED: since 1.0.4 sent only to the player that held the unit (the
+--   host): a sender-host war sends the unit home. The sender gets the
+--   RETURNING _WAR text instead.
 -- EFV_NOTIF_REQUEST_FAILED    requester                           LOW        1        0        0   GENERIC
 -- EFV_NOTIF_LAPSE_CANCELLED   sender, recipient if human          MID        1        0        84  DIPLOMATIC_PROMISE_TO_KEPT
 -- EFV_NOTIF_LAPSE_PAUSED      sender (lapsed VOL on valid land)   HIGH       0        0        9   COMMAND_UNITS

@@ -77,7 +77,7 @@ EFV_Lifecycle = {}
 --     suzerain-levy relink in RefreshTrackedUnits (RelinkLevied), and WP5.1
 --     landed early because city-states join their suzerain's wars and are
 --     often conquered: ReconcilePlayers (sender / recipient eliminated),
---     HandleSenderRecipientWar and RevertToSender, shared by EXP and CS
+--     HandleSenderRecipientWar (sends EXP / CS units home since 1.0.4), shared by EXP and CS
 --     (INTERFACES note 24). Their in-game acceptance tests stay P5.1-P5.5.
 --   Phase 3 (WP3.2): ProcessVolunteerLapse (start WAR / PARTNER, backup
 --     cancel), CancelVolunteerLapse (reversible lapse, LAPSE_CANCELLED),
@@ -629,13 +629,21 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_Lifecycle.HandleSenderRecipientWar(store, rec, turn)
--- Spec 11 row 1: EXP/CS on the map -> RevertToSender; VOL on the map ->
--- delete the record without touching the unit (DV6). OUTBOUND records are
--- decided by the transit check (DECISIONS "Transit cancelled", 2026-09-30:
--- WAR -> cancelled at the next check point); no caller passes them any
--- more, the branch only keeps the function total. Also called from
--- TurnBoundaryPass at every turn boundary for on-map records (DV16). Logs
--- "[War] ...".
+-- Spec 11 row 1 (designer ruling 2026-09-30, 1.0.4, option A): any war
+-- between the sender and the host, whoever declared it. EXP / CS on the map
+-- (DEPLOYED, expired GRACE, MUTINY) -> sent home: EFV_Transit.StartReturn
+-- reason "WAR" (the normal return trip: travel time, free, promotions and
+-- level kept, veteran restore settled first), the sender gets RETURNING
+-- with the _WAR text, the player that held the unit gets REVERTED (text:
+-- the unit went home because of the war). No unit is switched in place any
+-- more (that let a host keep a lent unit as a Trojan horse). VOL on the map
+-- -> delete the record without touching the unit (DV6). OUTBOUND records
+-- are decided by the transit check (DECISIONS "Transit cancelled",
+-- 2026-09-30: WAR -> cancelled at the next check point); no caller passes
+-- them any more, the branch only keeps the function total. RETURNING
+-- records are never passed (they still arrive). Called from ReconcileOne
+-- (step 0b) and from TurnBoundaryPass at every turn boundary for on-map
+-- records (DV16). Logs "[War] ...".
 -- Params:  store, rec record, turn number.
 -- Returns: nil.
 -- PLAN 2.9; DV6, DV16. APIs: via helpers.
@@ -666,100 +674,29 @@ function EFV_Lifecycle.HandleSenderRecipientWar(store, rec, turn)
 		EFV_Log(3, "War", "id=%d at war but the unit is missing; left for step 0c", rec.id)
 		return nil
 	end
-	EFV_Lifecycle.RevertToSender(store, rec, pUnit, turn)
-	return nil
-end
-
--- ---------------------------------------------------------------------------
--- EFV_Lifecycle.RevertToSender(store, rec, pUnit, turn) -> reverted
--- EFV_Veteran.Settle (0.7, open route B job finished first), snapshot,
--- remove, create for the sender on the same tile if it is now
--- empty (EFV_SpawnValid with opts.ignoreWarOwner) else EFV_Spawn.Pick(lastX,
--- lastY, domain, senderID, "rev" .. id); none -> StartReturn (DV15). Delete
--- the record on success; queue EFV_NOTIF_REVERTED to both.
--- Params:  store, rec record (EXP/CS on the map), pUnit unit object or nil
---          (snapshot used), turn number.
--- Returns: true if the unit now belongs to the sender, false if it was sent
---          on the return trip instead (stub: false).
--- PLAN 2.9; spec 11 row 1; DV15. APIs: via helpers.
--- ---------------------------------------------------------------------------
-function EFV_Lifecycle.RevertToSender(store, rec, pUnit, turn)
-	if turn == nil then
-		turn = CurrentTurn()
+	-- The player holding the unit (the host, or the suzerain of a levied
+	-- City-State unit) is read before StartReturn clears it.
+	local holderID = rec.onMapPlayerID
+	if holderID == nil then
+		holderID = rec.recipientID
 	end
-	local x, y = rec.lastX, rec.lastY
-	if pUnit ~= nil then
-		-- 0.7 (route B): finish any open veteran restore job of this unit
-		-- before the snapshot, so it is never reverted half-restored.
-		local okV, errV = pcall(EFV_Veteran.Settle, store, pUnit)
-		if not okV then
-			EFV_Log(1, "War", "revert id=%d: veteran settle failed: %s", rec.id, tostring(errV))
-		end
-		local snap = EFV_Units.Snapshot(pUnit)
-		if snap ~= nil then
-			EFV_Units.ApplySnapshot(rec, snap, turn)
-			Touch(store)
-		end
-		x, y = pUnit:GetX(), pUnit:GetY()
-		if not EFV_Units.Remove(pUnit) then
-			EFV_Log(1, "War", "revert id=%d: unit removal failed; retried at the next boundary", rec.id)
-			return false
-		end
-	end
-	-- The unit is gone from the recipient's side now.
-	local wasOwner = rec.onMapPlayerID
-	rec.onMapPlayerID = nil
-	rec.onMapUnitID = nil
-	rec.lastX, rec.lastY = x, y
-	Touch(store)
-
-	-- Same tile if it is free (spec 11: "on the same tile"; the at-war owner
-	-- rule is skipped there), else the spawn search around it as the sender.
-	-- A nil Create (closed borders, Session D 3) tries the next candidates
-	-- (EFV_Spawn.PickOrdered, only when the same tile did not work).
-	local domain = EFV_Spawn.DomainOf(rec.unitType)
-	local pNew, plot, tried = nil, nil, 0
-	if domain ~= nil and x ~= nil and y ~= nil then
-		local here = Map.GetPlot(x, y)
-		if here ~= nil and EFV_SpawnValid(here, domain, rec.senderID, { ignoreWarOwner = true }) then
-			tried = 1
-			pNew = EFV_Units.Recreate(store, rec.senderID, rec, here, turn)
-			if pNew ~= nil then
-				plot = here
-			end
-		end
-		if pNew == nil then
-			for _, p in ipairs(EFV_Spawn.PickOrdered(x, y, domain, rec.senderID, "rev" .. rec.id)) do
-				tried = tried + 1
-				pNew = EFV_Units.Recreate(store, rec.senderID, rec, p, turn)
-				if pNew ~= nil then
-					plot = p
-					break
-				end
-			end
-		end
-	end
-	if pNew == nil then
-		-- DV15: no tile (or creation failed) -> the return trip instead.
-		EFV_Log(2, "War", "revert id=%d: no tile near %s,%s (%s) -> return",
-			rec.id, tostring(x), tostring(y), (tried > 0) and ("create failed, tries=" .. tried) or "no plot")
-		EFV_Transit.StartReturn(store, rec, nil, "WAR", turn)
-		return false
-	end
-
+	local wasState = rec.state
+	local x, y = pUnit:GetX(), pUnit:GetY()
 	local args = { UnitName(rec), PlayerName(rec.senderID), PlayerName(rec.recipientID) }
-	local px, py = plot:GetX(), plot:GetY()
-	EFV_Notify.Queue(rec.senderID, EFV_Config.NOTIF.REVERTED, "LOC_" .. EFV_Config.NOTIF.REVERTED,
-		args, px, py, Extra(rec, "REVERTED"))
-	if rec.recipientID ~= rec.senderID then
-		EFV_Notify.Queue(rec.recipientID, EFV_Config.NOTIF.REVERTED, "LOC_" .. EFV_Config.NOTIF.REVERTED,
-			args, px, py, Extra(rec, "REVERTED"))
+	if not EFV_Transit.StartReturn(store, rec, pUnit, "WAR", turn) then
+		-- Removal failed (record unchanged, the next boundary retries) or no
+		-- return city (unit lost, UNIT_LOST already sent by StartReturn).
+		EFV_Log(2, "War", "id=%d send home did not start (state now %s)", rec.id,
+			tostring(EFV_Records.Get(store, rec.id) ~= nil and rec.state or "deleted"))
+		return nil
 	end
-	EFV_Log(2, "War", "reverted id=%d force=%s from=%s to=%d unit=%d at=%d,%d same=%s",
-		rec.id, tostring(rec.forceType), tostring(wasOwner), rec.senderID, pNew:GetID(), px, py,
-		tostring(px == x and py == y))
-	EFV_Records.Delete(store, rec.id)
-	return true
+	if holderID ~= nil and holderID ~= rec.senderID then
+		EFV_Notify.Queue(holderID, EFV_Config.NOTIF.REVERTED, "LOC_" .. EFV_Config.NOTIF.REVERTED,
+			args, x, y, Extra(rec, "REVERTED"))
+	end
+	EFV_Log(2, "War", "sent home id=%d force=%s was=%s holder=%s at=%d,%d arrival=%s",
+		rec.id, tostring(rec.forceType), tostring(wasState), tostring(holderID), x, y, tostring(rec.arrivalTurn))
+	return nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -1148,7 +1085,7 @@ function EFV_Lifecycle.OnMergeSurvivor(store, rec, pUnit)
 		return nil
 	end
 	-- WP5.2 (D3 ruling): an EXP / CS unit that survived a merge keeps its
-	-- record and its timer. It returns (expiry, war revert, recipient gone)
+	-- record and its timer. It returns (expiry, war, recipient gone)
 	-- as a single unit of its current type with its XP and promotions:
 	-- EFV_Units.Recreate never restores a formation, so the absorbed partner
 	-- (the recipient's unit) does not come along. rec.formation takes the new
@@ -1701,8 +1638,8 @@ end
 -- check: MUTINY floor (S8), S9 snapshot (when changed), merge check (D3).
 -- Then, unless opts.skipWar, HandleSenderRecipientWar for every on-map
 -- record (not OUTBOUND, not RETURNING) whose sender and recipient are at war
--- (DV16: the revert happens at the first boundary after the declaration,
--- i.e. at the end of the declarer's turn). Outbound records are not
+-- (DV16: an EXP / CS unit is sent home at the first boundary after the
+-- declaration, i.e. at the end of the declarer's turn; 1.0.4). Outbound records are not
 -- converted here any more (designer ruling 2026-09-30, transit cancel): at
 -- hook "PlayerTurnStarted" the transit check runs for the OUTBOUND records
 -- whose sender is pid (EFV_Transit.CheckTransits), so every cancel happens
@@ -1711,7 +1648,8 @@ end
 -- "[War] ... deferred at the owner's PTSC"): no unit is removed at its
 -- owner's PTSC; the next boundary handles it. Idempotent: a second call with no game change writes
 -- nothing (snapshot-if-changed; floor restores only a real decrease; the war
--- handler converts the record so it is not seen again).
+-- handler moves the record to RETURNING or deletes it, so it is not seen
+-- again).
 -- Params:  store; turn number; hook string (log: "PlayerTurnStarted",
 --          "PlayerTurnStartComplete", "OnGameTurnEnded", "OnGameTurnStarted",
 --          "OnPlayerTurnEnded"); pid player ID of the hook (log only; -1 for
