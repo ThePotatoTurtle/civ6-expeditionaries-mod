@@ -168,6 +168,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 
 ## Compatibility
 - Requires Gathering Storm.
+- Tested in multiplayer and works well.
 - VEF replaces the unit flag script (UnitFlagManager) with a thin wrapper to show its flag tags. Mods that replace the same script with a higher load order, such as Gift It To Me, win: the tags disappear, but everything else still works. Replacements with a lower load order are overridden, except CQUI and Better Builder Charges Tracking, which VEF loads underneath its wrapper.
 - CQUI should work but has not been tested.
 - VEF is saved with your game. Don't remove it in the middle of a game: units on the way exist only in the mod's records.
