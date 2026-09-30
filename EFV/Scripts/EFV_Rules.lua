@@ -11,6 +11,8 @@
 -- turns them into text (LOC_EFV_REASON_<CODE>), gameplay logs them and puts
 -- the first one into EFV_NOTIF_REQUEST_FAILED. Also the spawn candidate
 -- search (spec 8) used by EFV_Spawn (G) and the naval dry run (UI + G).
+-- EFV_SendRecipientReasons exposes the recipient-level send check for the
+-- transit check (designer ruling 2026-09-30, transit cancel).
 --
 -- Context adapters: calls that differ by context branch on EFV_IsGameplay().
 -- G-only and UI-only calls sit inside G-ONLY / UI-ONLY region markers
@@ -943,6 +945,35 @@ local function RecipientInfo(senderID, recipientID, forceType)
 		Add(info.reasons, "NO_COMMON_WAR")
 	end
 	return info
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_SendRecipientReasons(senderID, recipientID, forceType) -> codes, basis
+-- The recipient-level part of EFV_EvaluateSend (RecipientInfo), for checks
+-- that have no unit: the transit check (designer ruling 2026-09-30, a
+-- send whose conditions stop holding in transit is cancelled). Same codes
+-- and order as the picker / send handler, so the rules cannot drift:
+-- basis (NOT_PARTNER / VOL_NEEDS_ACCESS / CS_NOT_MET), AT_WAR_WITH_RECIPIENT,
+-- NO_COMMON_WAR (EXP and VOL only). Unknown force type or an error ->
+-- { "REQ_STALE" } (callers treat that as "could not evaluate").
+-- Returns: dense array (copy) of codes, empty = the recipient qualifies;
+--          the basis ("TEAM" / "ALLIANCE" / "FRIEND" / "FRIEND_OB" /
+--          "CITY_STATE") or nil.
+-- ---------------------------------------------------------------------------
+function EFV_SendRecipientReasons(senderID, recipientID, forceType)
+	if not IsKnownForce(forceType) then
+		return { "REQ_STALE" }, nil
+	end
+	local ok, info = pcall(RecipientInfo, senderID, recipientID, forceType)
+	if not ok or type(info) ~= "table" then
+		LogOnce("sendRecipientReasons", 1, "EFV_SendRecipientReasons failed: %s", tostring(info))
+		return { "REQ_STALE" }, nil
+	end
+	local out = {}
+	for i, code in ipairs(info.reasons) do
+		out[i] = code
+	end
+	return out, info.basis
 end
 
 -- Unit-level context shared by all rows of one picker build. landOwner =

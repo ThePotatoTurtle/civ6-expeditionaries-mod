@@ -16,6 +16,10 @@
      Order = order of first appearance in the spec 14.3 text:
        DEPARTED         1 Unit, 2 City (destination), 3 N transit turns
        ARRIVED          1 Unit, 2 Sender civ, 3 City
+         _CANCELLED     1 Unit, 2 Sender civ, 3 City (destination), 4 Reason
+                        text (recipient of a cancelled transit, 2026-09-30)
+         _KEPT          1 Unit, 2 Sender civ, 3 City (recipient of a unit
+                        whose sender was eliminated in transit, 2026-09-30)
        SPAWN_BLOCKED    1 Unit, 2 City
        EXPIRY_SOON      1 Unit, 2 N turns left, 3 Sender civ
        GRACE            1 Unit, 2 Sender civ, 3 N grace turns left
@@ -30,8 +34,14 @@
          LOC_EFV_NOTIF_EXPIRY_SOON_CS_MESSAGE / _SUMMARY instead of _SENDER
          (same arguments; QueueAlert senderSuffix "_CS").
        RETURNING       1 Unit, 2 City (return city), 3 N transit turns
+         _CANCELLED     1 Unit, 2 City (destination), 3 Reason text, 4 Home
+                        city, 5 N transit turns, 6 Refund text (sender of a
+                        cancelled transit without a free tile, 2026-09-30)
        RETURNED         1 Unit, 2 City
-       REROUTED         1 City (lost), 2 Unit, 3 NewCity
+         _CANCELLED     1 Unit, 2 City (destination), 3 Reason text, 4 Refund
+                        text (sender of a cancelled transit, 2026-09-30)
+       REROUTED         1 City (lost), 2 Unit, 3 NewCity (retired 2026-09-30:
+                        never sent; kept for older saves)
        VOLUNTEER_LAPSE  1 Recipient civ, 2 N grace turns
        ENTRUSTED        1 Capturer civ, 2 City, 3 Recipient civ
        ACCESS_LAPSE     1 Recipient civ, 2 N grace turns          (added)
@@ -80,7 +90,17 @@
                                         "N [ICON_Gold] Gold"),
                                         5 Transit turns, 6 Duration text,
                                         7 Force label (EFV_DestinationPicker.lua)
+       LOC_EFV_CONFIRM_SEND_CANCEL / _CANCEL_FREE
+                                        1 Recipient civ (appended to the
+                                          send confirmation; _FREE for a
+                                          fee of 0; 2026-09-30)
        LOC_EFV_CONFIRM_RECALL           1 Unit
+       LOC_EFV_CANCEL_REASON_<status>   1 Civ (sender's copy: the recipient;
+                                          recipient's copy: the sender;
+                                          _HOST variants where the wording
+                                          differs; DEST_LOST ignores it)
+       LOC_EFV_CANCEL_REFUND            1 N gold refunded; _REFUND_FREE and
+                                          LOC_EFV_CANCEL_DEST_GENERIC none
        LOC_EFV_ENTRUST_TO               1 Recipient civ
        LOC_EFV_ENTRUST_TO_TT            1 City, 2 Recipient civ
        LOC_EFV_ENTRUST_CONFIRM          1 City, 2 Recipient civ (armed row tooltip)
@@ -381,6 +401,14 @@
 		<Row Tag="LOC_EFV_CONFIRM_SEND" Language="en_US">
 			<Text>Send {1_Unit} to {2_City} ({3_Recipient}) as {7_Force}?[NEWLINE][NEWLINE]Fee: {4_Fee}[NEWLINE]Transit: {5_Turns} {5_Turns : plural 1?turn; other?turns;}[NEWLINE]Service: {6_Duration}</Text>
 		</Row>
+		<!-- Designer answer Q9 (transit cancel, 2026-09-30): one sentence about
+		     the cancel rule under the send confirmation. 1 Recipient civ. -->
+		<Row Tag="LOC_EFV_CONFIRM_SEND_CANCEL" Language="en_US">
+			<Text>If the city is lost or {1_Recipient} stops being eligible before the unit arrives, it comes back and you get half the fee back.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CONFIRM_SEND_CANCEL_FREE" Language="en_US">
+			<Text>If the city is lost or {1_Recipient} stops being eligible before the unit arrives, it comes back.</Text>
+		</Row>
 		<Row Tag="LOC_EFV_CONFIRM_RECALL" Language="en_US">
 			<Text>Recall {1_Unit}? It leaves the map now and reappears near its home city when it arrives.</Text>
 		</Row>
@@ -574,6 +602,50 @@
 		</Row>
 
 		<!-- ============================================================
+		     Transit cancel (designer rulings 2026-09-30). Reason texts
+		     LOC_EFV_CANCEL_REASON_<status> {1_Civ}: the sender's copy names
+		     the recipient, the recipient's copy names the sender (_HOST
+		     where the sender wording does not fit). Refund texts go last
+		     in the sender's notice.
+		     ============================================================ -->
+		<Row Tag="LOC_EFV_CANCEL_REASON_RECIPIENT_GONE" Language="en_US">
+			<Text>{1_Civ} has been eliminated.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_DEST_LOST" Language="en_US">
+			<Text>The city has changed hands or been destroyed since the unit set out.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_WAR" Language="en_US">
+			<Text>You are now at war with {1_Civ}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_NOT_PARTNER" Language="en_US">
+			<Text>{1_Civ} is no longer your ally, teammate or declared friend.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_NO_ACCESS" Language="en_US">
+			<Text>{1_Civ} no longer gives you open borders, which Volunteers need unless you are allies or teammates.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_NO_ACCESS_HOST" Language="en_US">
+			<Text>You no longer give {1_Civ} open borders, which Volunteers need unless you are allies or teammates.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_NO_COMMON_WAR" Language="en_US">
+			<Text>You and {1_Civ} are no longer at war with a common enemy.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_NOT_ELIGIBLE" Language="en_US">
+			<Text>{1_Civ} can no longer receive this unit.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REASON_NOT_ELIGIBLE_HOST" Language="en_US">
+			<Text>You can no longer receive this unit from {1_Civ}.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REFUND" Language="en_US">
+			<Text>Half the fee comes back to you: {1_Num} [ICON_Gold].</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_REFUND_FREE" Language="en_US">
+			<Text>The send was free, so there is nothing to refund.</Text>
+		</Row>
+		<Row Tag="LOC_EFV_CANCEL_DEST_GENERIC" Language="en_US">
+			<Text>its destination</Text>
+		</Row>
+
+		<!-- ============================================================
 		     Notifications (spec 14.3; PLAN 4.1; D9). _MESSAGE = headline
 		     (no arguments), _SUMMARY = body. Argument order: header.
 		     ============================================================ -->
@@ -588,6 +660,20 @@
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_ARRIVED_SUMMARY" Language="en_US">
 			<Text>{1_Unit} from {2_Sender} has arrived at {3_City}.</Text>
+		</Row>
+		<!-- recipient of a cancelled transit: 1 Unit, 2 Sender civ, 3 City, 4 Reason -->
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_CANCELLED_MESSAGE" Language="en_US">
+			<Text>Transit Cancelled</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_CANCELLED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} from {2_Sender} will not arrive at {3_City}. {4_Reason} The transit was called off and the unit went back to {2_Sender}.</Text>
+		</Row>
+		<!-- recipient of a unit whose sender was eliminated in transit: 1 Unit, 2 Sender civ, 3 City -->
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_KEPT_MESSAGE" Language="en_US">
+			<Text>Unit Joined Your Forces</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_ARRIVED_KEPT_SUMMARY" Language="en_US">
+			<Text>{1_Unit} from {2_Sender} has arrived at {3_City}. {2_Sender} has been eliminated, so the unit is now yours to keep.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_SPAWN_BLOCKED_MESSAGE" Language="en_US">
 			<Text>Arrival Delayed</Text>
@@ -677,6 +763,22 @@
 		<Row Tag="LOC_EFV_NOTIF_RETURNED_SUMMARY" Language="en_US">
 			<Text>{1_Unit} has returned to {2_City}.</Text>
 		</Row>
+		<!-- sender of a cancelled transit, unit placed: 1 Unit, 2 City, 3 Reason, 4 Refund -->
+		<Row Tag="LOC_EFV_NOTIF_RETURNED_CANCELLED_MESSAGE" Language="en_US">
+			<Text>Transit Cancelled</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNED_CANCELLED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} will not reach {2_City}. {3_Reason} The unit is back and can move again next turn. {4_Refund}</Text>
+		</Row>
+		<!-- sender of a cancelled transit, no free tile: 1 Unit, 2 City, 3 Reason, 4 Home, 5 N turns, 6 Refund -->
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_CANCELLED_MESSAGE" Language="en_US">
+			<Text>Transit Cancelled</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_CANCELLED_SUMMARY" Language="en_US">
+			<Text>{1_Unit} will not reach {2_City}. {3_Reason} There was no free tile near where it set out, so it is heading to {4_Home} and arrives in {5_Num} {5_Num : plural 1?turn; other?turns;}. {6_Refund}</Text>
+		</Row>
+		<!-- REROUTED: retired 2026-09-30 (transit cancel), never sent; kept so
+		     notifications stored in older saves still resolve. -->
 		<Row Tag="LOC_EFV_NOTIF_REROUTED_MESSAGE" Language="en_US">
 			<Text>Unit Rerouted</Text>
 		</Row>

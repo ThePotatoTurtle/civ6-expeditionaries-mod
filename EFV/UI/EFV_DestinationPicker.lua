@@ -25,6 +25,8 @@
 -- LOC_EFV_SEND_NO_RECIPIENTS
 -- (empty list), LOC_EFV_ACTION_SEND_* (confirm title), LOC_EFV_CONFIRM_SEND
 -- {1_Unit} {2_City} {3_Recipient} {4_Fee} {5_Transit} {6_Duration} {7_Force},
+-- LOC_EFV_CONFIRM_SEND_CANCEL / _CANCEL_FREE {1_Recipient} (the cancel rule,
+-- designer answer Q9, 2026-09-30),
 -- LOC_YES / LOC_NO (base game).
 -- ===========================================================================
 
@@ -126,7 +128,8 @@ end
 -- ---------------------------------------------------------------------------
 -- ConfirmRow(row)
 -- PopupDialogInGame confirm (LOC_EFV_CONFIRM_SEND with unit, city,
--- recipient, fee, transit, duration, force); yes -> EFV_UI_Request(
+-- recipient, fee, transit, duration, force, then the transit-cancel
+-- sentence LOC_EFV_CONFIRM_SEND_CANCEL, _FREE for a fee of 0); yes -> EFV_UI_Request(
 -- EFV_Config.REQ_SEND, { unitID, recipientID = row.recipientID, destX =
 -- row.destX, destY = row.destY, forceType, expectedFee = row.calc.fee })
 -- -> Close(). Cancel keeps the picker open.
@@ -155,6 +158,13 @@ local function ConfirmRow(row)
 		calc.transit or 0,
 		EFV_UI_DurationText(calc.duration),
 		forceKey and Locale.Lookup(forceKey) or "")
+	-- Designer answer Q9 (transit cancel, 2026-09-30): one sentence about the
+	-- cancel rule; a free send has no fee to refund.
+	local cancelKey = "LOC_EFV_CONFIRM_SEND_CANCEL"
+	if calc.fee <= 0 then
+		cancelKey = "LOC_EFV_CONFIRM_SEND_CANCEL_FREE"
+	end
+	text = text .. "[NEWLINE][NEWLINE]" .. Locale.Lookup(cancelKey, EFV_UI_PlayerName(row.recipientID))
 
 	local params = {
 		unitID      = ctx.unitID,

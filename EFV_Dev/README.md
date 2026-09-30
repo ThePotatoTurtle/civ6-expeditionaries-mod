@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteers & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 1.0.2.1, made for VEF 1.0.2. Never enable it in a real game.
+Version 1.0.2.2, made for VEF 1.0.2 plus the unreleased transit cancel (S16). Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 
@@ -60,6 +60,7 @@ These sit under "Test sessions", below the Screenshot buttons. Each one sets up 
 | S13 Unit in B's land | `scn_inland` | a Spearman of yours with full moves on a free tile of B within 3 tiles of B's capital, selected. The first check asks VEF's own picker rule right away (B's rows open, every other row `WRONG_TERRITORY`); send it to B the same turn | `FROM_LAND_RULES` (right away), `FROM_LAND` |
 | S14 Mutiny death | `scn_mutdeath` | two Swordsmen of yours, lent to F as Volunteers, in mutiny with 80 damage on neutral land next to F's land, each next to two Barbarian Warriors, plus an enemy Warrior of C nearby. Leave copy 1 (no moves) for the Barbarians and attack with copy 2 (selected). Every unit ID is logged. At the next turn start each copy must be closed and gone, with no unit of yours and no VEF record on its tile. `EFV/TESTING_S14.md` walks through it (`--s14`) | `MUT_DEATH` |
 | S15 Receive forces | `scn_receive` | B sends to you, both already deployed next to your capital: an Expeditionary Swordsman you now control (20 turns) and a Volunteer Swordsman B keeps in your land. Gives B open borders from you first if B has no Volunteer basis. Runs S0 if needed, removes the previous Shot or S15 scene and opens the VEF tracker | `RECEIVE` |
+| S16 Break transit | `scn_cancel` | your newest unit on its way: a city-state destination is handed to C (its only city: the city-state is eliminated); a major destination: your friendship with it ends (an alliance too, if the game lets it) and a Warrior of yours "VEF-BLOCK" blocks the unit's start tile. At your next turn the unit must be back within 5 tiles of its start tile: ring 0 when not blocked, ring 1 when blocked, 0 moves. Nothing on its way: CHECK "send a unit first" | `CANCEL_PREP` (right away), `CANCEL` |
 | T1 Volunteer partners | `elig_t1` | see "Eligibility tests" below | `ELIG_T1`, `ELIG_T1_UI` (right away) |
 | T2 Shared enemy | `elig_t2` | see "Eligibility tests" below | `ELIG_T2`, `ELIG_T2_UI` (right away) |
 | Go to scenario | (UI) | moves the camera back to the current test and selects your test unit | |

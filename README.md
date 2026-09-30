@@ -50,7 +50,7 @@ Units in grace or mutiny are listed first, in red. Click a column title to sort 
 
 While one of your units is in grace or mutiny, a red banner shows at the top of the screen and the VEF button gets an alert mark. Click the banner to jump through those units. Right-click it to open the tracker.
 
-VEF warnings (grace, mutiny, lapse, service ending, delayed arrival, rerouted unit) stay in your notification list until the problem is over or you dismiss them. Losses stay until you dismiss them. Plain news, such as a unit leaving, arriving or coming home, clears at the end of the turn.
+VEF warnings (grace, mutiny, lapse, service ending, delayed arrival) stay in your notification list until the problem is over or you dismiss them. Losses stay until you dismiss them. Plain news, such as a unit leaving, arriving or coming home, clears at the end of the turn.
 
 ### Entrust
 When you capture a city, the capture screen (Keep / Raze) gets an Entrust... button. It gives the city for good to an ally, teammate or declared friend who was at war with the city's old owner when you took it. If the old owner was a city-state or has been knocked out of the game, any of them can take it. The same goes for a Free City. It works for capitals too.
@@ -120,8 +120,22 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Distance is measured from city to city: from your city nearest to the unit to the destination city, and on the way home from the host city to your return city. This also holds for a unit that leaves from a partner's land.
 - On a Standard map a trip of up to 10 tiles takes 1 turn, 11 to 20 tiles 2 turns, 21 to 35 tiles 3 turns, and 36 or more 4 turns. The limits scale with the map width.
 - The unit appears within 5 tiles of the city and can't move that turn. If there is no free tile, the arrival is delayed and tried again every turn.
-- If the destination city changes hands on the way, the unit goes to the partner's nearest other city on the same turn. If the partner has no city left, it comes home.
+- If something changes while a unit is on its way, the send can be called off. See "When a send is called off" below.
 - Home is the city it was sent from if you still own it, otherwise your nearest city, then your capital. If you have no city left, the unit is lost.
+
+### When a send is called off
+A unit on its way out is checked at the start of each of your turns, and once more just before it arrives. The send is called off when:
+- the destination city changes hands in any way: captured, razed, flipped by loyalty, traded or gifted. This counts even if the partner has taken the city back by the time of the check.
+- the partner is knocked out of the game.
+- the partner no longer qualifies for that kind of send. For Expeditionary Forces and Volunteers that means you are now at war with each other, the alliance, team or friendship is gone, or you no longer share an enemy. Volunteers sent to a declared friend also need the friend's open borders to last. A city-state only stops qualifying if you go to war with it.
+
+What happens then:
+- The unit comes straight back, on the same turn, to the tile it left from. If another unit stands there, or the tile is now enemy land or land you can't enter, it takes the nearest free tile, up to 5 tiles away. If there is none, it appears next to the city it would normally return to, and if even that is full it travels there and arrives when a tile frees up.
+- It keeps its promotions, level, damage and name, like any unit coming home. It can't move on the turn it comes back.
+- You get half the fee back, rounded down. A free send gives nothing back, and the upkeep you paid while it travelled is not refunded.
+- A notification tells you why. A human partner is told too, with the reason, and the unit drops off the tracker.
+
+Only the checks count: if an alliance ends and is renewed between two of your turns, nothing happens. A war declared on you in the middle of a round calls the unit back at the start of your next turn. Open borders from a friend end on their expiry turn, so Volunteers still on their way to that friend are called back unless you are also allies or teammates. There is no grace period for this. Units already on their way home are not affected.
 
 ### Service, grace and mutiny
 - Expeditionary units serve 20 turns, City-State units 10. You and the host are warned 3 turns and 1 turn before the end.
@@ -141,9 +155,9 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - Recall needs 10 turns deployed (or a lapse) and the unit on your land or the host's. Full health is not needed.
 
 ### War, elimination and losses
-- If you and the host go to war with each other: lent Expeditionary and City-State units switch back to you where they stand (or on a nearby tile, or they travel home if there is no room). Deployed Volunteers are simply your units and VEF stops tracking them. Units on the way turn around.
-- If the host is eliminated: units on the way come home. Deployed Expeditionary units come home as they were when the host's last city fell (if VEF has no saved state for a unit, it is lost and you are told). A unit killed in that fight is lost, not sent home. Volunteers are not affected here; the normal lapse follows.
-- If you are eliminated, your lent units stay with their hosts.
+- If you and the host go to war with each other: lent Expeditionary and City-State units switch back to you where they stand (or on a nearby tile, or they travel home if there is no room). Deployed Volunteers are simply your units and VEF stops tracking them. Units on the way are called back (see When a send is called off).
+- If the host is eliminated: units on the way are called back to where they left, and you get half the fee back. Deployed Expeditionary units come home as they were when the host's last city fell (if VEF has no saved state for a unit, it is lost and you are told). A unit killed in that fight is lost, not sent home. Volunteers are not affected here; the normal lapse follows.
+- If you are eliminated: your deployed Expeditionary and City-State units stay with their hosts for good, and those still on the way arrive on schedule and become the host's own units. If the destination city has changed hands by then, they go to the host's nearest other city. Your Volunteers, deployed or on the way, and any unit on its way home are lost.
 - If a lent unit is killed or disbanded, you get a notification.
 
 ### Corps and Armies
@@ -171,6 +185,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 - A mutinying unit may briefly show a "+HP" animation before VEF takes the healing back.
 
 ## Changelog
+- Unreleased: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.
 - 1.0.0: First public release, on the Steam Workshop and GitHub. Same rules as 0.7.4.

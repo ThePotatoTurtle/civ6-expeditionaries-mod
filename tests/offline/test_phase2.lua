@@ -694,7 +694,7 @@ test("0.7.2 notifications: the sweep never dismisses a non-VEF notification, a V
 	H.clean()
 end)
 
-test("0.7.2 notifications: EXPIRY_SOON, lapse, SPAWN_BLOCKED and REROUTED stay until resolved; one copy per record", function()
+test("0.7.2 notifications: EXPIRY_SOON, lapse, SPAWN_BLOCKED and a legacy REROUTED copy stay until resolved; one copy per record", function()
 	local S, tr = BootUI()
 	local idE, idL, idS
 	G(function()
@@ -710,6 +710,7 @@ test("0.7.2 notifications: EXPIRY_SOON, lapse, SPAWN_BLOCKED and REROUTED stay u
 	local e2 = SendRaw(0, "EFV_NOTIF_EXPIRY_SOON", { EFV_RecordID = idE, EFV_Turn = T })
 	local l1 = SendRaw(0, "EFV_NOTIF_ACCESS_LAPSE", { EFV_RecordID = idL, EFV_Turn = T })
 	local s1 = SendRaw(0, "EFV_NOTIF_SPAWN_BLOCKED", { EFV_RecordID = idS, EFV_Turn = T })
+	-- a legacy REROUTED copy from an older save (never sent since the transit cancel, 2026-09-30)
 	local r1 = SendRaw(0, "EFV_NOTIF_REROUTED", { EFV_RecordID = idS, EFV_Turn = T })
 	for _, nid in ipairs({ e1, e2, l1, s1, r1 }) do Events.NotificationAdded(0, nid) end
 	Events.PlayerTurnActivated(0, true)

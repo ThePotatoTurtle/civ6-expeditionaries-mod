@@ -63,6 +63,15 @@ local function FreeAt(x, y, d)
 	error("no free plot at distance " .. d)
 end
 
+-- The number of player pid's units of typeName standing on (x, y).
+local function UnitsOn(pid, typeName, x, y)
+	local n = 0
+	for _, u in ipairs(H.unitsOf(pid, typeName)) do
+		if u.x == x and u.y == y then n = n + 1 end
+	end
+	return n
+end
+
 local CORPS = function() return MilitaryFormationTypes.CORPS_FORMATION end
 local ARMY = function() return MilitaryFormationTypes.ARMY_FORMATION end
 local STANDARD = function() return MilitaryFormationTypes.STANDARD_FORMATION end
@@ -163,7 +172,7 @@ test("row 1: a RETURNING record ignores the war and still arrives home", functio
 	H.clean()
 end)
 
-test("row 1 VOL + CS in transit: both return (WAR); VOL deployed closes (DV6)", function()
+test("row 1 VOL + CS in transit: both cancelled (WAR), each back on its tile; VOL deployed closes (DV6)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local rv, uv = Deploy(S, VOL)
@@ -175,8 +184,13 @@ test("row 1 VOL + CS in transit: both return (WAR); VOL deployed closes (DV6)", 
 	H.endTurn()
 	H.isnil(Rec(rv.id), "deployed Volunteer record closed (DV6)")
 	H.ok(H.unitAlive(uv)); H.eq(uv.owner, 0)
-	H.eq(Rec(ids["VOLUNTEEROUTBOUND"]).returnReason, "WAR")
-	H.eq(Rec(ids["CS_EXPEDITIONARYOUTBOUND"]).returnReason, "WAR")
+	-- Designer ruling 2026-09-30: in-transit units are cancelled, not sent
+	-- on a return trip.
+	H.isnil(Rec(ids["VOLUNTEEROUTBOUND"]), "in-transit Volunteer cancelled")
+	H.isnil(Rec(ids["CS_EXPEDITIONARYOUTBOUND"]), "in-transit City-State unit cancelled")
+	H.eq(UnitsOn(0, "UNIT_SWORDSMAN", 12, 10), 1, "Volunteer back on its tile")
+	H.eq(UnitsOn(0, "UNIT_SWORDSMAN", 10, 11), 1, "City-State unit back on its tile")
+	H.eq(#H.lines("reason=WAR"), 2)
 	H.clean()
 end)
 
@@ -303,7 +317,7 @@ test("row 4 EXP: no unit and no usable snapshot -> lost (UNIT_LOST RECIPIENT_GON
 	H.clean()
 end)
 
-test("row 4: OUTBOUND Volunteer returns; deployed Volunteer is the sender's and lapses; RETURNING unaffected", function()
+test("row 4: OUTBOUND Volunteer cancelled (RECIPIENT_GONE); deployed Volunteer is the sender's and lapses; RETURNING unaffected", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local rv, uv = Deploy(S, VOL)
@@ -316,7 +330,9 @@ test("row 4: OUTBOUND Volunteer returns; deployed Volunteer is the sender's and 
 	Eliminate(1)
 	H.ok(H.unitAlive(uv), "the sender's Volunteer is not removed with B")
 	H.endTurn()
-	H.eq(Rec(outID).state, "RETURNING"); H.eq(Rec(outID).returnReason, "RECIPIENT_GONE")
+	H.isnil(Rec(outID), "cancelled (designer ruling 2026-09-30), no return trip")
+	H.eq(UnitsOn(0, "UNIT_SWORDSMAN", 10, 11), 1, "the Volunteer is back on its tile")
+	H.ok(H.hasLine("reason=RECIPIENT_GONE"))
 	H.eq(Rec(rv.id).state, "GRACE", "lapse: B is no eligible partner any more")
 	H.eq(Rec(rv.id).lapsed, 1)
 	H.eq(Rec(re.id).state, "RETURNING"); H.ne(Rec(re.id).returnReason, "RECIPIENT_GONE")
@@ -341,7 +357,7 @@ end)
 -- ===========================================================================
 -- Spec 11 row 5: sender eliminated
 -- ===========================================================================
-test("row 5: sender eliminated -> EXP (even in MUTINY) stays with the recipient; in-transit and returning records deleted", function()
+test("row 5: sender eliminated -> EXP (even in MUTINY) stays with the recipient; in-transit EXP arrives for B (R2); returning record deleted", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r1, u1 = Deploy(S)
@@ -351,19 +367,27 @@ test("row 5: sender eliminated -> EXP (even in MUTINY) stays with the recipient;
 	H.moveUnit(u2, p:GetX(), p:GetY())
 	EditRecord(r2.id, function(rec) rec.state = "MUTINY"; rec.lastDamage = 20 end)
 	u2.damage = 20
-	H.send(0, MyUnit(10, 11), 1, S.c1, "EXPEDITIONARY", 999)   -- OUTBOUND
 	local r3 = Deploy(S, "EXPEDITIONARY", 1, S.c1, MyUnit(9, 10))
 	EditRecord(r3.id, function(rec) rec.deployedTurn = FAKE.turn - 20 end)
 	H.endTurn()
 	H.eq(Rec(r3.id).state, "RETURNING")
 	u2.damage = 20; EditRecord(r2.id, function(rec) rec.lastDamage = 20 end)
+	H.send(0, MyUnit(10, 11), 1, S.c1, "EXPEDITIONARY", 999)   -- OUTBOUND, band 2
+	local out = H.records()[#H.records()]
+	H.eq(out.state, "OUTBOUND")
 	local gold1 = H.gold(0)
+	local before = #H.unitsOf(1, "UNIT_SWORDSMAN")
 	Eliminate(0)
 	H.endTurn()
-	H.len(H.records(), 0, "every record of the dead sender deleted")
+	H.len(H.records(), 1, "every record of the dead sender deleted except the one in transit")
+	H.eq(Rec(out.id).state, "OUTBOUND"); H.eq(Rec(out.id).senderGoneTurn, FAKE.turn)
 	H.ok(H.unitAlive(u1)); H.eq(u1.owner, 1)
 	H.ok(H.unitAlive(u2)); H.eq(u2.owner, 1); H.eq(u2.damage, 20, "mutiny stopped")
-	H.eq(H.gold(0), gold1, "no transit maintenance charged to a dead sender")
+	H.endTurn()                                      -- arrival turn: B's own unit, record closed
+	H.len(H.records(), 0, "the orphan record closes once the unit has spawned")
+	H.eq(#H.unitsOf(1, "UNIT_SWORDSMAN"), before + 1, "the in-transit unit arrived for B")
+	H.eq(H.gold(0), gold1, "no transit maintenance charged to a dead sender, no refund")
+	H.ok(not H.hasLine("[Cancel] id="), "never cancelled")
 	H.clean()
 end)
 
@@ -559,32 +583,33 @@ end)
 -- ===========================================================================
 -- Spec 11 row 9: destination lost in transit (spec 7.3)
 -- ===========================================================================
-test("row 9 VOL: destination captured -> rerouted to the recipient's nearest city, same arrival turn", function()
+test("row 9 VOL: destination captured -> transit cancelled (DEST_LOST), no reroute", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	H.send(0, MyUnit(), 1, S.c1, VOL, 999)
 	local r = Only()
-	local arrival = r.arrivalTurn
+	local fee = r.feePaid
+	local g = H.gold(0)
 	CityManager.TransferCity(S.c1, 3, CityTransferTypes.BY_COMBAT)
-	H.turns(arrival - FAKE.turn)
-	local rr = Only()
-	H.eq(rr.state, "DEPLOYED"); H.eq(rr.deployedTurn, arrival, "no transit recalculation")
-	H.eq(rr.destX, S.c1b.x); H.eq(rr.destY, S.c1b.y); H.eq(rr.rerouted, 1)
-	H.eq(FAKE.units[rr.onMapUnitID].owner, 0, "Volunteers stay the sender's")
-	H.len(Sent(0, "REROUTED"), 1)
+	H.endTurn()
+	H.len(H.records(), 0, "cancelled at the next turn start")
+	H.eq(UnitsOn(0, "UNIT_SWORDSMAN", 11, 10), 1, "the Volunteer is back on its tile")
+	H.eq(H.gold(0), g + math.floor(fee / 2), "half the fee back, no upkeep on the cancel turn")
+	H.ok(H.hasLine("reason=DEST_LOST code=OWNER"))
+	H.len(Sent(0, "REROUTED"), 0)
 	H.clean()
 end)
 
-test("row 9 CS: the city-state's only city captured -> return (DEST_LOST) from the lost city", function()
+test("row 9 CS: the city-state's only city captured -> transit cancelled (DEST_LOST), unit on its tile", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	H.send(0, MyUnit(), 4, S.c4, CS, 999)
-	local r = Only()
 	CityManager.TransferCity(S.c4, 3, CityTransferTypes.BY_COMBAT)
-	H.turns(r.arrivalTurn - FAKE.turn)
-	local rr = Only()
-	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "DEST_LOST")
-	H.eq(rr.arrivalTurn, FAKE.turn + EFV_Band(S.c0.x, S.c0.y, S.c4.x, S.c4.y), "band from the lost city")
+	H.endTurn()
+	H.len(H.records(), 0)
+	H.eq(UnitsOn(0, "UNIT_SWORDSMAN", 11, 10), 1)
+	H.ok(H.hasLine("reason=DEST_LOST code=OWNER"))
+	H.len(Sent(0, "RETURNING"), 0, "no return trip")
 	H.clean()
 end)
 

@@ -3,7 +3,9 @@
 -- OnGameTurnStarted pipeline, PlayerTurnStartComplete, OnPlayerTurnEnded):
 -- P1.1 send -> transit -> arrival, P1.3 expiry -> return, P1.2 forged
 -- requests, P1.4 save/load + idempotency guard, P1.5 maintenance, P1.6 spawn
--- blocked, P1.7 reroute, destination/return city lost, unit killed.
+-- blocked, P1.7 destination lost (since 2026-09-30 a transit cancel, no
+-- reroute; the full suite is test_transit_cancel.lua), return city lost,
+-- unit killed.
 
 local N = function(name) return "EFV_NOTIF_" .. name end
 local function Rec(id) return EFV_Records.Get(EFV_Records.Load(), id) end
@@ -227,35 +229,36 @@ test("P1.6: spawn blocked -> SPAWN_BLOCKED each turn, arrival when a tile frees"
 	H.clean()
 end)
 
-test("P1.7: destination captured in transit -> REROUTED to nearest recipient city, same turn", function()
+test("P1.7: destination captured in transit -> transit cancelled, unit back on its tile, half the fee back, no REROUTED", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1)
-	local arrival = Only().arrivalTurn
 	CityManager.TransferCity(S.c1, 3, CityTransferTypes.BY_COMBAT)
-	H.turns(arrival - FAKE.turn)
-	local r = Only()
-	H.eq(r.state, "DEPLOYED"); H.eq(r.deployedTurn, arrival, "no transit recalculation")
-	H.eq(r.rerouted, 1); H.eq(r.destCityID, S.c1b.id); H.eq(r.destX, S.c1b.x)
-	H.eq(#H.notifs(0, N("REROUTED")), 1)
-	local nu = Players[1]:GetUnits():FindID(r.onMapUnitID)
-	H.ok(Map.GetPlotDistance(S.c1b.x, S.c1b.y, nu:GetX(), nu:GetY()) <= 5)
+	H.endTurn()
+	H.len(H.records(), 0, "cancelled at the next turn start")
+	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(mine, 1)
+	H.eq(mine[1]:GetX(), 11); H.eq(mine[1]:GetY(), 10)
+	H.eq(H.gold(0), 1000 - 36 + 18, "refund 18, no upkeep on the cancel turn")
+	H.eq(#H.notifs(0, N("REROUTED")), 0)
+	H.eq(#H.notifs(0, N("RETURNED")), 1, "RETURNED _CANCELLED")
+	H.ok(H.hasLine("reason=DEST_LOST code=OWNER"))
+	H.clean()
 end)
 
-test("destination lost and recipient has no city -> return (DEST_LOST) from the lost city", function()
+test("destination lost and recipient has no city left -> cancelled (DEST_LOST), unit on its tile", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1)
 	CityManager.TransferCity(S.c1, 3, CityTransferTypes.BY_COMBAT)
 	CityManager.TransferCity(S.c1b, 3, CityTransferTypes.BY_COMBAT)
-	H.turns(2)
-	local r = Only()
-	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "DEST_LOST")
-	local band = EFV_Band(S.c0.x, S.c0.y, S.c1.x, S.c1.y)
-	H.eq(r.arrivalTurn, FAKE.turn + band, "band from the lost destination to the return city")
-	H.turns(band)
+	H.endTurn()
 	H.len(H.records(), 0)
-	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1, "unit back home")
+	local mine = H.unitsOf(0, "UNIT_SWORDSMAN")
+	H.len(mine, 1, "unit back at once")
+	H.eq(mine[1]:GetX(), 11); H.eq(mine[1]:GetY(), 10)
+	H.ok(H.hasLine("reason=DEST_LOST"))
+	H.clean()
 end)
 
 test("return city lost while RETURNING -> nearest own city to the origin (10.1)", function()
@@ -263,9 +266,10 @@ test("return city lost while RETURNING -> nearest own city to the origin (10.1)"
 	H.loadEFV()
 	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1)
 	CityManager.TransferCity(S.c1, 3, CityTransferTypes.BY_COMBAT)
-	CityManager.TransferCity(S.c1b, 3, CityTransferTypes.BY_COMBAT)
-	H.turns(2)                                        -- now RETURNING to c0
-	H.eq(Only().state, "RETURNING")
+	FAKE.createNil = function() return true end      -- no tile anywhere: the cancel travels home (fallback B)
+	H.endTurn()                                       -- now RETURNING to c0
+	H.eq(Only().state, "RETURNING"); H.eq(Only().returnReason, "CANCELLED")
+	FAKE.createNil = nil
 	CityManager.TransferCity(S.c0, 3, CityTransferTypes.BY_COMBAT)
 	H.turns(Only().arrivalTurn - FAKE.turn)
 	H.len(H.records(), 0)

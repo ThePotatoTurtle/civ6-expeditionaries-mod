@@ -99,6 +99,14 @@ EFV_Lifecycle = {}
 --     units; KILLED instead of a snapshot return when the recipient is
 --     eliminated; CityConquered returns living units of an eliminated
 --     recipient at once; OnCombat raises the mutiny floor baseline.
+--   Transit cancel (designer rulings 2026-09-30, INTERFACES note 34): the
+--     spec 11 rows for units IN TRANSIT now go through EFV_Transit's
+--     transit check: step 0b (ReconcileOne) and the sender's
+--     PlayerTurnStarted (TurnBoundaryPass -> CheckTransits) cancel an
+--     outbound record whose recipient is gone, whose destination changed
+--     hands (OnCityConquered marks it) or whose send conditions lapsed; a
+--     dead sender's EXP / CS in transit still arrive for the recipient (R2).
+--     The DV16 boundary war check covers on-map records only.
 --
 -- Turn-boundary abstraction (INTERFACES note 23). In-game order (Session C
 -- T04, confirmed for every round by Session E T26): OnGameTurnStarted(N) ->
@@ -495,12 +503,19 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_Lifecycle.ReconcilePlayers(store, turn)
--- Pipeline step 0b (spec 11 rows 1, 4, 5): sender not alive -> delete every
--- record of that sender (deployed EXP/CS units stay with the recipient).
--- Recipient not alive -> OUTBOUND: ConvertToReturn(.., "RECIPIENT_GONE",
--- destX, destY, turn); EXP/CS on the map: StartReturn(store, rec,
--- pUnitOrNil, "RECIPIENT_GONE", turn) (snapshot path, S9); deployed VOL:
--- unaffected here (step 4 sees the lapse). Sender and recipient at war ->
+-- Pipeline step 0b (spec 11 rows 1, 4, 5; DECISIONS 2026-09-30 transit
+-- rulings). OUTBOUND records: sender not alive -> EXP / CS with a living
+-- recipient are kept (rec.senderGoneTurn, write-once) and arrive as the
+-- recipient's own units (R2, EFV_Transit ArriveOrphan); VOL, or a dead
+-- recipient too, -> record deleted (lost). Sender alive -> the transit
+-- check (EFV_Transit.CheckOutbound, hook "OnGameTurnStarted"): recipient
+-- eliminated (R3), destination lost, war or send conditions lost ->
+-- transit cancelled (half refund, the unit back on its origin tile). Other
+-- records: sender not alive -> delete every record of that sender
+-- (deployed EXP/CS units stay with the recipient). Recipient not alive ->
+-- EXP/CS on the map: StartReturn(store, rec, pUnitOrNil, "RECIPIENT_GONE",
+-- turn) (snapshot path, S9); deployed VOL: unaffected here (step 4 sees
+-- the lapse). Sender and recipient at war (on-map records) ->
 -- HandleSenderRecipientWar. Logs "[Reconcile] ...".
 -- 0.5.2 (Session F MUST-FIX 1): recipient gone and the unit missing with
 -- rec.killedTurn set or a combat marker of this or the last turn -> KILLED
@@ -529,21 +544,39 @@ local function SnapshotUsable(rec)
 end
 
 local function ReconcileOne(store, rec, turn)
-	if not IsAliveID(rec.senderID) then
+	local senderAlive = IsAliveID(rec.senderID)
+	if rec.state == EFV_Config.ST_OUTBOUND then
+		if not senderAlive then
+			-- Designer ruling 2026-09-30 (sender eliminated): EXP / CS still
+			-- arrive as the recipient's own units; outbound Volunteers are lost.
+			if rec.forceType == EFV_Config.FT_VOL or not IsAliveID(rec.recipientID) then
+				EFV_Log(2, "Reconcile", "sender gone id=%d sender=%s force=%s outbound (recipient alive=%s) -> record deleted",
+					rec.id, tostring(rec.senderID), tostring(rec.forceType), tostring(IsAliveID(rec.recipientID)))
+				EFV_Records.Delete(store, rec.id)
+			elseif rec.senderGoneTurn == nil then
+				rec.senderGoneTurn = turn
+				Touch(store)
+				EFV_Log(2, "Reconcile", "sender gone id=%d sender=%s force=%s outbound -> arrives as the recipient's own unit",
+					rec.id, tostring(rec.senderID), tostring(rec.forceType))
+			end
+			return
+		end
+		-- Designer ruling 2026-09-30: recipient eliminated, destination lost,
+		-- war, partner or shared war lost -> transit cancelled (EFV_Transit).
+		EFV_Transit.CheckOutbound(store, rec, turn, "OnGameTurnStarted")
+		return
+	end
+	if not senderAlive then
 		-- Spec 11 row 5: deployed EXP / CS units stay with the recipient; the
-		-- engine removes Volunteers; in-transit records vanish.
+		-- engine removes Volunteers; returning records vanish.
 		EFV_Log(2, "Reconcile", "sender gone id=%d sender=%s state=%s force=%s -> record deleted",
 			rec.id, tostring(rec.senderID), tostring(rec.state), tostring(rec.forceType))
 		EFV_Records.Delete(store, rec.id)
 		return
 	end
 	if not IsAliveID(rec.recipientID) then
-		-- Spec 11 row 4.
-		if rec.state == EFV_Config.ST_OUTBOUND then
-			EFV_Log(2, "Reconcile", "recipient gone id=%d recipient=%s outbound -> return",
-				rec.id, tostring(rec.recipientID))
-			EFV_Transit.ConvertToReturn(store, rec, "RECIPIENT_GONE", rec.destX, rec.destY, turn)
-		elseif IsOnMapState(rec.state) and rec.forceType ~= EFV_Config.FT_VOL then
+		-- Spec 11 row 4 (outbound records never get here: transit check above).
+		if IsOnMapState(rec.state) and rec.forceType ~= EFV_Config.FT_VOL then
 			-- The engine removed the units with the player (Session D); a unit
 			-- that still exists (e.g. levied by a suzerain) is taken along.
 			local pUnit, why = EFV_Units.GetForRecord(rec)
@@ -596,10 +629,13 @@ end
 
 -- ---------------------------------------------------------------------------
 -- EFV_Lifecycle.HandleSenderRecipientWar(store, rec, turn)
--- Spec 11 row 1: EXP/CS on the map -> RevertToSender; any OUTBOUND ->
--- ConvertToReturn(.., "WAR", destX, destY, turn); VOL on the map -> delete
--- the record without touching the unit (DV6). Also called from
--- TurnBoundaryPass at every turn boundary (DV16). Logs "[War] ...".
+-- Spec 11 row 1: EXP/CS on the map -> RevertToSender; VOL on the map ->
+-- delete the record without touching the unit (DV6). OUTBOUND records are
+-- decided by the transit check (DECISIONS "Transit cancelled", 2026-09-30:
+-- WAR -> cancelled at the next check point); no caller passes them any
+-- more, the branch only keeps the function total. Also called from
+-- TurnBoundaryPass at every turn boundary for on-map records (DV16). Logs
+-- "[War] ...".
 -- Params:  store, rec record, turn number.
 -- Returns: nil.
 -- PLAN 2.9; DV6, DV16. APIs: via helpers.
@@ -609,9 +645,10 @@ function EFV_Lifecycle.HandleSenderRecipientWar(store, rec, turn)
 		turn = CurrentTurn()
 	end
 	if rec.state == EFV_Config.ST_OUTBOUND then
-		EFV_Log(2, "War", "id=%d sender=%s recipient=%s at war; in transit -> return",
-			rec.id, tostring(rec.senderID), tostring(rec.recipientID))
-		EFV_Transit.ConvertToReturn(store, rec, "WAR", rec.destX, rec.destY, turn)
+		-- Designer ruling 2026-09-30: outbound transits are decided by the
+		-- transit check (WAR -> cancelled). No caller passes OUTBOUND any
+		-- more (ReconcileOne and TurnBoundaryPass skip it); kept total.
+		EFV_Transit.CheckOutbound(store, rec, turn, "War")
 		return nil
 	end
 	if not IsOnMapState(rec.state) then
@@ -1662,10 +1699,14 @@ end
 -- The "turn-end" work, run for ALL records at every turn boundary: for
 -- DEPLOYED / GRACE / MUTINY records with a unit that passes the identity
 -- check: MUTINY floor (S8), S9 snapshot (when changed), merge check (D3).
--- Then, unless opts.skipWar, HandleSenderRecipientWar for every non-RETURNING
--- record whose sender and recipient are at war (DV16: the revert happens at
--- the first boundary after the declaration, i.e. at the end of the
--- declarer's turn). Since 0.7 (FIXPLAN item 10) the war check skips records
+-- Then, unless opts.skipWar, HandleSenderRecipientWar for every on-map
+-- record (not OUTBOUND, not RETURNING) whose sender and recipient are at war
+-- (DV16: the revert happens at the first boundary after the declaration,
+-- i.e. at the end of the declarer's turn). Outbound records are not
+-- converted here any more (designer ruling 2026-09-30, transit cancel): at
+-- hook "PlayerTurnStarted" the transit check runs for the OUTBOUND records
+-- whose sender is pid (EFV_Transit.CheckTransits), so every cancel happens
+-- at the start of the sender's own turn (or in step 0b / at arrival). Since 0.7 (FIXPLAN item 10) the war check skips records
 -- whose unit belongs to pid when hook == "PlayerTurnStartComplete" (log
 -- "[War] ... deferred at the owner's PTSC"): no unit is removed at its
 -- owner's PTSC; the next boundary handles it. Idempotent: a second call with no game change writes
@@ -1692,7 +1733,7 @@ function EFV_Lifecycle.TurnBoundaryPass(store, turn, hook, pid, opts)
 		-- DV16: sender-recipient war handled at the first boundary after it.
 		for _, id in ipairs(EFV_Records.IDs(store)) do
 			local rec = EFV_Records.Get(store, id)
-			if rec ~= nil and rec.state ~= EFV_Config.ST_RETURNING
+			if rec ~= nil and rec.state ~= EFV_Config.ST_RETURNING and rec.state ~= EFV_Config.ST_OUTBOUND
 				and AtWar(rec.senderID, rec.recipientID) then
 				if hook == "PlayerTurnStartComplete" and rec.onMapPlayerID ~= nil and rec.onMapPlayerID == pid then
 					-- 0.7 (FIXPLAN item 10): never remove a unit of pid at pid's own
@@ -1704,6 +1745,14 @@ function EFV_Lifecycle.TurnBoundaryPass(store, turn, hook, pid, opts)
 					ForRecord("War", rec, EFV_Lifecycle.HandleSenderRecipientWar, store, rec, turn)
 				end
 			end
+		end
+	end
+	-- Designer ruling 2026-09-30: outbound transits are checked at the start
+	-- of their sender's own turn (and in step 0b / at arrival).
+	if hook == "PlayerTurnStarted" and type(pid) == "number" and pid >= 0 then
+		local okT, errT = pcall(EFV_Transit.CheckTransits, store, turn, hook, pid)
+		if not okT then
+			EFV_Log(1, "Cancel", "sender check failed pid=%s: %s", tostring(pid), tostring(errT))
 		end
 	end
 	EFV_Log(3, "Hook", "boundary hook=%s pid=%s turn=%s onMap=%d", tostring(hook), tostring(pid), tostring(turn), n)
@@ -1787,6 +1836,10 @@ end
 --     return starts right here from this fresh state (StartReturn,
 --     "RECIPIENT_GONE"); step 0b of the next turn start stays the safety net;
 --   * missing without a marker -> left for step 0b / 0c.
+-- Then every OUTBOUND record whose destination is this plot is marked
+-- (EFV_Transit.MarkDestinationConquered, rec.destLost = 1; designer ruling
+-- 2026-09-30): its transit is cancelled at the next check point, even if
+-- the city is retaken before that. No unit is created here.
 -- No war check here (the regular boundaries do it).
 -- Params:  capturerID, oldOwnerID, cityID, x, y (event arguments).
 -- Returns: nil.
@@ -1828,6 +1881,7 @@ function EFV_Lifecycle.OnCityConquered(capturerID, oldOwnerID, cityID, x, y)
 				ForRecord("Snapshot", rec, ConqueredOne, store, rec, turn, oldOwnerID, counts)
 			end
 		end
+		EFV_Transit.MarkDestinationConquered(store, x, y, capturerID, oldOwnerID, turn)
 		EFV_Log(counts.n > 0 and 2 or 3, "Snapshot",
 			"CityConquered capturer=%s oldOwner=%s city=%s at=%s,%s alive=%s records=%d found=%d killed=%d returned=%d",
 			tostring(capturerID), tostring(oldOwnerID), tostring(cityID), tostring(x), tostring(y),

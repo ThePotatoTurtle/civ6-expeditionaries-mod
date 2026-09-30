@@ -532,7 +532,10 @@ end
 --   E  EXPIRY_SOON           record still DEPLOYED
 --   S  SPAWN_BLOCKED         record still waiting to arrive (OUTBOUND /
 --                            RETURNING)
---   R  REROUTED              record still in transit
+--   R  REROUTED              record still in transit (legacy REROUTED copies
+--                            from older saves: the type is retired since the
+--                            transit cancel, 2026-09-30; swept once the
+--                            record leaves transit)
 -- Records are the local player's (sender or recipient); a record that is
 -- gone (arrived home, closed) makes its copies stale.
 -- Params:  localID player ID.

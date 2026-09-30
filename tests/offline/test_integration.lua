@@ -223,16 +223,19 @@ test("expired unit outside valid territory enters GRACE (Phase 2), returns once 
 	H.clean()
 end)
 
-test("recipient eliminated in transit: arrival converts to a return (RECIPIENT_GONE)", function()
+test("recipient eliminated in transit: cancelled at the next turn start (RECIPIENT_GONE), nothing spawned for it", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	H.send(0, H.unit(0, "UNIT_SWORDSMAN", 11, 10), 1, S.c1, "EXPEDITIONARY", 999)
 	local arrival = Only().arrivalTurn
 	H.kill(1)
 	H.turns(arrival - FAKE.turn)
-	local r = Only()
-	H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "RECIPIENT_GONE")
+	H.len(H.records(), 0, "cancelled at step 0b, no return trip")
+	H.ok(H.hasLine("reason=RECIPIENT_GONE"))
+	H.ok(H.hasLine("hook=OnGameTurnStarted"))
 	H.len(H.unitsOf(1), 0, "nothing spawned for a dead player")
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 1, "the unit is back with its sender")
+	H.clean()
 end)
 
 -- ---------------------------------------------------------------------------

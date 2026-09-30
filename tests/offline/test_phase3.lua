@@ -761,7 +761,7 @@ test("merge: a Volunteer absorbed into the sender's Corps closes its record (MER
 	H.clean()
 end)
 
-test("war between sender and recipient: deployed Volunteer record closed (DV6), in-transit one returns", function()
+test("war between sender and recipient: deployed Volunteer record closed (DV6), in-transit one cancelled (WAR)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local id, u = Deploy(S, { elapsed = 3 })
@@ -772,7 +772,15 @@ test("war between sender and recipient: deployed Volunteer record closed (DV6), 
 	H.endTurn()
 	H.isnil(Rec(id), "deployed Volunteer record closed")
 	H.ok(H.unitAlive(u)); H.eq(u.owner, 0, "the unit stays the sender's (now hostile territory)")
-	H.eq(Rec(outID).state, "RETURNING"); H.eq(Rec(outID).returnReason, "WAR")
+	-- Designer ruling 2026-09-30: the in-transit Volunteer is cancelled (WAR)
+	-- and stands on the tile it left from again.
+	H.isnil(Rec(outID), "in-transit Volunteer cancelled")
+	local back = 0
+	for _, w in ipairs(H.unitsOf(0, "UNIT_SWORDSMAN")) do
+		if w.x == 11 and w.y == 10 then back = back + 1 end
+	end
+	H.eq(back, 1, "back on its origin tile")
+	H.ok(H.hasLine("reason=WAR"))
 	H.eq(Count(0, "VOLUNTEER_LAPSE") + Count(0, "ACCESS_LAPSE"), 0, "war overrides the lapse")
 	H.clean()
 end)

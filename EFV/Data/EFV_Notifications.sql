@@ -46,6 +46,9 @@
 -- EFV_NOTIF_RETURNING         sender                              LOW        1        0        9   COMMAND_UNITS
 -- EFV_NOTIF_RETURNED          sender                              MID        1        0        9   COMMAND_UNITS
 -- EFV_NOTIF_REROUTED          sender                              MID        0        0        59  CITY_LOST
+--   REROUTED: retired 2026-09-30 (transit cancel): no longer sent; row kept so
+--   notifications stored in older saves still resolve. The transit cancel
+--   uses text variants of ARRIVED / RETURNING / RETURNED (_CANCELLED, _KEPT).
 -- EFV_NOTIF_VOLUNTEER_LAPSE   sender (lapse reason WAR)           HIGH       0        0        15  MAKE_PEACE
 -- EFV_NOTIF_ENTRUSTED         both                                MID        1        0        11  CONSIDER_RAZE_CITY
 -- EFV_NOTIF_ACCESS_LAPSE      sender (lapse reason PARTNER)       HIGH       0        0        122 DIPLO_ALLIANCE_EXPIRED

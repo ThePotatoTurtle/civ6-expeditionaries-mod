@@ -49,9 +49,11 @@ EFV_Dev = {}
 -- without changes: 0.7.4-dev.2; S15 Receive forces: 0.7.4-dev.3; rebuilt for
 -- the EFV 1.0.0 release without changes: 1.0.0.1; eligibility tests T1 / T2:
 -- 1.0.1.3; VEF 1.0.2 City-State rule (no shared enemy needed), S0 without
--- the city-state's war, T2 City-State lines: 1.0.2.1); a
+-- the city-state's war, T2 City-State lines: 1.0.2.1; S16 Break transit for
+-- the VEF transit cancel, built on EFV 1.0.2 plus the unreleased change:
+-- 1.0.2.2); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.2.1"
+EFV_Dev.VERSION = "1.0.2.2"
 EFV_Dev.FOR_EFV = "1.0.2"
 
 -- ---------------------------------------------------------------------------
@@ -785,6 +787,7 @@ local function MakeRecord(store, u, f)
 		forceType = f.force, state = f.state or ST.DEP, senderID = f.sender, recipientID = f.recipient,
 		accessBasis = f.basis, originCityID = f.origin:GetID(), originX = f.origin:GetX(), originY = f.origin:GetY(),
 		destCityID = f.dest:GetID(), destX = f.dest:GetX(), destY = f.dest:GetY(), rerouted = 0,
+		destNameKey = (function() local ok, n = pcall(function() return f.dest:GetName() end); return ok and n or nil end)(),
 		sentTurn = turn - 1, arrivalTurn = turn, transitTurns = 1, band = 1,
 		distance = Dist(f.origin:GetX(), f.origin:GetY(), f.dest:GetX(), f.dest:GetY()),
 		durationTurns = f.duration, lapsed = 0, spawnFailCount = 0, feePaid = 0, maintGoldPaid = 0,
@@ -793,7 +796,10 @@ local function MakeRecord(store, u, f)
 	if rec == nil then return nil end
 	local snap = EFV_Units.Snapshot(u)
 	if snap ~= nil then EFV_Units.ApplySnapshot(rec, snap, turn) end
-	if fields.state ~= ST.OUT then
+	if fields.state == ST.OUT then
+		-- VEF transit cancel (2026-09-30): the tile the unit leaves from.
+		rec.sentX, rec.sentY = u:GetX(), u:GetY()
+	else
 		rec.deployedTurn = f.deployedTurn or turn
 		rec.onMapPlayerID = u:GetOwner()
 		rec.onMapUnitID = u:GetID()
@@ -2458,6 +2464,126 @@ local function EvalS14(st, store, t, manual)
 end
 
 -- ---------------------------------------------------------------------------
+-- S16 Break transit (EFV_Dev 1.0.2.2; VEF transit cancel, designer rulings
+-- 2026-09-30). Your newest unit on its way out:
+--   * to a city-state: its city at the destination is handed to C
+--     (CityManager.TransferCity BY_GIFT, INTERFACES note 31; its only city,
+--     so the city-state is eliminated, R3) -> mode CS_TAKEN;
+--   * to a major: your declared friendship (and an alliance, if any) with it
+--     ends (SetHasDeclaredFriendship false; SetHasAllied false is a no-op in
+--     game, Session F T27) -> mode PARTNER_ENDED; a Warrior of yours
+--     "VEF-BLOCK" is put on the unit's start tile when that tile is free
+--     land, so the unit must take the nearest free tile (ring 1).
+-- CANCEL (next turn start): the record is gone and exactly one new unit of
+-- yours of that type stands within 5 tiles of the start tile, at ring 0
+-- (not blocked) or ring 1 (blocked), with 0 moves; the expected refund is
+-- half the fee (rounded down).
+-- ---------------------------------------------------------------------------
+local function MyUnitsOfType(pid, unitType)
+	local out = {}
+	pcall(function()
+		for _, u in Players[pid]:GetUnits():Members() do
+			if u ~= nil and UnitTypeName(u) == unitType then out[#out + 1] = u end
+		end
+	end)
+	table.sort(out, function(a, b) return a:GetID() < b:GetID() end)
+	return out
+end
+
+CMD.scn_cancel = function(me, p)
+	local st = Session("CANCEL", me)
+	if st == nil then return end
+	local store = EFV_Records.Load()
+	local rec = Newest(store, function(r) return r.state == ST.OUT and r.senderID == me end)
+	if rec == nil then
+		Check("CANCEL_PREP", "CHECK", "send a unit first, then press S16")
+		return
+	end
+	local ox, oy = rec.sentX, rec.sentY
+	if ox == nil or oy == nil then ox, oy = rec.lastX, rec.lastY end
+	local r = rec.recipientID
+	local fee = math.max(0, math.floor(tonumber(rec.feePaid) or 0))
+	local refund = math.floor(fee * EFV_Config.TRANSIT_CANCEL_REFUND_PCT / 100)
+	local have = {}
+	for _, u in ipairs(MyUnitsOfType(me, rec.unitType)) do have[#have + 1] = u:GetID() end
+	local mode, blocked = nil, 0
+	if IsCityStateID(r) then
+		local city = CityManager.GetCityAt(rec.destX, rec.destY)
+		local C = st.enemy
+		if city == nil or C == nil or not Alive(C) then
+			Check("CANCEL_PREP", "CHECK", "no city at the destination " .. Str(rec.destX) .. "," .. Str(rec.destY) ..
+				" or no C to hand it to")
+			return
+		end
+		local ok, err = pcall(function() CityManager.TransferCity(city, C, CityTransferTypes.BY_GIFT) end)
+		Log("scn_cancel", "hand " .. PlayerName(r) .. "'s city at " .. rec.destX .. "," .. rec.destY .. " to " .. PlayerName(C) ..
+			" ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))))
+		if not ok then
+			Check("CANCEL_PREP", "CHECK", "the city could not be handed to C: " .. Str(err))
+			return
+		end
+		mode = "CS_TAKEN"
+	else
+		SetDiploPair("scn_cancel", me, r, "SetHasDeclaredFriendship", false)
+		if Diplo(me, "HasAllied", r) then SetDiploPair("scn_cancel", me, r, "SetHasAllied", false) end
+		mode = "PARTNER_ENDED"
+		if EFV_PartnerBasis(me, r) ~= nil then
+			Check("CANCEL_PREP", "CHECK", "partnership with " .. PlayerName(r) .. " could not be ended (still " ..
+				Str(EFV_PartnerBasis(me, r)) .. "): use War")
+		end
+		local plot = (ox ~= nil and oy ~= nil) and Map.GetPlot(ox, oy) or nil
+		if plot ~= nil and EFV_Spawn.DomainOf(rec.unitType) == "LAND" and FreeLand(plot) then
+			local w = NewUnit("scn_cancel", me, "UNIT_WARRIOR", plot, "VEF-BLOCK")
+			if w ~= nil then
+				Hold(store, w)
+				blocked = 1
+			end
+		end
+	end
+	st.s16 = { turn = Turn(), id = rec.id, force = rec.forceType, ox = ox, oy = oy, fee = fee, refund = refund,
+		unitType = rec.unitType, have = have, mode = mode, blocked = blocked }
+	if ox ~= nil and oy ~= nil then Focus(st, ox, oy, nil, nil, p.stamp) end
+	EFV_Records.Commit(store)
+	ScnSave(st)
+	Check("CANCEL_PREP", "INFO", "record " .. rec.id .. " " .. Str(rec.forceType) .. " to " .. PlayerName(r) .. " " .. mode ..
+		" origin " .. Str(ox) .. "," .. Str(oy) .. (blocked == 1 and " (start tile blocked by VEF-BLOCK)" or "") ..
+		" expected refund " .. refund .. "; end the turn")
+end
+
+local function EvalS16(st, store, t, manual)
+	local s = st.s16
+	if type(s) ~= "table" or manual or t <= (tonumber(s.turn) or t) then return end
+	st.s16 = nil
+	local rec = EFV_Records.Get(store, s.id)
+	if rec ~= nil then
+		if rec.state == ST.RET and rec.returnReason == "CANCELLED" then
+			Check("CANCEL", "INFO", "record " .. s.id .. " cancelled, but no free tile near the start tile or home: travelling home" ..
+				" (arrives T" .. Str(rec.arrivalTurn) .. ", refund paid " .. Str(rec.refundPaid) .. ")")
+		else
+			Check("CANCEL", "CHECK", "record " .. s.id .. " still " .. Str(rec.state) .. " (expected the transit cancelled)")
+		end
+		return
+	end
+	local found = {}
+	for _, u in ipairs(MyUnitsOfType(st.me, s.unitType)) do
+		if not Has(s.have, u:GetID()) and s.ox ~= nil and Dist(s.ox, s.oy, u:GetX(), u:GetY()) <= 5 then found[#found + 1] = u end
+	end
+	if #found ~= 1 then
+		Check("CANCEL", "CHECK", "record " .. s.id .. " closed, but " .. #found .. " new " .. Str(s.unitType) ..
+			" of yours within 5 tiles of " .. Str(s.ox) .. "," .. Str(s.oy) .. " (expected exactly 1)")
+		return
+	end
+	local u = found[1]
+	local ring = Dist(s.ox, s.oy, u:GetX(), u:GetY())
+	local want = (tonumber(s.blocked) == 1) and 1 or 0
+	local moves = -1
+	pcall(function() moves = u:GetMovesRemaining() end)
+	Check("CANCEL", (ring == want and moves == 0) and "PASS" or "CHECK", "record " .. s.id .. " " .. Str(s.mode) ..
+		": back at " .. u:GetX() .. "," .. u:GetY() .. " ring " .. ring .. " (expected ring " .. want .. ") moves=" .. moves ..
+		" (expected 0) refund expected " .. Str(s.refund) .. " of fee " .. Str(s.fee))
+end
+
+-- ---------------------------------------------------------------------------
 -- End-of-turn cleanup (0.7, FIXPLAN item 10): units queued in st.cleanup
 -- ({ o, u, ut }) are removed at GameEvents.OnGameTurnEnded, identity-checked
 -- by type, never at a player's PlayerTurnStartComplete.
@@ -3292,6 +3418,7 @@ local function Evaluate(me, manual)
 	EvalS12(st, store, t, manual)
 	EvalS13(st, store, t, manual)
 	if not manual then EvalS14(st, store, t, manual) end
+	EvalS16(st, store, t, manual)
 	EFV_Records.Commit(store)
 	ScnSave(st)
 	if manual then Check("CHECK_NOW", "INFO", "evaluated") end

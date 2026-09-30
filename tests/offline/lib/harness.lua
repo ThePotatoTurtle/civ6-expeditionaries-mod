@@ -260,6 +260,9 @@ function H.fill(x1, y1, x2, y2, t)
 	end
 	FAKE.map.areaDirty = true
 end
+-- A razed city: CityManager.GetCityAt / the owner's city list no longer see it
+-- (transit cancel tests, 2026-09-30).
+function H.raze(city) city.destroyed = true end
 function H.own(x, y, pid) Map.GetPlot(x, y).owner = pid end
 function H.ownRect(x1, y1, x2, y2, pid)
 	for y = y1, y2 do

@@ -90,7 +90,8 @@ end
 -- The turn pipeline (PLAN 1.8), called from GameEvents.OnGameTurnStarted.
 --   G   guard: turn <= store.lastTurn -> log "[Pipeline] skip" and return (DV9)
 --   0a  EFV_Entrust.CleanupSnapshots
---   0b  EFV_Lifecycle.ReconcilePlayers
+--   0b  EFV_Lifecycle.ReconcilePlayers (also the outbound transit check:
+--       cancel, R2 orphans; designer rulings 2026-09-30)
 --   0c  EFV_Lifecycle.RefreshTrackedUnits
 --   0d  EFV_Lifecycle.TurnBoundaryPass (safety net after OnGameTurnEnded,
 --       which normally already floored the round heal: S9 snapshot, S8
@@ -172,7 +173,9 @@ end
 -- GameEvents.PlayerTurnStarted (fires in G for every player, Session C T04;
 -- AlexanderScenario.lua:247): a turn boundary. Every player whose turn came
 -- before pid in this round has ended its turn, so the turn-end work runs
--- here: EFV_Lifecycle.OnTurnBoundary("PlayerTurnStarted", pid).
+-- here: EFV_Lifecycle.OnTurnBoundary("PlayerTurnStarted", pid). The
+-- transit check of pid's own outbound records runs inside that boundary
+-- pass (EFV_Transit.CheckTransits, transit cancel 2026-09-30).
 -- Params:  pid player ID.
 -- Returns: nil.
 -- ---------------------------------------------------------------------------
@@ -264,7 +267,8 @@ end
 -- EFV_Gameplay.OnCityConquered(capturerID, oldOwnerID, cityID, x, y)
 -- GameEvents.CityConquered (A47) -> EFV_Lifecycle.OnCityConquered (Phase 5:
 -- last-moment S9 snapshot of the old owner's tracked units, in case this
--- was its last city) -> EFV_Entrust.OnCityConquered (Entrust snapshot).
+-- was its last city; marks outbound destinations for the transit cancel)
+-- -> EFV_Entrust.OnCityConquered (Entrust snapshot).
 -- Params:  capturerID, oldOwnerID, cityID, x, y.
 -- Returns: nil.
 -- ---------------------------------------------------------------------------

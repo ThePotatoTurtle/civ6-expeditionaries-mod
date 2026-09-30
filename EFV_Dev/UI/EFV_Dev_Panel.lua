@@ -984,6 +984,7 @@ local BUTTONS = {
 	{ label = "S13 Unit in B's land",   scn = "scn_inland" },
 	{ label = "S14 Mutiny death",       scn = "scn_mutdeath" },
 	{ label = "S15 Receive forces",     shot = "scn_receive" },
+	{ label = "S16 Break transit",      scn = "scn_cancel" },
 	{ label = "T1 Volunteer partners",  elig = "elig_t1", test = "T1" },
 	{ label = "T2 Shared enemy",        elig = "elig_t2", test = "T2" },
 	{ label = "Go to scenario",         ui = "GoTo" },

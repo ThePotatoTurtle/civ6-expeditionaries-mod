@@ -55,6 +55,7 @@ EFV_Config.STANDARD_MAP_WIDTH        = 84    -- SPIKES 3 row 1: DB Maps.GridWidt
 EFV_Config.SPAWN_SEARCH_MAX_RING     = 5
 EFV_Config.SPAWN_MIN_EXITS           = 2     -- minimum passable same-domain neighbours
 EFV_Config.SPAWN_CREATE_TRIES        = 8     -- EFV addition (Session D item 3): plots tried per spawn when Create returns nil (RNG pick first, then the rest of its ring and the next rings in index order)
+EFV_Config.TRANSIT_CANCEL_REFUND_PCT = 50    -- designer ruling 2026-09-30: a cancelled transit refunds half the fee (rounded down); upkeep paid in transit is not refunded
 
 -- Plan additions (PLAN 2.1)
 EFV_Config.EXPIRY_WARN_AT            = { 3, 1 }  -- EFV_NOTIF_EXPIRY_SOON when turns left is one of these (spec 14.3)
@@ -143,6 +144,8 @@ EFV_Config.NOTIF = {
 	MUTINY_DEATH    = "EFV_NOTIF_MUTINY_DEATH",
 	RETURNING       = "EFV_NOTIF_RETURNING",
 	RETURNED        = "EFV_NOTIF_RETURNED",
+	-- retired (transit cancel, 2026-09-30): never sent any more; kept so REROUTED
+	-- notifications in older saves still resolve and the tracker can sweep them.
 	REROUTED        = "EFV_NOTIF_REROUTED",
 	VOLUNTEER_LAPSE = "EFV_NOTIF_VOLUNTEER_LAPSE",
 	ENTRUSTED       = "EFV_NOTIF_ENTRUSTED",
