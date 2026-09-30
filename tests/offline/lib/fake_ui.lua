@@ -175,6 +175,13 @@ function FAKE_UI.Enable()
 	-- itself does not use the moves). FAKE_UI.promoteNeedsMoves = false
 	-- turns the rule off.
 	FAKE_UI.promoteNeedsMoves = true
+	-- The base rule the EFV_Dev 1.0.3.2 veteran spike works around: a landed
+	-- promotion ends the unit's turn (moves 0), unless the unit holds one of
+	-- FAKE_UI.keepMovesAbilities (the stand-in for a NoFinishMoves modifier,
+	-- EFFECT_ADJUST_UNIT_PROMOTE_NO_FINISH_MOVES). Off by default: the
+	-- re-test 0.7 log came from Gran Colombia, whose trait keeps the moves.
+	FAKE_UI.promoteEndsTurn = false
+	FAKE_UI.keepMovesAbilities = { EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES = true }
 	UnitManager.CanStartCommand = function(u, cmd, bTest, bResults)
 		if cmd ~= UnitCommandTypes.PROMOTE or u == nil or not FAKE_UI.canPromote then
 			return false, {}
@@ -221,6 +228,13 @@ function FAKE_UI.ApplyUnitCommands()
 				u.promotions[c.promotion] = true
 				if u.level ~= nil then u.level = u.level + 1 end
 				u.damage = math.max(0, u.damage - (FAKE_UI.promoteHeal or 0))
+				if FAKE_UI.promoteEndsTurn then
+					local keep = false
+					for _, name in ipairs(FAKE.SortedKeys(FAKE_UI.keepMovesAbilities or {})) do
+						if u.abilities ~= nil and (u.abilities[name] or 0) > 0 then keep = true end
+					end
+					if not keep then u.moves = 0 end
+				end
 				c.applied = true
 				Events.UnitPromoted(u.owner, u.id)
 			end

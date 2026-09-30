@@ -410,6 +410,74 @@ class TestOfflineRunnerClassify(unittest.TestCase):
         self.assertEqual(self.rt.classify(True, "", "someday", [])[0], "FAIL")
 
 
+class TestSummarizeV103(unittest.TestCase):
+    """summarize_efv_log.py --v103 (the VEF 1.0.3 session, EFV_Dev 1.0.3.2)."""
+
+    P = "EFV_Dev_Gameplay: [EFV][CHECK] "
+    U = "EFV_Dev_Panel: [EFV][CHECK] "
+    GOOD = [
+        "EFV_Gameplay: [EFV][T1][Init] EFV_Gameplay loading version=1.0.3",
+        "EFV_Dev_Gameplay: [EFV][T1][Dev] init: EFV_Dev gameplay loaded; registered GameEvents.EFV_Dev; version=1.0.3.2 for EFV 1.0.3 EFV=1.0.3",
+        P + "SETUP PASS T2 B=P1 Rome (basis FRIEND, Volunteers FRIEND_OB), F=P2 Arabia",
+        P + "TRACKER_PREP INFO T2 4 record(s) in transit: INBOUND record 1 VEF-IN (P2 Arabia -> P0 Rome); they are removed when you end this turn",
+        U + "TRACKER_LABELS PASS T2 INBOUND record 1 (VEF-IN, From Arabia): tracker shows 'Inbound' (expected 'Inbound')",
+        U + "TRACKER_LABELS PASS T2 summary: 4/4 rows as expected (received: Inbound, Departed; sent: Outbound, Returning)",
+        P + "ENTRUST_CS INFO T2 3 Tanks next to P5 Geneva's only city at 40,12",
+        U + "ENTRUST_CS_UI PASS T2 city-state city captured: old owner Geneva, snapshot recipients Hungary, China, partners Hungary, China, button enabled for Hungary, China",
+        P + "ENTRUST_MAJOR INFO T2 3 Tanks next to P7 Korea's city at 16,12",
+        U + "ENTRUST_MAJOR_UI PASS T2 living major's city captured: old owner Korea, snapshot recipients none, partners Hungary, China, button greyed (ENTRUST_NO_PARTNER)",
+        P + "CANCEL_PREP INFO T2 record 5 CS_EXPEDITIONARY to P4 Kabul CS_TAKEN origin 11,10 expected refund 0; end the turn",
+        U + "VSPIKE_V0 PASS T2 V0 control (route B, one PROMOTE per turn): 1 promotion(s) in the first turn, then PROMOTE is not offered (moves 0)",
+        U + "VSPIKE_V1 PASS T2 V1 hidden keep-moves ability + chained PROMOTE: 3/3 promotions in the first turn, level 4 (want 4), moves 2",
+        U + "VSPIKE_V1_OFF PASS T2 ability removed, one normal promotion ended the unit's turn again (moves 0)",
+        U + "VSPIKE_V2 PASS T2 V2 moves restored after each promotion: 3/3 promotions in the first turn, level 4 (want 4), moves 2",
+        U + "VSPIKE_V3 CHECK T2 V3 level-adjust ability + SetPromotion + XP: level 1 (want 4), XP 15/15 (want XP 90)",
+        P + "ENTRUST_CS PASS T3 the city-state's city now belongs to P1 Hungary (entrusted); P5 Geneva alive=false, B was at war with it=false",
+        P + "ENTRUST_MAJOR PASS T3 the city is still yours: nobody could take it (P7 Korea alive=true, 1 city(ies) left)",
+        P + "CANCEL PASS T3 record 5 CS_TAKEN: back at 11,10 ring 0 (expected ring 0) moves=0 (expected 0) refund expected 0 of fee 0",
+        P + "CANCEL_PREP INFO T3 record 6 VOLUNTEER to P1 Hungary PARTNER_ENDED origin 12,10 (start tile blocked by VEF-BLOCK) expected refund 9; end the turn",
+        P + "CANCEL PASS T4 record 6 PARTNER_ENDED: back at 12,11 ring 1 (expected ring 1) moves=0 (expected 0) refund expected 9 of fee 18",
+        U + "VSPIKE_V0 INFO T4 V0 control (route B, one PROMOTE per turn): all 3 promotions back by turn 4 (3 turns), level 4",
+    ]
+
+    def run_lines(self, lines):
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "Lua.log")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(os.linesep.join(lines))
+            out = io.StringIO()
+            old = sys.stdout
+            sys.stdout = out
+            try:
+                code = summarize_efv_log.main(["--v103", "--log", path, "--db", os.path.join(FIX, "no_such.sqlite")])
+            finally:
+                sys.stdout = old
+            return code, out.getvalue()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_good(self):
+        code, text = self.run_lines(self.GOOD)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(len(summarize_efv_log.V103_STEPS), 6)
+        for n in range(1, 7):
+            self.assertIn("Step  %d  PASS" % n, text)
+        self.assertIn("VEF 1.0.3, VEF Dev 1.0.3.2", text)
+        self.assertIn("Veteran spike (findings, not pass/fail):", text)
+        self.assertIn("V3     CHECK", text)
+        self.assertIn("all 3 promotions back by turn 4", text)
+
+    def test_missing_second_cancel_and_label_fail(self):
+        lines = [ln for ln in self.GOOD if "PARTNER_ENDED:" not in ln]
+        lines = [ln.replace("TRACKER_LABELS PASS T2 summary: 4/4", "TRACKER_LABELS FAIL T2 summary: 3/4") for ln in lines]
+        code, text = self.run_lines(lines)
+        self.assertEqual(code, 1)
+        self.assertIn("Step  2  CHECK", text)
+        self.assertIn("Step  6  CHECK", text)
+        self.assertIn("End Turn once more", text)
+
+
 if __name__ == "__main__":
     L.configure_stdout()
     unittest.main(verbosity=2)

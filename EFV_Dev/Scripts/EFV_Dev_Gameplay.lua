@@ -51,9 +51,11 @@ EFV_Dev = {}
 -- 1.0.1.3; VEF 1.0.2 City-State rule (no shared enemy needed), S0 without
 -- the city-state's war, T2 City-State lines: 1.0.2.1; S16 Break transit for
 -- the VEF transit cancel, built on EFV 1.0.2 plus the unreleased change:
--- 1.0.2.2; rebuilt for the EFV 1.0.3 release without changes: 1.0.3.1); a
--- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.3.1"
+-- 1.0.2.2; rebuilt for the EFV 1.0.3 release without changes: 1.0.3.1; the
+-- 1.0.3 test session (S17 tracker labels, S18 / S19 Entrust rules) and the
+-- veteran one-turn restore spike (V button, Data/EFV_Dev_Spike.xml):
+-- 1.0.3.2); a mismatch of FOR_EFV with the loaded EFV build is logged at load.
+EFV_Dev.VERSION = "1.0.3.2"
 EFV_Dev.FOR_EFV = "1.0.3"
 
 -- ---------------------------------------------------------------------------
@@ -1120,9 +1122,11 @@ local function Watch(st, rec)
 end
 
 local function Observe(st, store, me)
+	-- the S17 tracker records never come home (removed at the end of the turn)
+	local labels = type(st.s17) == "table" and st.s17.ids or {}
 	for _, id in ipairs(EFV_Records.IDs(store)) do
 		local rec = EFV_Records.Get(store, id)
-		if rec ~= nil and rec.senderID == me and rec.state == ST.RET then Watch(st, rec) end
+		if rec ~= nil and rec.senderID == me and rec.state == ST.RET and not Has(labels, id) then Watch(st, rec) end
 	end
 end
 
@@ -1580,6 +1584,12 @@ local function PromoRows(u)
 	return rows
 end
 
+-- exp:SetPromotion from gameplay (the restore VEF uses for AI owners,
+-- EFV_Units.Recreate): S6 routes A / C and the V3 spike copy.
+local function SetPromo(u, idx)
+	return pcall(function() u:GetExperience():SetPromotion(idx) end)
+end
+
 local function XPInfo(u)
 	local xp, nxt = -1, -1
 	pcall(function()
@@ -1651,14 +1661,14 @@ CMD.scn_vet = function(me, p)
 	if a ~= nil then
 		for _, r in ipairs(rows) do
 			XPToThreshold(a)
-			pcall(function() a:GetExperience():SetPromotion(r.Index) end)
+			SetPromo(a, r.Index)
 		end
 		TopUp(a, xp)
 		VetVerdict("VET_A", "A", a, vet)
 	end
 	local c = vet.C and FindUnit(me, vet.C)
 	if c ~= nil then
-		for _, r in ipairs(rows) do pcall(function() c:GetExperience():SetPromotion(r.Index) end) end
+		for _, r in ipairs(rows) do SetPromo(c, r.Index) end
 		TopUp(c, xp)
 		VetVerdict("VET_C", "C", c, vet)
 	end
@@ -2051,8 +2061,13 @@ end
 -- city and press Entrust.
 -- ---------------------------------------------------------------------------
 -- The S11 scene (also Shot 4): returns city, tanks, note, weak, or nil, why.
-local function BuildEntrustScene(cmd, me, st, radius)
-	local C = st.enemy
+-- opts (EFV_Dev 1.0.3.2, S19): owner = the city's owner (default C),
+-- allyWar = false keeps B out of the war (default: B declares war too),
+-- keepOwner = true refuses the owner's last city (taking it would eliminate
+-- the owner, and VEF 1.0.3 then skips the at-war check).
+local function BuildEntrustScene(cmd, me, st, radius, opts)
+	opts = opts or {}
+	local C = opts.owner or st.enemy
 	local cap = Capital(me)
 	if cap == nil then return nil, "you have no capital" end
 	local capC = Capital(C)
@@ -2061,17 +2076,19 @@ local function BuildEntrustScene(cmd, me, st, radius)
 		local d = Dist(cap:GetX(), cap:GetY(), c:GetX(), c:GetY())
 		if (capC == nil or c:GetID() ~= capC:GetID()) and (bestD == nil or d < bestD) then best, bestD = c, d end
 	end
-	local note = "C's nearest city that is not its capital"
+	local note = PlayerName(C) .. "'s nearest city that is not its capital"
 	if best == nil then
 		best, note = FoundCityFor(C, cap:GetX(), cap:GetY())
 		if best == nil then
+			if opts.keepOwner then return nil, note .. "; its only city would eliminate it" end
 			best = capC
 			note = note .. "; using C's only city (taking it eliminates C)"
 		end
 	end
 	if best == nil then return nil, "the enemy has no city" end
 	if EFV_PartnerBasis(me, st.ally) == nil then EnsurePartner(cmd, me, st.ally) end
-	DeclareWar(me, C); DeclareWar(st.ally, C)
+	DeclareWar(me, C)
+	if opts.allyWar ~= false then DeclareWar(st.ally, C) end
 	RevealCity(me, best, { -1, C, me, st.ally }, radius)
 	local _, weak = WeakenCity(best)
 	local tanks = {}
@@ -2494,7 +2511,9 @@ CMD.scn_cancel = function(me, p)
 	local st = Session("CANCEL", me)
 	if st == nil then return end
 	local store = EFV_Records.Load()
-	local rec = Newest(store, function(r) return r.state == ST.OUT and r.senderID == me end)
+	-- The S17 tracker records (st.s17.ids) are not real sends: skip them.
+	local labels = type(st.s17) == "table" and st.s17.ids or {}
+	local rec = Newest(store, function(r) return r.state == ST.OUT and r.senderID == me and not Has(labels, r.id) end)
 	if rec == nil then
 		Check("CANCEL_PREP", "CHECK", "send a unit first, then press S16")
 		return
@@ -2588,10 +2607,34 @@ end
 -- ({ o, u, ut }) are removed at GameEvents.OnGameTurnEnded, identity-checked
 -- by type, never at a player's PlayerTurnStartComplete.
 -- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.3.2: records queued in st.cleanRecs (record IDs; the S17
+-- tracker records) are deleted first, through EFV's own record API.
+local function DevCleanRecords(st, turn)
+	local ids = st.cleanRecs
+	if type(ids) ~= "table" or #ids == 0 then return false end
+	local store = EFV_Records.Load()
+	local n = 0
+	for _, id in ipairs(ids) do
+		if EFV_Records.Get(store, tonumber(id) or -1) ~= nil then
+			EFV_Records.Delete(store, tonumber(id))
+			n = n + 1
+		end
+	end
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	st.cleanRecs = nil
+	Log("scn", "end of turn " .. Str(turn) .. ": removed " .. n .. " of " .. #ids .. " test record(s)")
+	return true
+end
+
 local function DevCleanup(turn)
 	local st = ScnLoad()
+	local changed = DevCleanRecords(st, turn)
 	local c = st.cleanup
-	if type(c) ~= "table" or #c == 0 then return end
+	if type(c) ~= "table" or #c == 0 then
+		if changed then ScnSave(st) end
+		return
+	end
 	local n = 0
 	for _, e in ipairs(c) do
 		local o = tonumber(e.o) or -1
@@ -3390,6 +3433,494 @@ end
 CMD.elig_t1 = function(me, p) EligTest("T1", me, p) end
 CMD.elig_t2 = function(me, p) EligTest("T2", me, p) end
 
+-- ===========================================================================
+-- VEF 1.0.3 session (EFV_Dev 1.0.3.2; EFV/TESTING_1.0.3.md). Works against
+-- the released VEF 1.0.3 (Steam Workshop) without changes to it.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- S17 Tracker labels (VEF 1.0.3: the recipient reads Inbound / Departed,
+-- the sender Outbound / Returning). The tracker shows only the local
+-- player's view, so S17 builds four records in transit between you and F
+-- (your friend since S0; B is kept for S16), without units (the S12 field
+-- set), all arriving in 2 turns:
+--   INBOUND    F -> you, Expeditionary, on its way to your capital
+--   DEPARTED   F -> you, Volunteers, going home to F's capital
+--   OUTBOUND   you -> F, Expeditionary, on its way to F's capital
+--   RETURNING  you -> F, Volunteers, coming home to your capital
+-- They are deleted at the end of this turn (GameEvents.OnGameTurnEnded,
+-- st.cleanRecs), before any VEF turn-start step could move or cancel them;
+-- S16 and the HOME watch skip them. The panel opens the tracker (focus open
+-- = TRACKER) and checks its rows with VEF's own UI functions
+-- (TRACKER_LABELS, UI side).
+-- ---------------------------------------------------------------------------
+local LABEL_ROWS = {
+	{ role = "INBOUND",   fromF = true,  state = ST.OUT, force = FT_EXP, ut = "UNIT_SPEARMAN", name = "VEF-IN" },
+	{ role = "DEPARTED",  fromF = true,  state = ST.RET, force = FT_VOL, ut = "UNIT_ARCHER",   name = "VEF-DEPARTED" },
+	{ role = "OUTBOUND",  fromF = false, state = ST.OUT, force = FT_EXP, ut = "UNIT_HORSEMAN", name = "VEF-OUT" },
+	{ role = "RETURNING", fromF = false, state = ST.RET, force = FT_VOL, ut = "UNIT_WARRIOR",  name = "VEF-RET" },
+}
+local LABEL_TURNS = 2
+
+CMD.scn_labels = function(me, p)
+	local st = Session("TRACKER_PREP", me)
+	if st == nil then return end
+	local F = st.friend
+	local cap, capF = Capital(me), (F ~= nil) and Capital(F) or nil
+	if cap == nil or capF == nil then Check("TRACKER_PREP", "CHECK", "your capital or F's capital is missing"); return end
+	local store = EFV_Records.Load()
+	if type(st.s17) == "table" then
+		for _, id in ipairs(st.s17.ids or {}) do
+			if EFV_Records.Get(store, id) ~= nil then EFV_Records.Delete(store, id) end
+		end
+	end
+	local t = Turn()
+	local ids, rows, made = {}, {}, {}
+	for _, d in ipairs(LABEL_ROWS) do
+		local sender, recipient = me, F
+		local origin, dest = cap, capF
+		if d.fromF then sender, recipient, origin, dest = F, me, capF, cap end
+		local basis = (d.force == FT_VOL) and (EFV_VolunteerBasis(sender, recipient) or "FRIEND_OB")
+			or (EFV_PartnerBasis(sender, recipient) or "FRIEND")
+		local fields = {
+			forceType = d.force, state = d.state, senderID = sender, recipientID = recipient, accessBasis = basis,
+			originCityID = origin:GetID(), originX = origin:GetX(), originY = origin:GetY(),
+			destCityID = dest:GetID(), destX = dest:GetX(), destY = dest:GetY(), rerouted = 0,
+			sentTurn = t, arrivalTurn = t + LABEL_TURNS, transitTurns = LABEL_TURNS, band = LABEL_TURNS,
+			distance = Dist(origin:GetX(), origin:GetY(), dest:GetX(), dest:GetY()),
+			lapsed = 0, spawnFailCount = 0, feePaid = 0, maintGoldPaid = 0,
+			unitType = d.ut, veteranName = d.name, damage = 0, experience = 0, xpNext = 15, level = 1,
+			formation = 0, snapTurn = t,
+		}
+		if d.state == ST.OUT then
+			fields.sentX, fields.sentY = origin:GetX(), origin:GetY()
+		else
+			-- the unit served at dest and goes home to the sender's capital
+			fields.sentTurn, fields.deployedTurn = t - 6, t - 5
+			fields.returnCityID, fields.returnX, fields.returnY, fields.returnReason = origin:GetID(), origin:GetX(), origin:GetY(), "RECALL"
+			fields.lastX, fields.lastY = dest:GetX(), dest:GetY()
+		end
+		local rec = EFV_Records.New(store, fields)
+		if rec ~= nil then
+			ids[#ids + 1] = rec.id
+			rows[#rows + 1] = { role = d.role, id = rec.id }
+			made[#made + 1] = d.role .. " record " .. rec.id .. " " .. d.name .. " (" .. PlayerName(sender) .. " -> " .. PlayerName(recipient) .. ")"
+		end
+	end
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	st.s17 = { stamp = p.stamp or 0, turn = t, ids = ids, rows = rows }
+	local clean = Sub(st, "cleanRecs")
+	for _, id in ipairs(ids) do clean[#clean + 1] = id end
+	Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+	st.focus.open, st.focus.zoom = "TRACKER", ZOOM_MID
+	ScnSave(st)
+	Check("TRACKER_PREP", #ids == #LABEL_ROWS and "INFO" or "CHECK", #ids .. " record(s) in transit: " .. table.concat(made, "; ") ..
+		"; they are removed when you end this turn")
+end
+
+-- ---------------------------------------------------------------------------
+-- S18 Entrust a city-state's city (VEF 1.0.3: Entrust skips the at-war
+-- check when the old owner was a city-state or has been eliminated). A
+-- one-city city-state other than CS (S16 needs CS), which neither B nor F
+-- is at war with: you meet it and declare war on it (B stays at peace), its
+-- city is revealed, left at 1 HP with its walls down, 3 Tanks of yours next
+-- to it. Taking its only city eliminates it; Entrust must offer B (and F).
+-- ENTRUST_CS_UI (panel, at the capture) reads VEF's own Entrust state;
+-- ENTRUST_CS (next turn start or Check now) passes when B or F owns it.
+-- ---------------------------------------------------------------------------
+local function EntrustCityState(st, me)
+	local excl = { st.cs, st.killCs or -1, st.guardCs or -1 }
+	for _ = 1, 16 do
+		local cs = PickCityState(st, me, excl)
+		if cs == nil then return nil end
+		if not AtWar(st.ally, cs) and not (st.friend ~= nil and AtWar(st.friend, cs)) then return cs end
+		excl[#excl + 1] = cs
+	end
+	return nil
+end
+
+CMD.scn_entrust_cs = function(me, p)
+	local st = Session("ENTRUST_CS", me)
+	if st == nil then return end
+	local B = st.ally
+	local cs = EntrustCityState(st, me)
+	if cs == nil then
+		Check("ENTRUST_CS", "CHECK", "no one-city city-state other than CS that B and F are at peace with: start a game with at least 3 city-states")
+		return
+	end
+	if EFV_PartnerBasis(me, B) == nil then EnsurePartner("scn_entrust_cs", me, B) end
+	local city = Cities(cs)[1]
+	MeetPair(me, cs)
+	DeclareWar(me, cs)
+	RevealCity(me, city, { -1, cs, me, B })
+	local _, weak = WeakenCity(city)
+	local n = 0
+	for _ = 1, 3 do
+		if NewUnit("scn_entrust_cs", me, "UNIT_TANK", FindPlot(city:GetX(), city:GetY(), 4, OwnedByAny({ -1, cs, me, B }), 1)) ~= nil then n = n + 1 end
+	end
+	local bWar = AtWar(B, cs)
+	st.entrustCs = cs
+	st.s18 = { cx = city:GetX(), cy = city:GetY(), owner = cs, turn = Turn(), tries = 0, bWar = bWar and 1 or 0 }
+	Focus(st, city:GetX(), city:GetY(), nil, nil, p.stamp)
+	ScnSave(st)
+	local ok = AtWar(me, cs) and not bWar and n > 0 and EFV_PartnerBasis(me, B) ~= nil
+	Check("ENTRUST_CS", ok and "INFO" or "CHECK", n .. " Tanks next to " .. PlayerName(cs) .. "'s only city at " .. city:GetX() .. "," ..
+		city:GetY() .. " (" .. weak .. "); you at war with it=" .. tostring(AtWar(me, cs)) .. ", B at war with it=" .. tostring(bWar) ..
+		": take it and choose Entrust -> " .. PlayerName(B))
+end
+
+local function EvalS18(st, store, t, manual)
+	local s = st.s18
+	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
+	local city = CityManager.GetCityAt(s.cx, s.cy)
+	local owner = city and city:GetOwner() or -1
+	local facts = PlayerName(s.owner) .. " alive=" .. tostring(Alive(s.owner)) .. ", B was at war with it=" .. tostring(tonumber(s.bWar) == 1)
+	if owner == st.ally or owner == st.friend then
+		st.s18 = nil
+		Check("ENTRUST_CS", "PASS", "the city-state's city now belongs to " .. PlayerName(owner) .. " (entrusted); " .. facts)
+	elseif owner == st.me then
+		if not manual then
+			st.s18 = nil
+			Check("ENTRUST_CS", "CHECK", "you kept the city (Entrust was not used, greyed or refused: see ENTRUST_CS_UI); " .. facts)
+		end
+	elseif not manual then
+		s.tries = (tonumber(s.tries) or 0) + 1
+		if s.tries >= 3 then st.s18 = nil end
+		Check("ENTRUST_CS", s.tries >= 3 and "CHECK" or "INFO", "the city still belongs to " .. PlayerName(owner))
+	end
+end
+
+-- ---------------------------------------------------------------------------
+-- S19 Entrust a living major's city: still greyed (VEF 1.0.3 keeps the
+-- at-war check for a major that is alive and keeps a city). D = the next
+-- major with a city after B, F and C (needs 5 civs). You meet D and declare
+-- war on it; B and F stay at peace with D. D's nearest non-capital city, or
+-- a small new city founded for D 5-10 tiles from your capital (never D's
+-- last city: that would eliminate D and skip the check) is revealed, left at
+-- 1 HP, with 3 Tanks of yours next to it. After the capture the Entrust
+-- button must read "Entrust (no eligible partner)": choose Keep.
+-- ENTRUST_MAJOR_UI (panel) reads VEF's Entrust state at the capture;
+-- ENTRUST_MAJOR (next turn start) passes when the city is still yours and
+-- fails when a partner got it.
+-- ---------------------------------------------------------------------------
+local function FourthMajor(st, me)
+	for _, i in ipairs(SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)) do
+		if i ~= st.ally and i ~= st.friend and i ~= st.enemy then return i end
+	end
+	return nil
+end
+
+CMD.scn_entrust_major = function(me, p)
+	local st = Session("ENTRUST_MAJOR", me)
+	if st == nil then return end
+	local D = FourthMajor(st, me)
+	if D == nil then Check("ENTRUST_MAJOR", "CHECK", "needs a 4th AI civ (D): start a game with at least 5 civs"); return end
+	MeetPair(me, D)
+	if AtWar(st.ally, D) or (st.friend ~= nil and AtWar(st.friend, D)) then
+		Check("ENTRUST_MAJOR", "CHECK", "B or F is at war with " .. PlayerName(D) .. ": the city could be entrusted; this game cannot show the greyed case")
+		return
+	end
+	local city, tanks, note, weak = BuildEntrustScene("scn_entrust_major", me, st, nil, { owner = D, allyWar = false, keepOwner = true })
+	if city == nil then Check("ENTRUST_MAJOR", "CHECK", tanks); return end
+	local bWar = AtWar(st.ally, D) or (st.friend ~= nil and AtWar(st.friend, D))
+	st.entrustMajor = D
+	st.s19 = { cx = city:GetX(), cy = city:GetY(), owner = D, turn = Turn(), tries = 0 }
+	Focus(st, city:GetX(), city:GetY(), nil, nil, p.stamp)
+	ScnSave(st)
+	local ok = AtWar(me, D) and not bWar and #tanks > 0 and #Cities(D) >= 2
+	Check("ENTRUST_MAJOR", ok and "INFO" or "CHECK", #tanks .. " Tanks next to " .. PlayerName(D) .. "'s city at " .. city:GetX() .. "," ..
+		city:GetY() .. " (" .. note .. "; " .. weak .. "); " .. PlayerName(D) .. " keeps " .. (#Cities(D) - 1) .. " other city(ies); B or F at war with it=" ..
+		tostring(bWar) .. ": take it, Entrust must be greyed, then choose Keep")
+end
+
+local function EvalS19(st, store, t, manual)
+	local s = st.s19
+	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
+	local city = CityManager.GetCityAt(s.cx, s.cy)
+	local owner = city and city:GetOwner() or -1
+	if owner == st.ally or owner == st.friend then
+		st.s19 = nil
+		Check("ENTRUST_MAJOR", "FAIL", "the city went to " .. PlayerName(owner) .. " although nobody was at war with " .. PlayerName(s.owner) ..
+			" (alive=" .. tostring(Alive(s.owner)) .. ")")
+	elseif owner == st.me then
+		if not manual then
+			st.s19 = nil
+			Check("ENTRUST_MAJOR", "PASS", "the city is still yours: nobody could take it (" .. PlayerName(s.owner) .. " alive=" ..
+				tostring(Alive(s.owner)) .. ", " .. #Cities(s.owner) .. " city(ies) left)")
+		end
+	elseif not manual then
+		s.tries = (tonumber(s.tries) or 0) + 1
+		if s.tries >= 3 then st.s19 = nil end
+		Check("ENTRUST_MAJOR", s.tries >= 3 and "CHECK" or "INFO", "the city still belongs to " .. PlayerName(owner))
+	end
+end
+
+-- ===========================================================================
+-- V Veteran spike (EFV_Dev 1.0.3.2): can a returning human-owned veteran
+-- take all its promotions back in ONE turn? Today (route B) VEF raises the
+-- XP and the owner's UI sends the engine PROMOTE command, one promotion per
+-- turn, because promoting ends the unit's turn (no moves -> PROMOTE is not
+-- offered). Four fresh copies of one template (3 wanted promotions) are
+-- made next to your capital, named VEF-V0 .. VEF-V3:
+--   V0  control: route B as today (XP to the threshold, PROMOTE, sync).
+--   V1  a hidden unit ability (Data/EFV_Dev_Spike.xml,
+--       EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES: COLLECTION_OWNER +
+--       EFFECT_ADJUST_UNIT_PROMOTE_NO_FINISH_MOVES, NoFinishMoves = true,
+--       the Gran Colombia trait's effect on one unit) is granted, the panel
+--       chains PROMOTE in the same turn, then the ability is removed and one
+--       more normal promotion must end the turn again (VSPIKE_V1_OFF).
+--   V2  no DB change: after each landed promotion gameplay restores the
+--       moves, then the panel sends the next PROMOTE.
+--   V3  a level-adjust ability (EFV_DEV_ABILITY_VET_LEVEL:
+--       MODIFIER_PLAYER_UNIT_ADJUST_EXPERIENCE_LEVEL, Amount 3, the Giant
+--       Death Robot's ABILITY_UNIT_AUTO_VETERANCY pattern) plus SetPromotion
+--       for each promotion plus the XP: what level, threshold and pending
+--       promotion result.
+-- The UI side (panel) sends every PROMOTE and writes the verdicts
+-- (VSPIKE_V0 .. V3, VSPIKE_V1_OFF) with the UI level; gameplay writes
+-- "[EFV][CHECK] VSPIKE INFO" lines (moves, XP / next-level XP, CanPromote,
+-- HP, promotions, ability counts) at every step and at each of your next
+-- VS_TURNS turn starts. Gameplay changes happen only in this EXECUTE_SCRIPT
+-- handler (vs_start, vs_sync, vs_off); the panel issues the engine command.
+-- Play as a civ OTHER than Gran Colombia: its trait keeps every unit's moves.
+-- API evidence (shipped gameplay scripts):
+--   u:GetAbility():ChangeAbilityCount(name, n) / :GetAbilityCount(name):
+--     PiratesScenario_UnitCommands.lua:661-662 (+1),
+--     CivRoyaleScenario_UnitCommands.lua:53-54 (+1),
+--     PiratesScenario_StartScript.lua:1516-1518 (GetAbilityCount, -n)
+--   u:ChangeMovesRemaining(n) with u:GetMaxMoves():
+--     PiratesScenario_UnitCommands.lua:665-666 (moves for the current
+--     turn), PiratesScenario_StartScript.lua:1524-1525; the static form
+--     UnitManager.ChangeMovesRemaining(unit, n) is AustraliaScenario.lua:918
+--   exp:SetPromotion / :ChangeExperience / :CanPromote: EFV_Units.lua,
+--     EFV_Veteran.lua (Session A T09: CanPromote in G)
+-- ===========================================================================
+local VS_KEYS = { "V0", "V1", "V2", "V3" }
+local VS_KEEP_MOVES = "EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES"
+local VS_LEVEL = "EFV_DEV_ABILITY_VET_LEVEL"
+local VS_TYPE = "UNIT_WARRIOR"
+-- The XP of the template: the minimum of a level-4 unit (thresholds 15 /
+-- 45 / 90; Session B T08 "xp=45 nextLvlXP=90" for level 3).
+local VS_XP = 90
+local VS_TURNS = 3
+
+local function AbilityCount(u, name)
+	local ok, n = pcall(function() return u:GetAbility():GetAbilityCount(name) end)
+	if ok and type(n) == "number" then return n end
+	return -1
+end
+
+local function ChangeAbility(u, name, d)
+	local ok, err = pcall(function() u:GetAbility():ChangeAbilityCount(name, d) end)
+	return ok, err
+end
+
+-- Refills the moves (PiratesScenario_UnitCommands.lua:665-666 pattern).
+local function RestoreMoves(u)
+	return pcall(function()
+		local d = u:GetMaxMoves() - u:GetMovesRemaining()
+		if d > 0 then u:ChangeMovesRemaining(d) end
+	end)
+end
+
+-- Promotion type names the unit holds, in DB order (HasPromotion; G).
+local function HeldNames(u)
+	local out = {}
+	pcall(function()
+		local exp = u:GetExperience()
+		for row in GameInfo.UnitPromotions() do
+			if exp:HasPromotion(row.Index) then out[#out + 1] = row.UnitPromotionType end
+		end
+	end)
+	return out
+end
+
+-- The first two level-1 and the first level-2 promotion of the type's
+-- class (DB order). Every level-2 promotion of a class follows one of its
+-- two level-1 promotions, so the three can be taken in this order.
+local function VsPicks(unitType)
+	local row = GameInfo.Units[unitType]
+	local cls = row and row.PromotionClass
+	local l1, l2 = {}, nil
+	for r in GameInfo.UnitPromotions() do
+		if cls ~= nil and r.PromotionClass == cls then
+			local lv = tonumber(r.Level)
+			if lv == 1 and #l1 < 2 then l1[#l1 + 1] = r.UnitPromotionType
+			elseif lv == 2 and l2 == nil then l2 = r.UnitPromotionType end
+		end
+	end
+	if #l1 == 2 and l2 ~= nil then l1[3] = l2 end
+	return l1
+end
+
+-- Template: your selected land unit with promotions (its type, promotions
+-- and XP), else a Warrior with three promotions and VS_XP.
+local function VsTemplate(me, p)
+	local u = SelectedUnit(p)
+	if u ~= nil and u:GetOwner() == me then
+		local ut = UnitTypeName(u)
+		local row = GameInfo.Units[ut]
+		local rows = PromoRows(u)
+		if row ~= nil and row.PromotionClass ~= nil and row.Domain == "DOMAIN_LAND" and #rows > 0 then
+			local names = {}
+			for _, r in ipairs(rows) do names[#names + 1] = r.UnitPromotionType end
+			local xp = XPInfo(u)
+			return ut, names, math.max(0, xp), "your selected unit " .. u:GetID()
+		end
+	end
+	return VS_TYPE, VsPicks(VS_TYPE), VS_XP, "scenario template"
+end
+
+local function VsState(u)
+	if u == nil then return "unit not found" end
+	local s = "?"
+	pcall(function()
+		local exp = u:GetExperience()
+		local cp = "?"
+		pcall(function() cp = tostring(exp:CanPromote()) end)
+		local held = HeldNames(u)
+		s = "moves=" .. Str(u:GetMovesRemaining()) .. "/" .. Str(u:GetMaxMoves()) .. " xp=" .. Str(exp:GetExperiencePoints()) .. "/" ..
+			Str(exp:GetExperienceForNextLevel()) .. " canPromote=" .. cp .. " hp=" .. Str(u:GetMaxDamage() - u:GetDamage()) ..
+			" promotions=" .. (#held > 0 and table.concat(held, "+") or "-") .. " keepMoves=" .. AbilityCount(u, VS_KEEP_MOVES) ..
+			" levelAdjust=" .. AbilityCount(u, VS_LEVEL)
+	end)
+	return s
+end
+
+local function VsLog(k, step, u)
+	Check("VSPIKE", "INFO", Str(k) .. " " .. step .. " | " .. VsState(u))
+end
+
+local function VsCopyOf(vs, k)
+	for _, c in ipairs(vs.c or {}) do
+		if c.k == k then return c end
+	end
+	return nil
+end
+
+CMD.vs_start = function(me, p)
+	local st = ScnLoad()
+	st.me = st.me or me
+	local cap = Capital(me)
+	if cap == nil then Check("VSPIKE", "CHECK", "found your capital first"); return end
+	-- the copies of a previous press go (identity-checked by type)
+	if type(st.vs) == "table" then
+		for _, c in ipairs(st.vs.c or {}) do
+			local old = FindUnit(me, tonumber(c.u) or -1)
+			if old ~= nil and UnitTypeName(old) == st.vs.ut then pcall(function() Players[me]:GetUnits():Destroy(old) end) end
+		end
+	end
+	local ut, promos, xpT, src = VsTemplate(me, p)
+	if #promos == 0 then Check("VSPIKE", "CHECK", ut .. " has no promotion class with level-1 and level-2 promotions"); return end
+	local vs = { stamp = p.stamp or 0, turn = Turn(), ut = ut, promos = promos, xp = xpT, src = src, c = {} }
+	local units = {}
+	for _, k in ipairs(VS_KEYS) do
+		local plot = FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1) or FindPlot(cap:GetX(), cap:GetY(), 4, OwnedByAny({ -1, me }), 1)
+		local u = NewUnit("vs_start", me, ut, plot, "VEF-" .. k)
+		local c = { k = k, u = -1, synced = 0, off = 0 }
+		if u ~= nil then
+			c.u = u:GetID()
+			FullMoves(u)
+		end
+		units[k] = u
+		vs.c[#vs.c + 1] = c
+	end
+	-- V0 and V2: XP to the first threshold (route B step 1, EFV_Veteran.Begin)
+	for _, k in ipairs({ "V0", "V2" }) do
+		if units[k] ~= nil then
+			XPToThreshold(units[k])
+			VsLog(k, "created, XP to the first threshold", units[k])
+		end
+	end
+	-- V1: the hidden keep-moves ability, then XP to the first threshold
+	if units.V1 ~= nil then
+		local ok, err = ChangeAbility(units.V1, VS_KEEP_MOVES, 1)
+		XPToThreshold(units.V1)
+		VsLog("V1", "created, keep-moves ability +1 ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) ..
+			((AbilityCount(units.V1, VS_KEEP_MOVES) == 1) and "" or " (NOT GRANTED: is Data/EFV_Dev_Spike.xml loaded? see Database.log)") ..
+			", XP to the first threshold", units.V1)
+	end
+	-- V3: level-adjust ability, SetPromotion for each, then the XP
+	local v3 = units.V3
+	if v3 ~= nil then
+		local ok, err = ChangeAbility(v3, VS_LEVEL, 1)
+		VsLog("V3", "created, level-adjust ability +1 ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))), v3)
+		for _, nm in ipairs(promos) do
+			local row = GameInfo.UnitPromotions[nm]
+			if row ~= nil then SetPromo(v3, row.Index) end
+		end
+		VsLog("V3", "SetPromotion x" .. #promos, v3)
+		TopUp(v3, xpT)
+		VsLog("V3", "XP raised toward " .. xpT, v3)
+		local c3 = VsCopyOf(vs, "V3")
+		if c3 ~= nil then c3.synced = #HeldNames(v3) end
+	end
+	st.vs = vs
+	Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+	ScnSave(st)
+	local ids = {}
+	for _, c in ipairs(vs.c) do ids[#ids + 1] = c.k .. "=" .. Str(c.u) end
+	Check("VSPIKE", "INFO", "template " .. ut .. " (" .. src .. "), promotions " .. table.concat(promos, "+") .. ", XP " .. xpT ..
+		"; copies " .. table.concat(ids, " ") .. "; the panel now promotes V0, V1 and V2")
+end
+
+-- Panel step after a promotion landed (the EFV_VetStep pattern): derived
+-- from the unit, idempotent. V2 gets its moves back; XP to the next
+-- threshold while a wanted promotion is missing, else the template XP.
+CMD.vs_sync = function(me, p)
+	local st = ScnLoad()
+	local vs = st.vs
+	local c = type(vs) == "table" and VsCopyOf(vs, p.k) or nil
+	local u = c and FindUnit(me, tonumber(c.u) or -1)
+	if u == nil then Log("vs_sync", "copy " .. Str(p.k) .. " not found"); return end
+	local held = HeldNames(u)
+	if #held <= (tonumber(c.synced) or 0) then Log("vs_sync", Str(c.k) .. ": nothing new (" .. #held .. " held)"); return end
+	VsLog(c.k, "promotion " .. #held .. " landed", u)
+	if c.k == "V2" then
+		local ok, err = RestoreMoves(u)
+		VsLog("V2", "moves restored with ChangeMovesRemaining ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))), u)
+	end
+	local left = 0
+	for _, nm in ipairs(vs.promos or {}) do
+		if not Has(held, nm) then left = left + 1 end
+	end
+	if left > 0 then
+		XPToThreshold(u)
+	elseif tonumber(c.off) ~= 1 then
+		TopUp(u, vs.xp)
+	end
+	c.synced = #held
+	ScnSave(st)
+	VsLog(c.k, "synced, " .. (left > 0 and (left .. " to go, XP to the next threshold") or "every wanted promotion held"), u)
+end
+
+-- Panel step for V1 once its wanted promotions are back: the ability goes,
+-- XP to the next threshold for one normal promotion (it must end the turn).
+CMD.vs_off = function(me, p)
+	local st = ScnLoad()
+	local vs = st.vs
+	local c = type(vs) == "table" and VsCopyOf(vs, "V1") or nil
+	local u = c and FindUnit(me, tonumber(c.u) or -1)
+	if u == nil or tonumber(c.off) == 1 then Log("vs_off", "V1 not found or already done"); return end
+	local ok, err = ChangeAbility(u, VS_KEEP_MOVES, -1)
+	XPToThreshold(u)
+	c.off = 1
+	ScnSave(st)
+	VsLog("V1", "keep-moves ability -1 ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) ..
+		", XP to the next threshold for one normal promotion", u)
+end
+
+-- Your turn starts after the button's turn: one state line per copy.
+local function EvalVS(st, t)
+	local vs = st.vs
+	if type(vs) ~= "table" then return end
+	local t0 = tonumber(vs.turn) or t
+	if t <= t0 or t > t0 + VS_TURNS or vs.logged == t then return end
+	vs.logged = t
+	for _, c in ipairs(vs.c or {}) do VsLog(c.k, "turn start", FindUnit(st.me, tonumber(c.u) or -1)) end
+end
+
 -- ---------------------------------------------------------------------------
 -- Evaluation: at your turn start and on "Check now".
 -- ---------------------------------------------------------------------------
@@ -3412,6 +3943,7 @@ local function Evaluate(me, manual)
 		EvalS8(st, store, t)
 		EvalS9(st, store, t)
 		EvalS10(st, store, t)
+		EvalVS(st, t)
 	end
 	EvalS7(st, store, t, manual)
 	EvalS11(st, store, t, manual)
@@ -3419,6 +3951,8 @@ local function Evaluate(me, manual)
 	EvalS13(st, store, t, manual)
 	if not manual then EvalS14(st, store, t, manual) end
 	EvalS16(st, store, t, manual)
+	EvalS18(st, store, t, manual)
+	EvalS19(st, store, t, manual)
 	EFV_Records.Commit(store)
 	ScnSave(st)
 	if manual then Check("CHECK_NOW", "INFO", "evaluated") end

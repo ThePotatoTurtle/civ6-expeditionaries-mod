@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- EFV_Dev_Spike.xml (EFV_Dev 1.0.3.2, TESTING ONLY): the two hidden unit abilities of the veteran
+     one-turn restore spike (V button, Scripts/EFV_Dev_Gameplay.lua "V Veteran spike").
+     Both are Inactive: no unit has them until the spike grants one with
+     pUnit:GetAbility():ChangeAbilityCount(type, 1) (PiratesScenario_UnitCommands.lua:661-662 pattern).
+     TypeTags: the ability classes of the common land and naval combat units (the class list of
+     ABILITY_FINEST_HOUR_FRIENDLY_TERRITORY in Expansion2_UnitAbilities.xml, plus the naval classes of
+     ABILITY_SWASHBUCKLER_UNIT_ACTIVE / ABILITY_ERIKSON_NAVAL_SIGHT); a unit of another class cannot hold them.
+
+     V1  EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES: a promotion does not end the unit's turn. New modifier type
+         with COLLECTION_OWNER (the unit that holds the ability) and the effect of the Gran Colombia trait
+         (DLC/GranColombia_Maya/Data/GranColombia_Maya_Modifiers.xml:45-49
+         MODIFIER_PLAYER_UNITS_PROMOTE_NO_FINISH_MOVES = COLLECTION_PLAYER_UNITS +
+         EFFECT_ADJUST_UNIT_PROMOTE_NO_FINISH_MOVES; argument NoFinishMoves = true,
+         GranColombia_Maya_Civilizations.xml TRAIT_PROMOTE_NO_FINISH_MOVES).
+     V3  EFV_DEV_ABILITY_VET_LEVEL: level +3. The Giant Death Robot's ABILITY_UNIT_AUTO_VETERANCY pattern
+         (DLC/Expansion2/Data/Expansion2_UnitAbilities.xml: GDR_VETERAN_NAME, ModifierType
+         MODIFIER_PLAYER_UNIT_ADJUST_EXPERIENCE_LEVEL, argument Amount = 2; the modifier type is
+         Base/Assets/Gameplay/Data/Modifiers.xml:1269-1273 = COLLECTION_OWNER +
+         EFFECT_ADJUST_UNIT_EXPERIENCE_LEVEL). Amount 3 = the three promotions of the spike template. -->
+<GameInfo>
+	<Types>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Kind="KIND_ABILITY"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Kind="KIND_ABILITY"/>
+		<Row Type="EFV_DEV_MODIFIER_UNIT_PROMOTE_NO_FINISH_MOVES" Kind="KIND_MODIFIER"/>
+	</Types>
+	<TypeTags>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_RECON"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_MELEE"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_RANGED"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_SIEGE"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_HEAVY_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_LIGHT_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_RANGED_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_ANTI_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_HEAVY_CHARIOT"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_LIGHT_CHARIOT"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_NAVAL_MELEE"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_NAVAL_RANGED"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_NAVAL_RAIDER"/>
+		<Row Type="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Tag="CLASS_NAVAL_CARRIER"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_RECON"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_MELEE"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_RANGED"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_SIEGE"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_HEAVY_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_LIGHT_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_RANGED_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_ANTI_CAVALRY"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_HEAVY_CHARIOT"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_LIGHT_CHARIOT"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_NAVAL_MELEE"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_NAVAL_RANGED"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_NAVAL_RAIDER"/>
+		<Row Type="EFV_DEV_ABILITY_VET_LEVEL" Tag="CLASS_NAVAL_CARRIER"/>
+	</TypeTags>
+	<UnitAbilities>
+		<Row UnitAbilityType="EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES" Inactive="true"/>
+		<Row UnitAbilityType="EFV_DEV_ABILITY_VET_LEVEL" Inactive="true"/>
+	</UnitAbilities>
+	<DynamicModifiers>
+		<Row>
+			<ModifierType>EFV_DEV_MODIFIER_UNIT_PROMOTE_NO_FINISH_MOVES</ModifierType>
+			<CollectionType>COLLECTION_OWNER</CollectionType>
+			<EffectType>EFFECT_ADJUST_UNIT_PROMOTE_NO_FINISH_MOVES</EffectType>
+		</Row>
+	</DynamicModifiers>
+	<Modifiers>
+		<Row>
+			<ModifierId>EFV_DEV_PROMOTE_KEEP_MOVES</ModifierId>
+			<ModifierType>EFV_DEV_MODIFIER_UNIT_PROMOTE_NO_FINISH_MOVES</ModifierType>
+		</Row>
+		<Row>
+			<ModifierId>EFV_DEV_VET_LEVEL</ModifierId>
+			<ModifierType>MODIFIER_PLAYER_UNIT_ADJUST_EXPERIENCE_LEVEL</ModifierType>
+		</Row>
+	</Modifiers>
+	<ModifierArguments>
+		<Row>
+			<ModifierId>EFV_DEV_PROMOTE_KEEP_MOVES</ModifierId>
+			<Name>NoFinishMoves</Name>
+			<Value>true</Value>
+		</Row>
+		<Row>
+			<ModifierId>EFV_DEV_VET_LEVEL</ModifierId>
+			<Name>Amount</Name>
+			<Value>3</Value>
+		</Row>
+	</ModifierArguments>
+	<UnitAbilityModifiers>
+		<Row>
+			<UnitAbilityType>EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES</UnitAbilityType>
+			<ModifierId>EFV_DEV_PROMOTE_KEEP_MOVES</ModifierId>
+		</Row>
+		<Row>
+			<UnitAbilityType>EFV_DEV_ABILITY_VET_LEVEL</UnitAbilityType>
+			<ModifierId>EFV_DEV_VET_LEVEL</ModifierId>
+		</Row>
+	</UnitAbilityModifiers>
+</GameInfo>

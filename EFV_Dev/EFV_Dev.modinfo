@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Mod id="94ec021d-9956-4a30-b9c1-5ccf136679bf" version="1">
   <Properties>
-    <Name>VEF Dev Tools (testing only) v1.0.3.1</Name>
+    <Name>VEF Dev Tools (testing only) v1.0.3.2</Name>
     <Teaser>Test helpers for Volunteers &amp; Expeditionary Forces (VEF). Not for normal play.</Teaser>
     <Description>Developer panel for the VEF in-game tests. One-click scenarios for the in-game test sessions and the Workshop screenshots (start them from a new game), plus tools to spawn units, set damage, XP and promotions, change gold and resources, set alliances, friendships and wars, move VEF timers and list VEF records. Open it with Ctrl+Shift+D. Writes to Lua.log. Requires Volunteers &amp; Expeditionary Forces (VEF) 1.0.3. Never enable it in a real game.</Description>
     <Authors>VEF project</Authors>
@@ -21,6 +21,13 @@
   </ActionCriteria>
 
   <InGameActions>
+    <!-- Veteran one-turn restore spike (V button): two hidden unit abilities, granted only by the spike. -->
+    <UpdateDatabase id="EFV_DEV_Data" criteria="EFV_DEV_XP2">
+      <Properties>
+        <LoadOrder>14000</LoadOrder>
+      </Properties>
+      <File>Data/EFV_Dev_Spike.xml</File>
+    </UpdateDatabase>
     <AddGameplayScripts id="EFV_DEV_Gameplay" criteria="EFV_DEV_XP2">
       <Properties>
         <LoadOrder>14000</LoadOrder>
@@ -37,6 +44,7 @@
   </InGameActions>
 
   <Files>
+    <File>Data/EFV_Dev_Spike.xml</File>
     <File>Scripts/EFV_Dev_Gameplay.lua</File>
     <File>UI/EFV_Dev_Panel.lua</File>
     <File>UI/EFV_Dev_Panel.xml</File>

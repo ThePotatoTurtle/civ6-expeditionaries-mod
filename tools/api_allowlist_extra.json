@@ -15,7 +15,8 @@
   "EFV_Dev 0.6.0-dev.1 final-session scenarios (2026-09-28): :GetTechs / :SetTech (G, grant the upgrade target's tech, S5), GameInfo.Technologies, and the UI promotion command UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the S6 veteran route B. EFV_Dev only.",
   "EFV_Dev 0.6.1-dev.1 (2026-09-28): the final session starts from a brand-new game, so S0 (and S5/S7/S11) build what a new game lacks: PlayersVisibility :ChangeVisibilityCount (reveal), :GetCulture / :SetCivic (Early Empire for open borders, S5 target civic), the scripted open-borders deal (DealManager working deal, DealDirection.OUTGOING, :AddItemOfType / :SetSubType / :SetDuration / :SetLocked / :Validate), CityManager.GetDistrictAt + DefenseTypes (city HP / walls for S7 / S11), UnitManager.RestoreMovementToFormation (created unit without moves), GameInfo.Civics. EFV_Dev only; evidence in refs.",
   "0.7.0-dev WP3 (2026-09-28, INTERFACES note 33): veteran route B. EFV/UI/EFV_VetRestore.lua may issue UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the local player's own unit, and reads UnitManager.CanStartCommand / UnitCommandResults.PROMOTIONS (base UnitPromotionPopup pattern). Gameplay owns the job state (EFV_Veteran).",
-  "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons (2026-09-29, workshop/SCREENSHOTS.md B5, FIXPLAN_0.7 item 13): the panel's map zoom (UI.GetMapZoom / UI.SetMapZoom, base WorldInput.lua) and Shot 4's Tank attack, the base RequestMoveOperation call (UnitManager.CanStartOperation / RequestOperation with UnitOperationTypes.MOVE_TO, PARAM_X / PARAM_Y / PARAM_MODIFIERS and UnitOperationMoveModifiers.ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, Civ6Common.lua:147-163). EFV_Dev only; all pcall-guarded and not yet run from a mod context (level L until the screenshot session)."
+  "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons (2026-09-29, workshop/SCREENSHOTS.md B5, FIXPLAN_0.7 item 13): the panel's map zoom (UI.GetMapZoom / UI.SetMapZoom, base WorldInput.lua) and Shot 4's Tank attack, the base RequestMoveOperation call (UnitManager.CanStartOperation / RequestOperation with UnitOperationTypes.MOVE_TO, PARAM_X / PARAM_Y / PARAM_MODIFIERS and UnitOperationMoveModifiers.ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, Civ6Common.lua:147-163). EFV_Dev only; all pcall-guarded and not yet run from a mod context (level L until the screenshot session).",
+  "EFV_Dev 1.0.3.2 (2026-09-30): the veteran one-turn restore spike (V button) grants and removes its hidden unit abilities with unit:GetAbility():ChangeAbilityCount / :GetAbilityCount and refills a copy's moves with unit:ChangeMovesRemaining(max - remaining). All three are used by shipped gameplay scripts (refs); R2 lists them CONFIRMED (research/R2_unit_map_apis.md rows for ChangeMovesRemaining and GetAbility():ChangeAbilityCount). EFV_Dev only."
  ],
  "globals": {
   "include": {
@@ -2297,6 +2298,66 @@
     "Session C: the same deal without SetDuration left nothing in GetPlayerDeals"
    ],
    "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "GetAbility": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_UnitCommands.lua:661-662 (pUnit:GetAbility(); pUnitAbility:ChangeAbilityCount(\"ABILITY_SWASHBUCKLER_UNIT_ACTIVE\", 1), gameplay: unit command script)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_UnitCommands.lua:53-54 (ChangeAbilityCount(\"ABILITY_MAD_SCIENTISTS_UNIT_SHIELD\", 1))",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1503, 1516-1518 (pUnit:GetAbility(); GetAbilityCount(name); ChangeAbilityCount(name, -lockCount))",
+    "research/R2_unit_map_apis.md:77 (unit:GetAbility():ChangeAbilityCount / GetAbilityCount: CONFIRMED G)"
+   ],
+   "note": "EFV_Dev 1.0.3.2 only: veteran one-turn restore spike (V button)",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "GetAbilityCount": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_UnitCommands.lua:661-662 (pUnit:GetAbility(); pUnitAbility:ChangeAbilityCount(\"ABILITY_SWASHBUCKLER_UNIT_ACTIVE\", 1), gameplay: unit command script)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_UnitCommands.lua:53-54 (ChangeAbilityCount(\"ABILITY_MAD_SCIENTISTS_UNIT_SHIELD\", 1))",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1503, 1516-1518 (pUnit:GetAbility(); GetAbilityCount(name); ChangeAbilityCount(name, -lockCount))",
+    "research/R2_unit_map_apis.md:77 (unit:GetAbility():ChangeAbilityCount / GetAbilityCount: CONFIRMED G)"
+   ],
+   "note": "EFV_Dev 1.0.3.2 only: veteran one-turn restore spike (V button)",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "ChangeAbilityCount": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_UnitCommands.lua:661-662 (pUnit:GetAbility(); pUnitAbility:ChangeAbilityCount(\"ABILITY_SWASHBUCKLER_UNIT_ACTIVE\", 1), gameplay: unit command script)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_UnitCommands.lua:53-54 (ChangeAbilityCount(\"ABILITY_MAD_SCIENTISTS_UNIT_SHIELD\", 1))",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1503, 1516-1518 (pUnit:GetAbility(); GetAbilityCount(name); ChangeAbilityCount(name, -lockCount))",
+    "research/R2_unit_map_apis.md:77 (unit:GetAbility():ChangeAbilityCount / GetAbilityCount: CONFIRMED G)"
+   ],
+   "note": "EFV_Dev 1.0.3.2 only: veteran one-turn restore spike (V button)",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "ChangeMovesRemaining": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_UnitCommands.lua:665-666 (local maxMoves = pUnit:GetMaxMoves(); pUnit:ChangeMovesRemaining(maxMoves): moves for the current turn)",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1506, 1513, 1525 (ChangeMovesRemaining(extra / -movesRemaining / maxMoves))",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_UnitCommands.lua:175 (pUnit:ChangeMovesRemaining(-1))",
+    "research/R2_unit_map_apis.md:43 (unit:ChangeMovesRemaining(n): delta, CONFIRMED G); static form UnitManager.ChangeMovesRemaining(unit, n) at AustraliaScenario.lua:918, 1429"
+   ],
+   "note": "EFV_Dev 1.0.3.2 only: veteran one-turn restore spike (V button)",
    "only_paths": [
     "EFV_Dev/"
    ]

@@ -23,6 +23,9 @@ Checks
             match at least one key; Locale.Lookup(key, ...) passes at least as many args as {n_} placeholders;
             every PLAN Appendix B reason code has LOC_EFV_REASON_<CODE> (retired codes exempt); every code of
             EFV_Rules.ALL_REASON_CODES has its key, and a LOC_EFV_REASON_* key without a code is unused;
+            keys defined by a dependency mod of this project (EFV for EFV_Dev: a <Dependency> id that
+            matches another .modinfo under the project folder) count as defined for these reference checks
+            (EFV_Dev 1.0.3.2 reads VEF's tracker and Entrust texts); they are not checked for use;
             the same arg check for the UI wrappers L(key, ...) / SafeLookup(key, ...) (more args than
             placeholders = warning); plural forms "{n_X : plural 1?a; other?b;}" well-formed, "{n_Num} turns"
             without a plural form = warning; unused keys = warning (keys reserved for a named pending work
@@ -41,6 +44,7 @@ Exit code 1 on any ERROR (or WARN with --strict).
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import re
 import shutil
@@ -230,6 +234,7 @@ class Validator:
         self.lookup_calls = []     # (key, nargs, file, line)
         self.icon_names = set()    # IconDefinitions / IconAliases names inserted by UpdateIcons files
         self.plan_text = L.read_file(L.PLAN_PATH) if os.path.exists(L.PLAN_PATH) else ""
+        self.dep_text = None       # tag -> en_US text of dependency mods in the project (lazy)
 
     # ------------------------------------------------------------------
     def run(self):
@@ -707,9 +712,57 @@ class Validator:
                     for m in re.finditer(r"LOC_[A-Z0-9_]+", v or ""):
                         self.loc_refs.append((m.group(0), f, 0))
 
+    def dependency_text(self):
+        """Tags (-> en_US text) of the UpdateText files of the mods this root depends on that live in the
+        project folder (e.g. EFV for EFV_Dev). Keys a mod reads from its dependency are defined at run time."""
+        if self.dep_text is not None:
+            return self.dep_text
+        self.dep_text = {}
+        own = {os.path.normcase(os.path.abspath(m.path)) for m in self.mods}
+        dep_ids = {(d[0] or "").lower() for m in self.mods for d in m.deps} - set(L.OFFICIAL_GUIDS)
+        if not dep_ids:
+            return self.dep_text
+        # the mod folders at the top of the project (EFV\, EFV_Dev\); dist\ copies are not sources
+        paths = sorted(glob.glob(os.path.join(L.PROJECT_DIR, "*", "*.modinfo")))
+        for path in paths:
+            if os.path.normcase(os.path.abspath(path)) in own:
+                continue
+            if os.path.basename(os.path.dirname(path)) in ("dist", "tests", "tools", "research", "spike", "workshop"):
+                continue
+            mi = L.parse_modinfo(path)
+            if (mi.id or "").lower() not in dep_ids:
+                continue
+            for a in mi.actions:
+                if a.type != "UpdateText":
+                    continue
+                for fr, _ in a.files:
+                    full = os.path.normpath(os.path.join(mi.root, L.norm_rel(fr)))
+                    try:
+                        root = ET.parse(full).getroot()
+                    except (ET.ParseError, OSError):
+                        continue
+                    for row in root.iter():
+                        if L._local(row.tag) not in ("Row", "Replace"):
+                            continue
+                        tag, lang, txt = row.get("Tag"), row.get("Language") or "en_US", row.get("Text")
+                        for ch in row:
+                            cn = L._local(ch.tag)
+                            if cn == "Text":
+                                txt = ch.text or ""
+                            elif cn == "Tag":
+                                tag = ch.text
+                            elif cn == "Language":
+                                lang = ch.text
+                        if tag and lang == "en_US":
+                            self.dep_text[tag] = txt or ""
+        return self.dep_text
+
     def check_text_refs(self):
         defined = {tag for (_lang, tag) in self.text_defs}
         en = {tag: txt for (lang, tag), (_f, txt) in self.text_defs.items() if lang == "en_US"}
+        dep = self.dependency_text() if (self.loc_refs or self.loc_prefix_refs) else {}
+        for tag, txt in dep.items():
+            en.setdefault(tag, txt)
         base = self._loc_db()
         used = set()
         # Notification text is looked up by convention ("LOC_" .. type .. "_MESSAGE"
@@ -728,6 +781,9 @@ class Validator:
             used.add(key)
             if key in defined:
                 continue
+            if key in dep:
+                self.rep.info(f, line, "text-dependency", "%s is defined by a dependency mod of this project" % key)
+                continue
             if key.startswith("LOC_EFV"):
                 self.rep.error(f, line, "text-missing", "%s is referenced but not defined in any UpdateText file" % key)
             else:
@@ -742,7 +798,7 @@ class Validator:
         prefixes = set()
         for pfx, f, line in self.loc_prefix_refs:
             prefixes.add(pfx)
-            if not any(t.startswith(pfx) for t in defined):
+            if not any(t.startswith(pfx) for t in defined) and not any(t.startswith(pfx) for t in dep):
                 self.rep.error(f, line, "text-prefix", "dynamic key prefix %r matches no defined key" % pfx)
             else:
                 self.rep.info(f, line, "text-prefix", "dynamic key prefix %r (keys built at runtime are not checked individually)" % pfx)

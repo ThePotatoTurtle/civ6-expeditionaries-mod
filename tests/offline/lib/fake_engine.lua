@@ -732,6 +732,28 @@ function Unit:GetExperience()
 end
 function Unit:GetMovesRemaining() return self.moves end
 function Unit:GetMaxMoves() return self.maxMoves end
+-- EFV_Dev 1.0.3.2 veteran spike: pUnit:ChangeMovesRemaining(delta)
+-- (PiratesScenario_UnitCommands.lua:666) and pUnit:GetAbility() with
+-- GetAbilityCount / ChangeAbilityCount (PiratesScenario_StartScript.lua:
+-- 1516-1518). Counts live in unit.abilities[name]; FAKE.abilityTypes
+-- (name -> true, nil = any name) stands in for the ability rows a mod's
+-- UpdateDatabase adds: an unknown name raises like a missing type.
+function Unit:ChangeMovesRemaining(d) self.moves = math.max(0, (self.moves or 0) + (d or 0)) end
+function Unit:GetAbility()
+	local u = self
+	return {
+		GetAbilityCount = function(_, name)
+			return (u.abilities and u.abilities[name]) or 0
+		end,
+		ChangeAbilityCount = function(_, name, d)
+			if FAKE.abilityTypes ~= nil and not FAKE.abilityTypes[name] then
+				error("ChangeAbilityCount: unknown ability " .. tostring(name))
+			end
+			u.abilities = u.abilities or {}
+			u.abilities[name] = math.max(0, (u.abilities[name] or 0) + (d or 0))
+		end,
+	}
+end
 function Unit:GetAttacksRemaining() return self.attacks end
 function UnitUI.IsCannotAttack(self) return (self:GetCombat() or 0) == 0 end
 function Unit:GetMilitaryFormation() return self.formation end

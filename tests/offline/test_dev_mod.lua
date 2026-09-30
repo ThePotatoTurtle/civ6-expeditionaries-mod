@@ -1549,3 +1549,242 @@ test("1.0.1.3 T2 panel: button sends the stamped request; UI rules give the same
 	H.ok(Has(info, "CSN=") and Has(info, "CSX=") and not Has(info, "CSO="), info)
 	H.eq(FAKE_UI.selectedUnit and FAKE_UI.selectedUnit.id, H.prop("EFV_DEV_SCN").elig.u1, "the first Swordsman is selected")
 end)
+
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.3.2: the VEF 1.0.3 session (EFV/TESTING_1.0.3.md): S17
+-- tracker labels, S18 / S19 Entrust rules, and the V veteran spike.
+-- ---------------------------------------------------------------------------
+local function UICheckLines(id, verdict)
+	return H.lines("[EFV][CHECK] " .. id .. " " .. verdict)
+end
+
+test("1.0.3.2 S17: four records in transit; the tracker reads Inbound / Departed / Outbound / Returning; removed at the end of the turn", function()
+	local S = Setup()
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	local b = FAKE_UI.FindButton("S17 Tracker labels")
+	H.notnil(b, "S17 button")
+	b:Click()
+	local p = FAKE_UI.requests[#FAKE_UI.requests].params
+	H.eq(p.cmd, "scn_labels")
+	Pump({ panel }, 4)
+	H.ok(CheckLine("TRACKER_PREP", "INFO"), "four records built")
+	H.len(H.records(), 4)
+	local byRole = {}
+	local store = EFV_Records.Load()
+	for _, e in ipairs(H.prop("EFV_DEV_SCN").s17.rows) do byRole[e.role] = EFV_Records.Get(store, e.id) end
+	H.eq(byRole.INBOUND.senderID, 2); H.eq(byRole.INBOUND.recipientID, 0); H.eq(byRole.INBOUND.state, "OUTBOUND")
+	H.eq(byRole.DEPARTED.senderID, 2); H.eq(byRole.DEPARTED.recipientID, 0); H.eq(byRole.DEPARTED.state, "RETURNING")
+	H.eq(byRole.OUTBOUND.senderID, 0); H.eq(byRole.OUTBOUND.recipientID, 2); H.eq(byRole.OUTBOUND.state, "OUTBOUND")
+	H.eq(byRole.RETURNING.senderID, 0); H.eq(byRole.RETURNING.state, "RETURNING")
+	H.eq(byRole.RETURNING.returnX, S.c0.x, "your unit comes home to your capital")
+	H.eq(byRole.DEPARTED.returnX, S.c2.x, "F's unit goes home to F's capital")
+	H.len(UICheckLines("TRACKER_LABELS", "PASS"), 5, "four rows and the summary")
+	H.len(UICheckLines("TRACKER_LABELS", "FAIL"), 0)
+	H.ok(H.hasLine("INBOUND record " .. byRole.INBOUND.id), "one line per row")
+	H.ok(H.hasLine("tracker shows 'Inbound' (expected 'Inbound')"))
+	H.ok(H.hasLine("tracker shows 'Departed' (expected 'Departed'); tooltip has 'Departed, home in 2 turns'"))
+	H.ok(H.hasLine("tracker shows 'Outbound' (expected 'Outbound')"))
+	H.ok(H.hasLine("tracker shows 'Returning' (expected 'Returning'); tooltip has 'Returning, arrives in 2 turns'"))
+	H.ok(H.hasLine("summary: 4/4 rows as expected"))
+	H.ok(H.hasLine("tracker open hook sent ok=true"), "the panel opens the tracker")
+	-- the S17 records are not sends: S16 ignores them
+	FAKE_UI.AsGameplay(function() Dev("scn_cancel") end)
+	H.ok(CheckLine("CANCEL_PREP", "CHECK"), "S16 skips the S17 records")
+	FAKE_UI.AsGameplay(function() H.endTurn() end)
+	H.len(H.records(), 0, "removed at the end of the turn")
+	H.ok(H.hasLine("removed 4 of 4 test record(s)"))
+	H.ok(not H.hasLine("[EFV][CHECK] HOME"), "no HOME check for them")
+end)
+
+test("1.0.3.2 S17: a label mismatch is a FAIL line", function()
+	Setup()
+	local panel = PanelUI()
+	FAKE_UI.AsGameplay(function() Dev("scn_labels", { stamp = 170 }) end)
+	local real = EFV_UI_TrackerRows
+	EFV_UI_TrackerRows = function(pid, turn)
+		local rows = real(pid, turn)
+		for _, r in ipairs(rows) do
+			if r.rec.state == "OUTBOUND" and r.rec.recipientID == pid then r.state = "Outbound" end
+		end
+		return rows
+	end
+	Pump({ panel }, 3)
+	EFV_UI_TrackerRows = real
+	H.ok(H.hasLine("tracker shows 'Outbound' (expected 'Inbound')"))
+	H.ok(CheckLine("TRACKER_LABELS", "FAIL"))
+	H.ok(H.hasLine("summary: 3/4 rows as expected"))
+end)
+
+test("1.0.3.2 S18: a city-state's only city, B at peace with it: Entrust offers B (UI), entrusted -> ENTRUST_CS PASS", function()
+	Setup()
+	Dev("scn_entrust_cs", { stamp = 18 })
+	H.ok(CheckLine("ENTRUST_CS", "INFO"))
+	local st = H.prop("EFV_DEV_SCN")
+	local cs = st.s18.owner
+	H.ok(cs ~= 4, "not CS (S16 needs it)")
+	H.ok(Players[0]:GetDiplomacy():IsAtWarWith(cs), "you are at war with it")
+	H.ok(not Players[1]:GetDiplomacy():IsAtWarWith(cs), "B is not")
+	H.len(H.unitsOf(0, "UNIT_TANK"), 3)
+	local city = CityManager.GetCityAt(st.s18.cx, st.s18.cy)
+	H.eq(CityManager.GetDistrictAt(city.x, city.y):GetDamage(DefenseTypes.DISTRICT_GARRISON), 199, "1 HP left")
+	local x, y, oldID = city.x, city.y, city.id
+	CityManager.TransferCity(city, 0, CityTransferTypes.BY_COMBAT)
+	H.kill(cs)
+	GameEvents.CityConquered(0, cs, oldID, x, y)
+	local panel = PanelUI()
+	Pump({ panel }, 3)
+	H.ok(CheckLine("ENTRUST_CS_UI", "PASS"), "the Entrust button offers a partner")
+	H.ok(H.hasLine("button enabled for"))
+	FAKE_UI.AsGameplay(function() H.request(0, { OnStart = "EFV_Entrust", x = x, y = y, recipientID = 1 }) end)
+	H.eq(CityManager.GetCityAt(x, y):GetOwner(), 1, "entrusted to B")
+	FAKE_UI.AsGameplay(function() H.endTurn() end)
+	H.ok(CheckLine("ENTRUST_CS", "PASS"))
+	H.ok(H.hasLine("B was at war with it=false"))
+end)
+
+test("1.0.3.2 S19: a living major's city (not its last): Entrust greyed (UI), kept -> ENTRUST_MAJOR PASS; a partner getting it -> FAIL", function()
+	FreshBoot()
+	FAKE.NewPlayer(7, { gold = 1000 })
+	H.city(7, 60, 12, { capital = true, name = "LOC_CITY_D" })
+	Dev("scn_setup", { stamp = 1 })
+	H.ok(CheckLine("SETUP", "PASS"))
+	Dev("scn_entrust_major", { stamp = 19 })
+	H.ok(CheckLine("ENTRUST_MAJOR", "INFO"))
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.s19.owner, 7, "D = the 4th major")
+	H.ok(H.hasLine("new city founded for"), "D had only its capital")
+	H.len(FAKE.CitiesOf(7), 2)
+	H.ok(Players[0]:GetDiplomacy():IsAtWarWith(7))
+	H.ok(not Players[1]:GetDiplomacy():IsAtWarWith(7) and not Players[2]:GetDiplomacy():IsAtWarWith(7), "B and F stay at peace with D")
+	local city = CityManager.GetCityAt(st.s19.cx, st.s19.cy)
+	H.ok(not (city.x == 60 and city.y == 12), "not D's capital")
+	local x, y, oldID = city.x, city.y, city.id
+	CityManager.TransferCity(city, 0, CityTransferTypes.BY_COMBAT)
+	GameEvents.CityConquered(0, 7, oldID, x, y)
+	local panel = PanelUI()
+	Pump({ panel }, 3)
+	H.ok(CheckLine("ENTRUST_MAJOR_UI", "PASS"), "greyed with ENTRUST_NO_PARTNER")
+	H.ok(H.hasLine("greyed (ENTRUST_NO_PARTNER)"))
+	FAKE_UI.AsGameplay(function() H.endTurn() end)
+	H.ok(CheckLine("ENTRUST_MAJOR", "PASS"))
+	-- a second scene whose city a partner gets anyway is reported as a FAIL
+	FAKE_UI.AsGameplay(function() Dev("scn_entrust_major", { stamp = 191 }) end)
+	local st2 = H.prop("EFV_DEV_SCN").s19
+	CityManager.TransferCity(CityManager.GetCityAt(st2.cx, st2.cy), 1, CityTransferTypes.BY_GIFT)
+	FAKE_UI.AsGameplay(function() Dev("scn_check") end)
+	H.ok(CheckLine("ENTRUST_MAJOR", "FAIL"))
+end)
+
+test("1.0.3.2 S19: only 3 AI civs -> CHECK, nothing set up", function()
+	Setup()
+	Dev("scn_entrust_major")
+	H.ok(CheckLine("ENTRUST_MAJOR", "CHECK"))
+	H.ok(H.hasLine("needs a 4th AI civ"))
+	H.len(H.unitsOf(0, "UNIT_TANK"), 0)
+end)
+
+-- The veteran one-turn restore spike. FAKE_UI.promoteEndsTurn = true is the
+-- base rule (a promotion ends the unit's turn) that V1 and V2 work around.
+local function SpikeBoot(opts)
+	opts = opts or {}
+	FreshBoot()
+	if opts.civType then Players[0].civType = opts.civType end
+	local panel = PanelUI()
+	FAKE_UI.promoteEndsTurn = opts.endsTurn ~= false
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	local b = FAKE_UI.FindButton("V Veteran spike")
+	H.notnil(b, "V button")
+	b:Click()
+	H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, "vs_start")
+	Pump({ panel }, 40)
+	return panel
+end
+
+local function Copy(k) return Named(0, "VEF-" .. k) end
+
+test("1.0.3.2 V spike: V0 one promotion in the first turn; V1 and V2 all three; V1 off ends the turn again; V3 logged", function()
+	local panel = SpikeBoot()
+	H.ok(CheckLine("VSPIKE", "INFO"))
+	H.ok(H.hasLine("template UNIT_WARRIOR (scenario template), promotions PROMOTION_BATTLECRY+PROMOTION_TORTOISE+PROMOTION_COMMANDO, XP 90"))
+	for _, k in ipairs({ "V0", "V1", "V2", "V3" }) do H.notnil(Copy(k), k) end
+	H.ok(not H.hasLine("you play Gran Colombia"))
+	-- V0: the limit
+	H.ok(CheckLine("VSPIKE_V0", "PASS"), "control: one promotion, then nothing offered")
+	H.ok(H.hasLine("the one-per-turn limit is reproduced"))
+	H.len(H.promotionTypes(Copy("V0")), 1)
+	-- V1: hidden ability, all three, level 4; then off -> one normal promotion ends the turn
+	H.ok(CheckLine("VSPIKE_V1", "PASS"))
+	H.ok(H.hasLine("3/3 promotions in the first turn, level 4 (want 4)"))
+	H.ok(CheckLine("VSPIKE_V1_OFF", "PASS"), "the base rule is back after the ability is removed")
+	H.eq(Copy("V1"):GetAbility():GetAbilityCount("EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES"), 0, "ability removed")
+	H.len(H.promotionTypes(Copy("V1")), 4, "three wanted + the normal one")
+	H.eq(Copy("V1"):GetMovesRemaining(), 0)
+	-- V2: moves back after each promotion
+	H.ok(CheckLine("VSPIKE_V2", "PASS"))
+	H.len(H.promotionTypes(Copy("V2")), 3)
+	H.ok(H.hasLine("V2 moves restored with ChangeMovesRemaining ok=true"))
+	-- V3: the fake keeps a script-made unit at level 1 (Session F T08): CHECK with the numbers
+	H.ok(CheckLine("VSPIKE_V3", "CHECK"))
+	H.ok(H.hasLine("V3 level-adjust ability + SetPromotion + XP: level 1 (want 4)"))
+	H.eq(Copy("V3"):GetAbility():GetAbilityCount("EFV_DEV_ABILITY_VET_LEVEL"), 1)
+	H.len(H.promotionTypes(Copy("V3")), 3)
+	H.ok(#H.lines("[EFV][CHECK] VSPIKE_UI INFO") > 5, "UI state lines")
+	H.ok(H.hasLine("V1 created, keep-moves ability +1 ok=true"), "gameplay lines")
+	-- later turns: V0 takes one more promotion per turn; state lines at each turn start
+	FAKE_UI.AsGameplay(function() H.endTurn() end)
+	Pump({ panel }, 20)
+	H.len(H.promotionTypes(Copy("V0")), 2, "turn 2: the second")
+	H.ok(H.hasLine("V0 turn start |"), "gameplay turn-start line")
+	FAKE_UI.AsGameplay(function() H.endTurn() end)
+	Pump({ panel }, 20)
+	H.len(H.promotionTypes(Copy("V0")), 3)
+	H.ok(H.hasLine("all 3 promotions back by turn"), "V0 done in 3 turns")
+	H.clean()
+end)
+
+test("1.0.3.2 V spike: promotions keep the moves (Gran Colombia): warning, V0 takes a second one in the first turn -> CHECK", function()
+	SpikeBoot({ endsTurn = false, civType = "CIVILIZATION_GRAN_COLOMBIA" })
+	H.ok(CheckLine("VSPIKE", "CHECK"), "Gran Colombia warning")
+	H.ok(H.hasLine("you play Gran Colombia"))
+	H.ok(CheckLine("VSPIKE_V0", "CHECK"))
+	H.ok(H.hasLine("a 2nd promotion landed in the first turn"))
+	H.ok(not CheckLine("VSPIKE_V0", "PASS"))
+	H.ok(CheckLine("VSPIKE_V1_OFF", "CHECK"), "the rule off: the extra promotion keeps the moves")
+end)
+
+test("1.0.3.2 V spike: the abilities missing from the database -> V1 stops at one promotion, logged NOT GRANTED", function()
+	FAKE.abilityTypes = {}
+	SpikeBoot()
+	H.ok(H.hasLine("NOT GRANTED"))
+	H.ok(CheckLine("VSPIKE_V1", "CHECK"))
+	H.ok(H.hasLine("stopped at 1/3 in the first turn"))
+	H.ok(CheckLine("VSPIKE_V2", "PASS"), "V2 needs no database change")
+end)
+
+test("1.0.3.2 V spike: your selected veteran is the template (its type, promotions and XP); a second press replaces the copies", function()
+	FreshBoot()
+	local v = H.unit(0, "UNIT_SWORDSMAN", 11, 10, { promotions = { "PROMOTION_BATTLECRY", "PROMOTION_TORTOISE" }, xp = 50 })
+	Dev("vs_start", With({ stamp = 5 }, Sel(v)))
+	H.ok(H.hasLine("template UNIT_SWORDSMAN (your selected unit " .. v.id .. "), promotions PROMOTION_BATTLECRY+PROMOTION_TORTOISE, XP 50"))
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 5, "the veteran and four copies")
+	for _, k in ipairs({ "V0", "V1", "V2" }) do
+		local c = Copy(k)
+		H.eq(c.xp, 15, k .. ": XP to the first threshold")
+		H.eq(c:GetMovesRemaining(), c:GetMaxMoves(), k .. ": full moves")
+	end
+	H.eq(Copy("V1"):GetAbility():GetAbilityCount("EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES"), 1)
+	Dev("vs_start", With({ stamp = 6 }, Sel(v)))
+	H.len(H.unitsOf(0, "UNIT_SWORDSMAN"), 5, "the previous copies were removed")
+	Dev("vs_sync", { k = "V2", have = 0 })
+	H.ok(H.hasLine("V2: nothing new"), "vs_sync is derived from the unit: nothing landed, nothing changes")
+end)
+
+test("1.0.3.2 panel: the new session buttons exist", function()
+	FreshBoot()
+	PanelUI()
+	for _, label in ipairs({ "S17 Tracker labels", "S18 Entrust city-state", "S19 Entrust major", "V Veteran spike" }) do
+		H.notnil(FAKE_UI.FindButton(label), label)
+	end
+end)

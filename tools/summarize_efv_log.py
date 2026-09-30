@@ -2,7 +2,7 @@
 """summarize_efv_log.py - one PASS/CHECK line per step of an in-game test session.
 
 Usage:
-    python tools/summarize_efv_log.py [--retest | --s14 | --eligibility] [--log PATH] [--db PATH] [-v]
+    python tools/summarize_efv_log.py [--retest | --s14 | --eligibility | --v103] [--log PATH] [--db PATH] [-v]
 
 Reads Lua.log of the last game run (default: %LOCALAPPDATA%\\Firaxis Games\\Sid Meier's
 Civilization VI\\Logs\\Lua.log, or EFV_CIV6_LOGS) and prints the result of every step of
@@ -12,7 +12,9 @@ EFV/TESTING_FINAL.md, with --retest of the 6-step 0.7 re-test EFV/TESTING_RETEST
 eligibility buttons of EFV_Dev 1.0.1.3+ instead: one line per civ (role, picker result expected
 and actual for Expeditionary and Volunteers; T2 also one per city-state for the City-State picker,
 EFV_Dev 1.0.2.1; PASS/FAIL/CHECK) for the gameplay rules and the UI
-rules, from the last press of each button:
+rules, from the last press of each button. --v103 summarises the VEF 1.0.3 session
+EFV/TESTING_1.0.3.md (EFV_Dev 1.0.3.2: tracker labels, Entrust rules, transit cancel) and lists
+the veteran spike results (V0-V3) as findings, which never fail the run:
 
     Step  3  PASS   Send Expeditionary: fee 36 (band 2, expected 36)
     Step  7  CHECK  Grace (S3): record 2 state=DEPLOYED grace=nil (expected GRACE with 5 turns)
@@ -156,7 +158,9 @@ def send_step(*forces):
     return ev
 
 
-def version_step(log, ctx):
+def version_step(log, ctx, efv_version=None, dev_version=None):
+    efv_version = efv_version or EFV_VERSION
+    dev_version = dev_version or DEV_VERSION
     loads = [e for e in log.efv_of("Init", "EFV_Gameplay loading version=")]
     if not loads:
         return "CHECK", "VEF did not load (no '[Init] EFV_Gameplay loading' line)"
@@ -169,15 +173,15 @@ def version_step(log, ctx):
     spike = any("[EFV_SPIKE]" in ln for ln in log.lines)
     mismatch = any("version mismatch" in ln for ln in log.lines)
     parts = ["VEF %s" % ver, "VEF Dev %s" % devver]
-    ok = ver == EFV_VERSION and devver == DEV_VERSION and not spike and not mismatch
+    ok = ver == efv_version and devver == dev_version and not spike and not mismatch
     if spike:
         parts.append("SPIKE TEST MOD IS ENABLED")
     if mismatch:
         parts.append("VERSION MISMATCH")
-    if ver != EFV_VERSION:
-        parts.append("expected VEF %s" % EFV_VERSION)
-    if devver != DEV_VERSION:
-        parts.append("expected VEF Dev %s" % DEV_VERSION)
+    if ver != efv_version:
+        parts.append("expected VEF %s" % efv_version)
+    if devver != dev_version:
+        parts.append("expected VEF Dev %s" % dev_version)
     return ("PASS" if ok else "CHECK"), ", ".join(parts)
 
 
@@ -440,6 +444,67 @@ S14_STEPS = [
 ]
 
 
+# The VEF 1.0.3 session (EFV/TESTING_1.0.3.md, EFV_Dev 1.0.3.2).
+V103_EFV = "1.0.3"
+V103_DEV = "1.0.3.2"
+
+
+def v103_version_step(log, ctx):
+    return version_step(log, ctx, V103_EFV, V103_DEV)
+
+
+def cancel_step(mode):
+    """S16 CANCEL verdict of one mode (CS_TAKEN or PARTNER_ENDED), from the next turn start."""
+    def ev(log, ctx):
+        v, d = verdict_of(log, "CANCEL", " %s:" % mode)
+        if v is None:
+            if log.checks_of("CANCEL_PREP", " %s " % mode):
+                return "CHECK", "S16 was pressed (%s), but no CANCEL line: End Turn once more, then quit" % mode
+            return None, "not run (send a unit, press S16, End Turn)"
+        return ("PASS" if v == "PASS" else "CHECK"), d
+    return ev
+
+
+V103_STEPS = [
+    (1, "Install, new game and setup (S0)", combine(v103_version_step, ids_step("SETUP"))),
+    (2, "Tracker labels: Inbound, Departed, Outbound, Returning (S17)",
+     ids_step("TRACKER_LABELS", contains={"TRACKER_LABELS": "summary:"})),
+    (3, "Entrust a city-state's last city to a partner at peace with it (S18)", ids_step("ENTRUST_CS_UI", "ENTRUST_CS")),
+    (4, "Entrust of a living major's city stays greyed (S19)", ids_step("ENTRUST_MAJOR_UI", "ENTRUST_MAJOR")),
+    (5, "Transit cancelled: the city-state loses its city (S16)", cancel_step("CS_TAKEN")),
+    (6, "Transit cancelled: the partner stops qualifying (S16)", cancel_step("PARTNER_ENDED")),
+]
+
+V103_SPIKE = [
+    ("V0", "VSPIKE_V0", "control, route B as today (expected: 1 promotion in the first turn)"),
+    ("V1", "VSPIKE_V1", "hidden keep-moves ability"),
+    ("V1 off", "VSPIKE_V1_OFF", "ability removed: a promotion ends the turn again"),
+    ("V2", "VSPIKE_V2", "moves restored after each promotion"),
+    ("V3", "VSPIKE_V3", "level-adjust ability + SetPromotion + XP"),
+]
+
+
+def spike_report(log):
+    """Prints the veteran spike findings (EFV_Dev 1.0.3.2); they never fail the run."""
+    warn = [c for c in log.checks_of("VSPIKE") if c[1] == "CHECK"]
+    if not log.checks_of("VSPIKE") and not any(log.checks_of(cid) for _, cid, _ in V103_SPIKE):
+        print("Veteran spike: not run (press V Veteran spike)")
+        return
+    print("Veteran spike (findings, not pass/fail):")
+    for c in warn:
+        print("    WARN   T%d %s" % (c[2], short(c[3], 200)))
+    for label, cid, title in V103_SPIKE:
+        rows = [c for c in log.checks_of(cid) if c[1] != "INFO"]
+        info = [c for c in log.checks_of(cid) if c[1] == "INFO"]
+        if not rows and not info:
+            print("    %-6s -      %s: no result" % (label, title))
+            continue
+        last = rows[-1] if rows else info[-1]
+        print("    %-6s %-5s  T%d %s" % (label, last[1], last[2], short(last[3], 220)))
+        if cid == "VSPIKE_V0" and rows and info:
+            print("    %-6s INFO   T%d %s" % ("", info[-1][2], short(info[-1][3], 200)))
+
+
 ELIG_TITLES = {"T1": "Volunteer partners", "T2": "Shared enemy"}
 ELIG_CIV_RE = re.compile(r"^(\S+?)=(.+?) \| (.*?) \| Expeditionary expected (\S+) actual (.+?) \| "
                          r"Volunteers expected (\S+) actual (.+?)(?: \| SETUP: (.*?))? \[(?:gameplay|UI) rules\]$")
@@ -532,6 +597,8 @@ def main(argv=None):
     ap.add_argument("--s14", action="store_true", help="the S14 mutiny-death check (EFV/TESTING_S14.md)")
     ap.add_argument("--eligibility", action="store_true",
                     help="the T1 / T2 eligibility buttons (EFV_Dev 1.0.1.3): per-civ lines and PASS/FAIL")
+    ap.add_argument("--v103", action="store_true",
+                    help="the VEF 1.0.3 session (EFV/TESTING_1.0.3.md, EFV_Dev 1.0.3.2) and the veteran spike findings")
     a = ap.parse_args(argv)
     if not os.path.exists(a.log):
         print("Lua.log not found: %s" % a.log)
@@ -549,10 +616,17 @@ def main(argv=None):
         errs = error_lines(log)
         print("Errors: %s" % ("none" if not errs else "%d, first: %s" % (len(errs), short(errs[0], 200))))
         return 1 if bad or errs else 0
-    title = "VEF S14 mutiny-death summary" if a.s14 else ("VEF 0.7 re-test summary" if a.retest else "VEF final session summary")
+    if a.v103:
+        title, steps = "VEF 1.0.3 session summary", V103_STEPS
+    elif a.s14:
+        title, steps = "VEF S14 mutiny-death summary", S14_STEPS
+    elif a.retest:
+        title, steps = "VEF 0.7 re-test summary", RETEST_STEPS
+    else:
+        title, steps = "VEF final session summary", STEPS
     print("%s (%s, %d VEF lines, %d check lines)" % (title, a.log, len(log.efv), len(log.checks)))
     failed = 0
-    for num, title, ev in (S14_STEPS if a.s14 else (RETEST_STEPS if a.retest else STEPS)):
+    for num, title, ev in steps:
         if ev is None:
             ev = arrival_step
         try:
@@ -569,6 +643,8 @@ def main(argv=None):
     print("Badge audit: %s%s" % ("" if av is None else av + " ", short(ad, 200)))
     if av == "CHECK":
         failed += 1
+    if a.v103:
+        spike_report(log)
     if a.verbose:
         for c in log.checks:
             if c[1] == "CHECK":

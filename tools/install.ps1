@@ -5,6 +5,10 @@
 .DESCRIPTION
   Default:     runs tools\check_all.py on EFV\ (and EFV_Dev\ with -Dev); aborts on errors unless -Force;
                then robocopy /MIR EFV\ -> <Mods>\EFV (and EFV_Dev\ -> <Mods>\EFV_Dev with -Dev).
+  -DevOnly:    checks and installs ONLY EFV_Dev\ (the dev tools), for testing against VEF from the Steam
+               Workshop: <Mods>\EFV is not touched. Warns when a local <Mods>\EFV exists (it has the same
+               mod id as the Workshop VEF: remove it so the game loads the Workshop copy).
+  Installing refuses to run while Civilization VI is running (the game locks and caches mod files).
   -Watch:      after installing, tails Lua.log live, filtered to EFV lines and Lua errors.
                Start it after the game's main menu is up: the game recreates Lua.log at launch
                (the tail re-attaches when the file is recreated). Lua.log is buffered while playing;
@@ -17,12 +21,14 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\install.ps1
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Dev -Watch
+  powershell -ExecutionPolicy Bypass -File tools\install.ps1 -DevOnly
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Force -Src D:\other\EFV
 #>
 [CmdletBinding()]
 param(
     [switch]$Dev,
+    [switch]$DevOnly,
     [switch]$Watch,
     [switch]$WatchOnly,
     [switch]$CheckLogs,
@@ -114,10 +120,25 @@ if ($WatchOnly) {
     exit 0
 }
 
+# 0. the game must not be running while its Mods folder changes
+$game = Get-Process -Name "CivilizationVI*" -ErrorAction SilentlyContinue
+if ($game) {
+    Write-Host "Civilization VI is running ($($game[0].ProcessName)). Quit the game, then run this again." -ForegroundColor Red
+    exit 3
+}
+if ($DevOnly) {
+    $localEfv = Join-Path $ModsDir (Split-Path -Leaf $Src)
+    if (Test-Path -LiteralPath $localEfv -PathType Container) {
+        Write-Host "WARNING: a local copy of VEF is in $localEfv. It has the same mod id as the Steam Workshop VEF;" -ForegroundColor Yellow
+        Write-Host "         delete that folder so the game loads the Workshop version." -ForegroundColor Yellow
+    }
+}
+
 # 1. static checks
 if (-not $SkipChecks) {
     $roots = @($Src)
     if ($Dev) { $roots += $DevSrc }
+    if ($DevOnly) { $roots = @($DevSrc) }
     Write-Step ("Static checks: " + ($roots -join ", "))
     $argList = @((Join-Path $ToolsDir "check_all.py")) + $roots + @("--no-checklist")
     if ($Strict) { $argList += "--strict" }
@@ -134,9 +155,9 @@ if (-not $SkipChecks) {
     Write-Host "Skipping static checks (-SkipChecks)" -ForegroundColor Yellow
 }
 
-# 2. mirror
-Invoke-Mirror $Src (Join-Path $ModsDir (Split-Path -Leaf $Src))
-if ($Dev) { Invoke-Mirror $DevSrc (Join-Path $ModsDir (Split-Path -Leaf $DevSrc)) }
+# 2. mirror (-DevOnly: the dev tools only; VEF comes from the Steam Workshop)
+if (-not $DevOnly) { Invoke-Mirror $Src (Join-Path $ModsDir (Split-Path -Leaf $Src)) }
+if ($Dev -or $DevOnly) { Invoke-Mirror $DevSrc (Join-Path $ModsDir (Split-Path -Leaf $DevSrc)) }
 Write-Host ""
 Write-Host "Installed. Enable the mod(s) in Additional Content, start/load a game, then run:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs"

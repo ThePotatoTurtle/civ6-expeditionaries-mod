@@ -35,7 +35,7 @@ python tools\validate_data.py EFV [--db PATH]
 - Every `.xml`, `.modinfo` and `.artdef` file is well formed.
 - modinfo: valid ids, every action has criteria, every listed file exists (exact case) and every file on disk is listed (except `.md` and `.txt`), the Gathering Storm dependency, `AffectsSavedGames=1`, complete `ReplaceUIScript` and `AddUserInterfaces` entries.
 - SQL: the game's cached gameplay database is copied to a temp folder (the original is only read). Leftover `EFV*` rows from a previous game are removed from the copy. Then every database file of the mod runs there in load order, with the game's own hash function. Unknown tables or columns, constraint failures and hash collisions fail, and a final foreign key check copies what the game does on load. Notification types and rows must pair up. Icon files run against a small stub table.
-- Text: no duplicate keys, no rows for keys the base game already has, every `LOC_*` key used in Lua, SQL, UI XML or the modinfo exists, placeholders get enough arguments, plural forms are written correctly, every reason code has its text, unused keys are warnings, and every notification has a message and a summary.
+- Text: no duplicate keys, no rows for keys the base game already has, every `LOC_*` key used in Lua, SQL, UI XML or the modinfo exists (keys of a dependency mod in this project count too: VEF Dev Tools reads VEF's own texts), placeholders get enough arguments, plural forms are written correctly, every reason code has its text, unused keys are warnings, and every notification has a message and a summary.
 - Displayed name: the word "EFV" in any player-visible English text or modinfo display field is an error. Players see "VEF".
 - Icons: every notification type needs an icon alias.
 - Lua cross references: notification type names exist in the SQL, `Controls.X` exists in the paired XML, instance names match.
@@ -60,9 +60,11 @@ python tools\api_audit.py --regen          # rebuild api_allowlist.json and .lua
 ```
 powershell -ExecutionPolicy Bypass -File tools\install.ps1                # checks, then copy EFV\
 powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Dev -Watch     # also EFV_Dev\, then follow Lua.log
+powershell -ExecutionPolicy Bypass -File tools\install.ps1 -DevOnly        # only EFV_Dev\ (VEF from the Steam Workshop)
 powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs      # only scan the last run's logs
 ```
 
+- Stops at once while Civilization VI is running. `-DevOnly` checks and copies only `EFV_Dev`, for tests against the Workshop VEF, and warns when a local `Mods\EFV` is left over (same mod id as the Workshop copy: delete it).
 - Runs `check_all.py` first. Errors stop the install unless you pass `-Force` (`-SkipChecks` skips the checks, `-Strict` also stops on warnings).
 - Mirrors the folders into `S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods\EFV` (and `EFV_Dev`). It refuses targets outside `-ModsDir` or folders not named `EFV*`. Files deleted in the source are deleted in the copy too.
 - `-Watch` / `-WatchOnly` follow `Lua.log`, filtered by `-Pattern` (default `EFV|Runtime Error|Syntax Error|stack traceback`), and pick the file up again when the game recreates it.
@@ -72,10 +74,10 @@ powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs      # onl
 ## summarize_efv_log.py: result of the final in-game session
 
 ```
-python tools\summarize_efv_log.py [--retest | --s14] [--log PATH] [--db PATH] [-v]
+python tools\summarize_efv_log.py [--retest | --s14 | --eligibility | --v103] [--log PATH] [--db PATH] [-v]
 ```
 
-`--retest` reads the short 0.7 re-test (`EFV/TESTING_RETEST_0.7.md`) and `--s14` the mutiny-death check (`EFV/TESTING_S14.md`). Every mode ends with the error count and the "Badge audit" line of VEF Dev Tools 0.7.2-dev.1.
+`--retest` reads the short 0.7 re-test (`EFV/TESTING_RETEST_0.7.md`), `--s14` the mutiny-death check (`EFV/TESTING_S14.md`) and `--v103` the VEF 1.0.3 session (`EFV/TESTING_1.0.3.md`, VEF Dev Tools 1.0.3.2); `--v103` also lists the veteran spike results (V0 to V3) as findings that never fail the run. Every mode ends with the error count and the "Badge audit" line of VEF Dev Tools 0.7.2-dev.1.
 
 Reads `Lua.log` after the session in `EFV/TESTING_FINAL.md` and prints one line per step, for example `Step  7  PASS   Grace (S3): ...`. A step is PASS, CHECK (look at it) or `-` (not run). It uses the `[EFV][CHECK]` lines written by the VEF Dev Tools scenario buttons, plus a few of the mod's own lines: the versions, every send with its fee (compared with the expected fee from the game database), Entrust, and the number of game loads. The last line counts error lines. `-v` also prints every CHECK line. Quit the game before running it.
 

@@ -24,7 +24,7 @@ include("InstanceManager")
 local m_UIShared = pcall(include, "EFV_UIShared")
 include("EFV_Config")
 -- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText EFV_UI_TrackerState EFV_SortedKeys EFV_UI_RecordsFor EFV_UI_TrackedUnit
--- EFV:GLOBALS EFV_DestinationRows EFV_PartnerBasis EFV_VolunteerBasis
+-- EFV:GLOBALS EFV_DestinationRows EFV_PartnerBasis EFV_VolunteerBasis EFV_UI_TrackerRows EFV_UI_EntrustState
 
 local PREFIX = "[EFV][Dev][UI]"
 local m_ButtonIM = InstanceManager:new("DevButtonInstance", "Button", Controls.ButtonStack)
@@ -529,7 +529,9 @@ local function IsShotCmd(cmd)
 	return string.sub(Str(cmd), 1, 4) == "shot"
 end
 
+-- S17 (scn_labels, EFV_Dev 1.0.3.2) runs the same way: it opens the tracker.
 local function ShotID(cmd)
+	if cmd == "scn_labels" then return "TRACKER_LABELS" end
 	if not IsShotCmd(cmd) then return "RECEIVE" end
 	return "SHOT" .. string.sub(Str(cmd), 5)
 end
@@ -675,6 +677,439 @@ local function LapseTextCheck()
 			UICheck("LAPSE_TEXT", text == expect and "PASS" or "CHECK", "tracker state of Volunteer record " .. id .. ": '" .. text ..
 				"' (expected '" .. expect .. "')")
 		end
+	end
+end
+
+-- ---------------------------------------------------------------------------
+-- VEF 1.0.3 session UI checks (EFV_Dev 1.0.3.2; EFV/TESTING_1.0.3.md),
+-- polled with the ones above:
+--   TRACKER_LABELS    S17: the tracker rows of the four S17 records, read
+--                     with VEF's own EFV_UI_TrackerRows for the local
+--                     player: Inbound / Departed on the rows sent to you,
+--                     Outbound / Returning on yours; the Departed and
+--                     Returning tooltips carry their state sentence. One
+--                     line per row, then a summary. Waits up to 5 s for the
+--                     UI store to show the records.
+--   ENTRUST_CS_UI     S18 / S19: once the scene's city is yours and VEF's
+--   ENTRUST_MAJOR_UI  capture snapshot is there, VEF's own
+--                     EFV_UI_EntrustState (what the Entrust button shows):
+--                     S18 must offer B (the old owner is a city-state),
+--                     S19 must be greyed with ENTRUST_NO_PARTNER.
+-- ---------------------------------------------------------------------------
+local m_LabelsDone = {}
+local m_LabelsSince = {}
+local m_EntrustDone = {}
+
+local function Plain(s)
+	s = string.gsub(Str(s), "%[COLOR[^%]]*%]", "")
+	s = string.gsub(s, "%[ENDCOLOR%]", "")
+	return s
+end
+
+local function CurrentTurn()
+	local t = -1
+	pcall(function() t = Game.GetCurrentGameTurn() end)
+	return tonumber(t) or -1
+end
+
+local function LabelsCheck()
+	local st = ScnState()
+	local s = st and st.s17
+	if type(s) ~= "table" or s.stamp == nil or m_LabelsDone[s.stamp] or st.me ~= LocalID() then return end
+	if type(EFV_UI_TrackerRows) ~= "function" then
+		m_LabelsDone[s.stamp] = true
+		UICheck("TRACKER_LABELS", "CHECK", "VEF's tracker functions are not loaded (EFV_UIShared)")
+		return
+	end
+	local turn = CurrentTurn()
+	if turn ~= tonumber(s.turn) then m_LabelsDone[s.stamp] = true; return end
+	local byId = {}
+	for _, r in ipairs(EFV_UI_TrackerRows(LocalID(), turn)) do byId[r.id] = r end
+	local missing = 0
+	for _, e in ipairs(s.rows or {}) do
+		if byId[e.id] == nil then missing = missing + 1 end
+	end
+	if missing > 0 then
+		m_LabelsSince[s.stamp] = m_LabelsSince[s.stamp] or m_Clock
+		if m_Clock - m_LabelsSince[s.stamp] < 5 then return end
+	end
+	m_LabelsDone[s.stamp] = true
+	local pass, n = 0, 0
+	for _, e in ipairs(s.rows or {}) do
+		n = n + 1
+		local r = byId[e.id]
+		local want = Locale.Lookup("LOC_EFV_TRACKER_ST_" .. Str(e.role))
+		if r == nil then
+			UICheck("TRACKER_LABELS", "FAIL", Str(e.role) .. " record " .. Str(e.id) .. ": no tracker row (expected '" .. want .. "')")
+		else
+			local got = Plain(r.state)
+			local ok = got == want
+			local extra = ""
+			local left = math.max(0, (tonumber(r.rec and r.rec.arrivalTurn) or turn) - turn)
+			local sentence = nil
+			if e.role == "DEPARTED" then sentence = Locale.Lookup("LOC_EFV_STATE_DEPARTED", left) end
+			if e.role == "RETURNING" then sentence = Locale.Lookup("LOC_EFV_STATE_RETURNING", left) end
+			if sentence ~= nil then
+				local has = string.find(Plain(r.tooltip), sentence, 1, true) ~= nil
+				ok = ok and has
+				extra = "; tooltip " .. (has and "has" or "LACKS") .. " '" .. sentence .. "'"
+			end
+			if ok then pass = pass + 1 end
+			UICheck("TRACKER_LABELS", ok and "PASS" or "FAIL", Str(e.role) .. " record " .. Str(e.id) .. " (" .. Plain(r.unit) .. ", " ..
+				Plain(r.partner) .. "): tracker shows '" .. got .. "' (expected '" .. want .. "')" .. extra)
+		end
+	end
+	UICheck("TRACKER_LABELS", (pass == n and n > 0) and "PASS" or "FAIL", "summary: " .. pass .. "/" .. n ..
+		" rows as expected (received: Inbound, Departed; sent: Outbound, Returning)")
+end
+
+local function Listed(list, v)
+	for _, x in ipairs(list or {}) do
+		if x == v then return true end
+	end
+	return false
+end
+
+local function Names(ids)
+	local out = {}
+	for _, pid in ipairs(ids or {}) do out[#out + 1] = CivName(pid) end
+	return #out > 0 and table.concat(out, ", ") or "none"
+end
+
+local function EntrustUICheck()
+	local st = ScnState()
+	if st == nil or st.me ~= LocalID() or type(EFV_UI_EntrustState) ~= "function" then return end
+	for _, spec in ipairs({ { key = "s18", id = "ENTRUST_CS_UI" }, { key = "s19", id = "ENTRUST_MAJOR_UI" } }) do
+		local s = st[spec.key]
+		if type(s) == "table" and s.cx ~= nil then
+			local tag = spec.key .. ":" .. Str(s.cx) .. "," .. Str(s.cy) .. ":" .. Str(s.turn)
+			local city = nil
+			pcall(function() city = CityManager.GetCityAt(s.cx, s.cy) end)
+			if not m_EntrustDone[tag] and city ~= nil and city:GetOwner() == LocalID() then
+				local ok, es = pcall(EFV_UI_EntrustState, LocalID(), s.cx, s.cy)
+				if ok and type(es) == "table" and type(es.snap) == "table" then
+					m_EntrustDone[tag] = true
+					local enabled = {}
+					for _, row in ipairs(es.rows or {}) do
+						if #(row.codes or {}) == 0 then enabled[#enabled + 1] = row.recipientID end
+					end
+					local codes = table.concat(es.codes or {}, "+")
+					local facts = "old owner " .. CivName(es.snap.oldOwnerID) .. ", snapshot recipients " .. Names(es.snap.recipients) ..
+						", partners " .. Names(es.snap.partners) .. ", button " .. (#enabled > 0 and ("enabled for " .. Names(enabled)) or
+						("greyed (" .. (codes ~= "" and codes or "no reason") .. ")"))
+					if spec.key == "s18" then
+						local pass = Listed(enabled, st.ally) or Listed(enabled, st.friend)
+						UICheck(spec.id, pass and "PASS" or "FAIL", "city-state city captured: " .. facts ..
+							(pass and "; a partner at peace with the city-state can take it" or "; expected B (or F) to be offered"))
+					else
+						local pass = #enabled == 0 and Listed(es.codes, "ENTRUST_NO_PARTNER")
+						UICheck(spec.id, pass and "PASS" or "FAIL", "living major's city captured: " .. facts ..
+							(pass and "; still greyed, nobody was at war with it" or "; expected greyed with ENTRUST_NO_PARTNER"))
+					end
+				end
+			end
+		end
+	end
+end
+
+-- ---------------------------------------------------------------------------
+-- V Veteran spike, UI side (EFV_Dev 1.0.3.2; gameplay: "V Veteran spike" in
+-- EFV_Dev_Gameplay.lua). After the V button's answer (st.vs, same stamp)
+-- the panel restores V0, V1 and V2 like EFV_VetRestore does for a real
+-- veteran: for each copy the first wanted promotion the engine offers
+-- (UnitManager.CanStartCommand(u, PROMOTE, true, true) ->
+-- UnitCommandResults.PROMOTIONS, UnitPromotionPopup.lua:81-82, 285-290) is
+-- sent with UnitManager.RequestCommand(u, PROMOTE, { PARAM_PROMOTION_TYPE })
+-- (UnitPromotionPopup.lua:70-72); once it landed, vs_sync lets gameplay
+-- sync (XP to the next threshold; V2: moves back). V1 then gets vs_off (the
+-- keep-moves ability removed) and one more normal promotion, whose moves
+-- must be 0 (VSPIKE_V1_OFF). The copies' UI state (GetLevel is UI only) is
+-- logged as VSPIKE_UI lines at every step and at each new turn, for
+-- VS_TURNS turns after the press. Verdicts:
+--   VSPIKE_V0  PASS: exactly 1 promotion in the first turn, then PROMOTE is
+--              not offered (the limit reproduced); INFO when all are back.
+--   VSPIKE_V1  PASS: all wanted promotions in the first turn, level 1 + n.
+--   VSPIKE_V2  the same for V2.
+--   VSPIKE_V3  PASS: level 1 + n, XP kept, no pending promotion.
+-- The runner lives in UI memory (a reload stops it; the gameplay lines
+-- continue at each turn start). Play a civ other than Gran Colombia: the
+-- button logs a CHECK line when the local civ is Gran Colombia
+-- (PlayerConfigurations[id]:GetCivilizationTypeName(), Civ6Common.lua:580).
+-- Other UI calls: exp:GetLevel() (UI only; UnitPanel.lua:2264),
+-- exp:GetPromotions() (UI only; Session A T09), u:GetMovesRemaining() /
+-- GetMaxMoves() / GetMaxDamage() / GetDamage() (PLAN A23, A25).
+-- ---------------------------------------------------------------------------
+local VS_WAIT_S = 3.0       -- first turn: no wanted promotion offered this long = the limit
+local VS_RESEND_S = 3.0
+local VS_TURNS = 3
+local VS_METHOD = {
+	V0 = "V0 control (route B, one PROMOTE per turn)",
+	V1 = "V1 hidden keep-moves ability + chained PROMOTE",
+	V2 = "V2 moves restored after each promotion",
+	V3 = "V3 level-adjust ability + SetPromotion + XP",
+}
+local m_VS = nil
+
+local function VsNames(u)
+	local out = {}
+	pcall(function()
+		for _, idx in ipairs(u:GetExperience():GetPromotions() or {}) do
+			local row = GameInfo.UnitPromotions[idx]
+			out[#out + 1] = row and row.UnitPromotionType or Str(idx)
+		end
+	end)
+	return out
+end
+
+local function VsWanted(u, promos)
+	local n = 0
+	for _, nm in ipairs(promos or {}) do
+		local row = GameInfo.UnitPromotions[nm]
+		if row ~= nil and HasPromo(u, row) then n = n + 1 end
+	end
+	return n
+end
+
+-- Indexes the engine offers for PROMOTE now, and whether PROMOTE can start.
+local function VsOffered(u)
+	local ok, can, res = pcall(function() return UnitManager.CanStartCommand(u, UnitCommandTypes.PROMOTE, true, true) end)
+	if not ok or not can or type(res) ~= "table" then return {}, false end
+	local list = res[UnitCommandResults.PROMOTIONS]
+	if type(list) ~= "table" then return {}, true end
+	return list, true
+end
+
+local function VsMoves(u)
+	local m = -1
+	pcall(function() m = u:GetMovesRemaining() end)
+	return tonumber(m) or -1
+end
+
+local function VsUIState(u)
+	if u == nil then return "unit not found" end
+	local s = "?"
+	pcall(function()
+		local exp = u:GetExperience()
+		local list, can = VsOffered(u)
+		local names = VsNames(u)
+		s = "level=" .. Str(Level(u)) .. " moves=" .. Str(u:GetMovesRemaining()) .. "/" .. Str(u:GetMaxMoves()) .. " xp=" ..
+			Str(exp:GetExperiencePoints()) .. "/" .. Str(exp:GetExperienceForNextLevel()) .. " PROMOTE=" ..
+			(can and ("yes(" .. #list .. ")") or "no") .. " hp=" .. Str(u:GetMaxDamage() - u:GetDamage()) .. " promotions=" ..
+			(#names > 0 and table.concat(names, "+") or "-")
+	end)
+	return s
+end
+
+local function VsUILog(k, step, u)
+	UICheck("VSPIKE_UI", "INFO", Str(k) .. " " .. step .. " | " .. VsUIState(u))
+end
+
+local function VsPromote(u, row, k, attempt)
+	local ok, err = pcall(function()
+		local t = {}
+		t[UnitCommandTypes.PARAM_PROMOTION_TYPE] = row.Index
+		UnitManager.RequestCommand(u, UnitCommandTypes.PROMOTE, t)
+	end)
+	VsUILog(k, "PROMOTE " .. Str(row.UnitPromotionType) .. " sent (attempt " .. attempt .. ", ok=" .. tostring(ok) ..
+		(ok and "" or (" err=" .. Str(err))) .. ")", u)
+end
+
+local function VsStart()
+	local civ = nil
+	pcall(function() civ = PlayerConfigurations[LocalID()]:GetCivilizationTypeName() end)
+	if civ == "CIVILIZATION_GRAN_COLOMBIA" then
+		UICheck("VSPIKE", "CHECK", "you play Gran Colombia: its trait lets every promotion keep the unit's moves, so the spike " ..
+			"cannot show the one-per-turn limit. Start a new game with another civ")
+	end
+	local p = BaseParams("vs_start")
+	m_VS = { stamp = p.stamp, phase = "wait", t0 = m_Clock, nextAt = m_Clock + 0.5, m = {}, civ = civ }
+	Send(p)
+end
+
+local function VsSend(cmd, k, have)
+	local q = BaseParams(cmd)
+	q.k = k
+	if have ~= nil then q.have = have end
+	Send(q)
+end
+
+-- One copy, one poll (see the header).
+local function VsCopy(v, vs, c, turn, newTurn)
+	local k = Str(c.k)
+	local m = v.m[k]
+	if m == nil then
+		m = { phase = "run" }
+		v.m[k] = m
+	end
+	if m.phase == "gone" then return end
+	local u = OwnUnit(LocalID(), c.u)
+	if u == nil then
+		m.phase = "gone"
+		UICheck("VSPIKE_" .. k, "CHECK", VS_METHOD[k] .. ": copy VEF-" .. k .. " (unit " .. Str(c.u) .. ") not found")
+		return
+	end
+	local promos = vs.promos or {}
+	local want = #promos
+	local first = (turn == v.turn0)
+	local held = #VsNames(u)
+	local wanted = VsWanted(u, promos)
+	if newTurn then VsUILog(k, first and "start" or "turn start", u) end
+	if k == "V3" then
+		if not m.verdict then
+			m.verdict = true
+			local lvl = Level(u)
+			local list, can = VsOffered(u)
+			local xp, nxt = -1, -1
+			pcall(function()
+				local e = u:GetExperience()
+				xp, nxt = e:GetExperiencePoints(), e:GetExperienceForNextLevel()
+			end)
+			local ok = lvl == 1 + want and not can and xp == tonumber(vs.xp) and wanted == want
+			m.nxt = nxt
+			UICheck("VSPIKE_V3", ok and "PASS" or "CHECK", VS_METHOD.V3 .. ": level " .. Str(lvl) .. " (want " .. (1 + want) ..
+				"), XP " .. Str(xp) .. "/" .. Str(nxt) .. " (want XP " .. Str(vs.xp) .. "), PROMOTE offered " ..
+				(can and ("yes, " .. #list .. " choice(s)") or "no") .. ", promotions " .. wanted .. "/" .. want)
+		end
+		return
+	end
+	if m.lastHeld ~= nil and held > m.lastHeld then
+		VsUILog(k, "promotion " .. held .. " landed", u)
+		m.waitSince = nil
+		if first and k == "V0" and wanted >= 2 and not m.v1 then
+			m.v1 = true
+			UICheck("VSPIKE_V0", "CHECK", VS_METHOD.V0 .. ": a 2nd promotion landed in the first turn, so there is no one-per-turn " ..
+				"limit here (Gran Colombia, or promoting keeps the moves)")
+		end
+	end
+	m.lastHeld = held
+	if held > (tonumber(c.synced) or 0) then
+		if m.syncFor ~= held or m_Clock - (m.syncAt or 0) >= VS_RESEND_S then
+			VsSend("vs_sync", k, held)
+			m.syncFor, m.syncAt = held, m_Clock
+		end
+		return
+	end
+	if m.phase == "run" then
+		if wanted >= want then
+			local lvl = Level(u)
+			local span = first and "in the first turn" or ("by turn " .. turn .. " (" .. (turn - v.turn0 + 1) .. " turns)")
+			if k == "V0" then
+				UICheck("VSPIKE_V0", "INFO", VS_METHOD.V0 .. ": all " .. want .. " promotions back " .. span .. ", level " .. Str(lvl))
+			else
+				local ok = first and lvl == 1 + want
+				UICheck("VSPIKE_" .. k, ok and "PASS" or "CHECK", VS_METHOD[k] .. ": " .. wanted .. "/" .. want .. " promotions " .. span ..
+					", level " .. Str(lvl) .. " (want " .. (1 + want) .. "), moves " .. VsMoves(u))
+				m.v1 = true
+			end
+			if k == "V1" then
+				m.phase = "off"
+				m.offAt = m_Clock
+				VsSend("vs_off", k)
+			else
+				m.phase = "done"
+			end
+			return
+		end
+		local list = VsOffered(u)
+		local pick = nil
+		for _, nm in ipairs(promos) do
+			local row = GameInfo.UnitPromotions[nm]
+			if pick == nil and row ~= nil and not HasPromo(u, row) and Listed(list, row.Index) then pick = row end
+		end
+		if pick ~= nil then
+			if m.promFor ~= held then
+				m.promFor, m.promAt, m.promN = held, m_Clock, 1
+				VsPromote(u, pick, k, 1)
+			elseif (m.promN or 1) < 2 and m_Clock - (m.promAt or 0) >= VS_RESEND_S then
+				m.promN, m.promAt = 2, m_Clock
+				VsPromote(u, pick, k, 2)
+			end
+			m.waitSince = nil
+			return
+		end
+		if m.waitSince == nil then
+			m.waitSince = m_Clock
+			VsUILog(k, "no wanted promotion offered", u)
+		end
+		if first and not m.v1 and m_Clock - m.waitSince >= VS_WAIT_S then
+			m.v1 = true
+			if k == "V0" then
+				UICheck("VSPIKE_V0", wanted == 1 and "PASS" or "CHECK", VS_METHOD.V0 .. ": " .. wanted .. " promotion(s) in the first turn, " ..
+					"then PROMOTE is not offered (moves " .. VsMoves(u) .. "): " .. (wanted == 1 and "the one-per-turn limit is reproduced" or
+					"expected exactly 1"))
+			else
+				UICheck("VSPIKE_" .. k, "CHECK", VS_METHOD[k] .. ": stopped at " .. wanted .. "/" .. want .. " in the first turn, " ..
+					"PROMOTE not offered (moves " .. VsMoves(u) .. ")")
+			end
+		end
+		return
+	end
+	if m.phase == "off" then
+		if tonumber(c.off) == 1 then
+			local list = VsOffered(u)
+			local row = list[1] ~= nil and GameInfo.UnitPromotions[list[1]] or nil
+			if row ~= nil then
+				m.offBase = held
+				m.phase = "offwait"
+				m.offAt = m_Clock
+				VsPromote(u, row, k, 1)
+			elseif m_Clock - (m.offAt or 0) > VS_WAIT_S then
+				m.phase = "done"
+				UICheck("VSPIKE_V1_OFF", "CHECK", "after the keep-moves ability was removed no promotion is offered (" .. VsUIState(u) .. ")")
+			end
+		elseif m_Clock - (m.offAt or 0) > VS_RESEND_S * 2 then
+			m.phase = "done"
+			UICheck("VSPIKE_V1_OFF", "CHECK", "no answer from gameplay to vs_off")
+		end
+		return
+	end
+	if m.phase == "offwait" then
+		if held > (m.offBase or held) then
+			local mv = VsMoves(u)
+			m.phase = "done"
+			UICheck("VSPIKE_V1_OFF", mv == 0 and "PASS" or "CHECK", "ability removed, one normal promotion " .. (mv == 0 and
+				"ended the unit's turn again (moves 0)" or ("left the unit " .. mv .. " moves: its turn did NOT end")))
+		elseif m_Clock - (m.offAt or 0) > VS_RESEND_S * 2 then
+			m.phase = "done"
+			UICheck("VSPIKE_V1_OFF", "CHECK", "the promotion after the ability was removed did not land (" .. VsUIState(u) .. ")")
+		end
+	end
+end
+
+local function VsStep()
+	local v = m_VS
+	if m_Clock < v.nextAt then return end
+	v.nextAt = m_Clock + 0.3
+	local st = ScnState()
+	local vs = st and st.vs
+	if v.phase == "wait" then
+		if type(vs) ~= "table" or vs.stamp ~= v.stamp then
+			if m_Clock - v.t0 > VET_TIMEOUT then
+				m_VS = nil
+				Log("V spike: no answer from gameplay (found your capital first)")
+			end
+			return
+		end
+		LookAt(st.focus)
+		v.phase = "run"
+		v.turn0 = tonumber(vs.turn) or CurrentTurn()
+		return
+	end
+	if type(vs) ~= "table" or vs.stamp ~= v.stamp then
+		m_VS = nil
+		return
+	end
+	local turn = CurrentTurn()
+	if turn > v.turn0 + VS_TURNS then
+		UICheck("VSPIKE_UI", "INFO", "spike logging ends at turn " .. turn)
+		m_VS = nil
+		return
+	end
+	local newTurn = v.loggedTurn ~= turn
+	v.loggedTurn = turn
+	for _, c in ipairs(vs.c or {}) do
+		local ok, err = pcall(VsCopy, v, vs, c, turn, newTurn)
+		if not ok then Log("V spike " .. Str(c.k) .. " error: " .. Str(err)) end
 	end
 end
 
@@ -912,12 +1347,23 @@ local function OnUpdate(dt)
 		m_CheckAt = m_Clock + 0.5
 		pcall(VetLevelCheck)
 		pcall(LapseTextCheck)
+		local okL, errL = pcall(LabelsCheck)
+		if not okL then Log("tracker label check error: " .. Str(errL)) end
+		local okE, errE = pcall(EntrustUICheck)
+		if not okE then Log("Entrust check error: " .. Str(errE)) end
 	end
 	if m_Vet ~= nil then
 		local ok, err = pcall(VetStep)
 		if not ok then
 			Log("S6 route B error: " .. Str(err))
 			m_Vet = nil
+		end
+	end
+	if m_VS ~= nil then
+		local ok, err = pcall(VsStep)
+		if not ok then
+			Log("V spike error: " .. Str(err))
+			m_VS = nil
 		end
 	end
 end
@@ -958,7 +1404,7 @@ end
 -- Buttons: cmd = gameplay command (EFV_Dev_Gameplay.lua), ui = local function
 -- ---------------------------------------------------------------------------
 local UIFN = { ForgeSend = ForgeSend, ForgeRecall = ForgeRecall, ForgeEntrust = ForgeEntrust, UIStore = UIStore,
-	VetStart = VetStart, GoTo = GoTo }
+	VetStart = VetStart, GoTo = GoTo, VsStart = VsStart }
 
 local BUTTONS = {
 	{ header = "Screenshots (VEF 0.7+, new game after one End Turn)" },
@@ -967,7 +1413,7 @@ local BUTTONS = {
 	{ label = "Shot 3 Tracker",         shot = "shot3" },
 	{ label = "Shot 4 Entrust",         shot = "shot4" },
 	{ label = "Shot 5 Mutiny",          shot = "shot5" },
-	{ header = "Test sessions (EFV/TESTING_RETEST_0.7.md, TESTING_FINAL.md): start a NEW game; one click sets up each step" },
+	{ header = "Test sessions (EFV/TESTING_1.0.3.md, older: TESTING_FINAL.md): start a NEW game; one click sets up each step" },
 	{ label = "S0 Setup session",       scn = "scn_setup" },
 	{ label = "S1 Arrive next turn",    scn = "scn_arrive" },
 	{ label = "S2 Expire CS unit (off its land)", scn = "scn_expire_cs" },
@@ -985,6 +1431,10 @@ local BUTTONS = {
 	{ label = "S14 Mutiny death",       scn = "scn_mutdeath" },
 	{ label = "S15 Receive forces",     shot = "scn_receive" },
 	{ label = "S16 Break transit",      scn = "scn_cancel" },
+	{ label = "S17 Tracker labels",     shot = "scn_labels" },
+	{ label = "S18 Entrust city-state", scn = "scn_entrust_cs" },
+	{ label = "S19 Entrust major",      scn = "scn_entrust_major" },
+	{ label = "V Veteran spike",        ui = "VsStart" },
 	{ label = "T1 Volunteer partners",  elig = "elig_t1", test = "T1" },
 	{ label = "T2 Shared enemy",        elig = "elig_t2", test = "T2" },
 	{ label = "Go to scenario",         ui = "GoTo" },
