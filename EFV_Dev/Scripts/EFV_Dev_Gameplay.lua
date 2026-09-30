@@ -51,10 +51,10 @@ EFV_Dev = {}
 -- 1.0.1.3; VEF 1.0.2 City-State rule (no shared enemy needed), S0 without
 -- the city-state's war, T2 City-State lines: 1.0.2.1; S16 Break transit for
 -- the VEF transit cancel, built on EFV 1.0.2 plus the unreleased change:
--- 1.0.2.2); a
+-- 1.0.2.2; rebuilt for the EFV 1.0.3 release without changes: 1.0.3.1); a
 -- mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.2.2"
-EFV_Dev.FOR_EFV = "1.0.2"
+EFV_Dev.VERSION = "1.0.3.1"
+EFV_Dev.FOR_EFV = "1.0.3"
 
 -- ---------------------------------------------------------------------------
 -- Helpers

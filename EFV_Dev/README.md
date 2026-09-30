@@ -2,7 +2,7 @@
 
 A separate mod with a developer panel for testing Volunteers & Expeditionary Forces (VEF) in game. It needs Gathering Storm and VEF (mod id `fcc83bd7-1abf-4d9a-bddb-01633574bf40`). Its own id is `94ec021d-9956-4a30-b9c1-5ccf136679bf`.
 
-Version 1.0.2.2, made for VEF 1.0.2 plus the unreleased transit cancel (S16). Never enable it in a real game.
+Version 1.0.3.1, made for VEF 1.0.3. Never enable it in a real game.
 
 The internal prefix of the project is `EFV_`, so files, Lua names and log tags use that. Players only ever see "VEF".
 

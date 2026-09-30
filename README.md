@@ -4,7 +4,7 @@ A Civilization VI mod for Gathering Storm. It lets you lend combat units to the 
 
 Get it on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3810156577
 
-Version 1.0.2.
+Version 1.0.3.
 
 ## The four options
 
@@ -185,7 +185,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - A mutinying unit may briefly show a "+HP" animation before VEF takes the healing back.
 
 ## Changelog
-- Unreleased: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so.
+- 1.0.3: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so. Entrust no longer needs a partner at war with the old owner when that owner was a city-state or has been knocked out of the game, so a city-state or a civ's last city can be entrusted now. In the tracker, units lent to you show as Inbound while on their way and Departed once they head home.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.
 - 1.0.0: First public release, on the Steam Workshop and GitHub. Same rules as 0.7.4.
