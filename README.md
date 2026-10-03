@@ -139,6 +139,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 
 ### Service, grace and mutiny
 - Expeditionary units serve 20 turns, City-State units 10. You and the host are warned 3 turns and 1 turn before the end.
+- Making peace with the shared enemy, or the alliance or friendship ending, doesn't shorten an Expeditionary tour. The shared enemy only matters when you send (and while the unit is on its way). Only Volunteers lapse.
 - When an Expeditionary unit's service ends, it comes home by itself if it stands on the host's land or yours. Anywhere else it gets 5 turns of grace to get back.
 - After grace comes mutiny: 20 damage per turn and no healing. A unit at full health dies on the 5th mutiny turn, a damaged one sooner.
 - An Expeditionary unit that reaches the host's land or yours during grace or mutiny comes home at the next turn. The damage stays.
