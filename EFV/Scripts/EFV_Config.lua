@@ -40,16 +40,19 @@ EFV_Config.CS_EXPEDITIONARY_DURATION = 10
 EFV_Config.VOLUNTEER_MIN_DEPLOYMENT  = 10    -- turns before recall is allowed
 EFV_Config.GRACE_TURNS               = 5
 EFV_Config.MUTINY_DAMAGE_PER_TURN    = 20    -- HP; 20% of COMBAT_MAX_HIT_POINTS 100 (SPIKES 3)
--- Fees (designer ruling 0.5.2, replaces spec 3's 0.10 / 0.20 / 0.10 and
--- { 0.10, 0.20, 0.30, 0.40 }): total = FEE + SURCHARGE[band] of the base
--- gold cost. Expeditionary and City-State Expeditionary: 0% / 10% / 20% /
--- 30% for bands 1-4 (band 1 is free); Volunteer: 20% / 30% / 40% / 50%.
+-- Fees (designer ruling 2026-10-04 for 1.0.4, halves the 0.5.2 ruling's
+-- 0.20 and { 0.00, 0.10, 0.20, 0.30 }, which replaced spec 3's
+-- 0.10 / 0.20 / 0.10 and { 0.10, 0.20, 0.30, 0.40 }): total = FEE +
+-- SURCHARGE[band] of the base gold cost. Expeditionary and City-State
+-- Expeditionary: 0% / 5% / 10% / 15% for bands 1-4 (band 1 is free);
+-- Volunteer: 10% / 15% / 20% / 25%. Derive() turns the fractions into
+-- integer percents (ToPct rounds to nearest, so 0.05 steps stay exact).
 -- A fee of 0 is valid end to end (EFV_Fee returns 0, no gold check fails,
 -- no gold is deducted, the UI shows "Free").
 EFV_Config.FEE_EXPEDITIONARY         = 0.00  -- fraction of base gold cost
-EFV_Config.FEE_VOLUNTEER             = 0.20
+EFV_Config.FEE_VOLUNTEER             = 0.10
 EFV_Config.FEE_CS_EXPEDITIONARY      = 0.00
-EFV_Config.SURCHARGE_BY_BAND         = { 0.00, 0.10, 0.20, 0.30 }  -- index = band = transit turns 1..4
+EFV_Config.SURCHARGE_BY_BAND         = { 0.00, 0.05, 0.10, 0.15 }  -- index = band = transit turns 1..4
 EFV_Config.BAND_THRESHOLDS_STANDARD  = { 10, 20, 35 }              -- hex distance upper bounds, bands 1..3, Standard map
 EFV_Config.STANDARD_MAP_WIDTH        = 84    -- SPIKES 3 row 1: DB Maps.GridWidth (Standard 84x54)
 EFV_Config.SPAWN_SEARCH_MAX_RING     = 5
@@ -303,8 +306,8 @@ end
 --   D.PURCHASE_MULTIPLIER          number = product of the two (4; SPIKES 3 row 5)
 --   D.SPEED_PCT                    integer percent (GameSpeeds.CostMultiplier; 100 = Standard)
 --   D.SPEED_SOURCE                 "GetGameSpeedType" | "GetValue" | "DEFAULT"
---   D.FEE_PCT                      { EXPEDITIONARY = 0, VOLUNTEER = 20, CS_EXPEDITIONARY = 0 }
---   D.SURCHARGE_PCT                { 0, 10, 20, 30 } (index = band)
+--   D.FEE_PCT                      { EXPEDITIONARY = 0, VOLUNTEER = 10, CS_EXPEDITIONARY = 0 }
+--   D.SURCHARGE_PCT                { 0, 5, 10, 15 } (index = band)
 --   D.MAP_WIDTH                    number (Map.GetGridSize width; 84 if unreadable)
 --   D.BAND_THRESHOLDS              { t1, t2, t3 } for this map (spec 4.2)
 --   D.HEAL_RESOURCE_MIN            number (GlobalParameters STRATEGIC_RESOURCE_

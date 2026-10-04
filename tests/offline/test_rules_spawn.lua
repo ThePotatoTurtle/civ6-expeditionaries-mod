@@ -359,7 +359,7 @@ end)
 -- ---------------------------------------------------------------------------
 -- Destination evaluation
 -- ---------------------------------------------------------------------------
-test("EFV_EvaluateSend: ally city, band 2, fee 36 (0.5.2 ruling), origin = nearest own city", function()
+test("EFV_EvaluateSend: ally city, band 2, fee 18 (2026-10-04 ruling), origin = nearest own city", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local u = H.unit(0, "UNIT_SWORDSMAN", 11, 10)
@@ -367,7 +367,7 @@ test("EFV_EvaluateSend: ally city, band 2, fee 36 (0.5.2 ruling), origin = neare
 	H.deq(reasons, {}); H.ok(ok)
 	H.eq(calc.origin, S.c0, "origin city")
 	H.eq(calc.distance, 12); H.eq(calc.band, 2); H.eq(calc.transit, 2)
-	H.eq(calc.fee, 36); H.eq(calc.duration, 20); H.eq(calc.basis, "ALLIANCE")
+	H.eq(calc.fee, 18); H.eq(calc.duration, 20); H.eq(calc.basis, "ALLIANCE")
 end)
 
 test("EFV_EvaluateSend: destination failures", function()
@@ -383,10 +383,10 @@ test("EFV_EvaluateSend: destination failures", function()
 	ok, r = EFV_EvaluateSend(0, u, 1, S.c1, "EXPEDITIONARY", store)
 	H.contains(r, "NOT_REVEALED")
 	FAKE.unrevealed[0] = nil
-	H.setGold(0, 35)
+	H.setGold(0, 17)
 	local calc
 	ok, r, calc = EFV_EvaluateSend(0, u, 1, S.c1, "EXPEDITIONARY", store)
-	H.deq(r, { "GOLD" }); H.eq(calc.fee, 36, "calc filled for disabled rows")
+	H.deq(r, { "GOLD" }); H.eq(calc.fee, 18, "calc filled for disabled rows")
 	H.setGold(0, 1000)
 	H.peace(3, 1)
 	ok, r = EFV_EvaluateSend(0, u, 1, S.c1, "EXPEDITIONARY", store)

@@ -109,20 +109,21 @@ test("UI: picker lists partner cities with fee/transit; disabled rows explain (n
 	H.len(rows, 3, "B's two cities + F's city")
 	local rb = RowFor(S.c1)
 	H.notnil(rb, "B's capital row")
-	H.eq(rb.RowLabel.text, EFV_UI_PlayerName(1) .. " - " .. EFV_CityName(S.c1) .. " - 12 tiles - 2 turns - 36 [ICON_Gold] - 20 turns")
+	H.eq(rb.RowLabel.text, EFV_UI_PlayerName(1) .. " - " .. EFV_CityName(S.c1) .. " - 12 tiles - 2 turns - 18 [ICON_Gold] - 20 turns")
 	H.ok(not rb.RowButton.disabled)
 	-- Not enough gold: rows disabled, tooltip shows the fee.
-	H.setGold(0, 20)
+	H.setGold(0, 10)
 	FAKE_UI.KeyTo(ctx.picker, Keys.VK_ESCAPE)
 	H.ok(ctx.picker.Controls.PickerRoot:IsHidden(), "ESC closes")
 	LuaEvents.EFV_OpenDestinationPicker(0, u:GetID(), "EXPEDITIONARY")
 	for _, r in ipairs(RowIM().list) do
-		-- 0.5.2 fee ruling: a band-1 row is free and stays enabled with 20 gold.
+		-- 0.5.2 fee ruling: a band-1 row is free and stays enabled with 10 gold
+		-- (the cheapest paid row costs 18 since the 2026-10-04 ruling).
 		local free = string.find(r.RowLabel.text, " - " .. Locale.Lookup("LOC_EFV_FEE_FREE") .. " - ", 1, true) ~= nil
 		H.eq(r.RowButton.disabled, not free, r.RowLabel.text)
 		if r == RowFor(S.c1) then
 			H.ok(r.RowButton.disabled)
-			H.ok(string.find(r.RowButton.tooltip, "36", 1, true), "GOLD reason shows the fee: " .. r.RowButton.tooltip)
+			H.ok(string.find(r.RowButton.tooltip, "18", 1, true), "GOLD reason shows the fee: " .. r.RowButton.tooltip)
 		end
 	end
 	-- No common war with B: the reason names B.
@@ -144,7 +145,7 @@ test("UI -> gameplay: confirm sends a flat EFV_Send (expectedFee = shown fee) th
 	row.RowButton:Click()
 	local popup = FAKE_UI.popups[#FAKE_UI.popups]
 	H.notnil(popup, "confirm dialog")
-	H.ok(string.find(popup.texts[1], Locale.Lookup("LOC_EFV_FEE_GOLD", 36), 1, true), "confirm repeats the fee")
+	H.ok(string.find(popup.texts[1], Locale.Lookup("LOC_EFV_FEE_GOLD", 18), 1, true), "confirm repeats the fee")
 	H.ok(not string.find(popup.texts[1], "{", 1, true), "all 7 CONFIRM_SEND args filled: " .. popup.texts[1])
 	popup.confirm()
 	H.ok(ctx.picker.Controls.PickerRoot:IsHidden(), "picker closes after confirm")
@@ -152,15 +153,15 @@ test("UI -> gameplay: confirm sends a flat EFV_Send (expectedFee = shown fee) th
 	H.eq(req.op, PlayerOperations.EXECUTE_SCRIPT)
 	local p = req.params
 	H.eq(p.OnStart, "EFV_Send"); H.eq(p.unitID, u:GetID()); H.eq(p.recipientID, 1)
-	H.eq(p.destX, S.c1.x); H.eq(p.destY, S.c1.y); H.eq(p.forceType, "EXPEDITIONARY"); H.eq(p.expectedFee, 36)
+	H.eq(p.destX, S.c1.x); H.eq(p.destY, S.c1.y); H.eq(p.forceType, "EXPEDITIONARY"); H.eq(p.expectedFee, 18)
 	for k, v in pairs(p) do
 		H.ok(type(v) == "number" or type(v) == "string", "flat param " .. k)
 	end
 	FAKE_UI.AsGameplay(function() H.request(req.pid, p) end)
 	local recs = H.records()
 	H.len(recs, 1, "gameplay accepted the UI request")
-	H.eq(recs[1].feePaid, 36, "shown fee == charged fee")
-	H.eq(H.gold(0), 964)
+	H.eq(recs[1].feePaid, 18, "shown fee == charged fee")
+	H.eq(H.gold(0), 982)
 	H.clean()
 end)
 

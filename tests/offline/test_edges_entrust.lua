@@ -30,7 +30,7 @@ test("recipient eliminated while OUTBOUND -> transit cancelled (RECIPIENT_GONE),
 	H.len(mine, 1)
 	H.eq(mine[1]:GetX(), 11); H.eq(mine[1]:GetY(), 10)
 	H.ok(H.hasLine("reason=RECIPIENT_GONE"))
-	H.eq(H.gold(0), 1000 - 36 + 18, "half the fee back")
+	H.eq(H.gold(0), 1000 - 18 + 9, "half the fee back")
 	H.clean()
 end)
 
@@ -109,14 +109,14 @@ end)
 -- ---------------------------------------------------------------------------
 -- Volunteers: send and recall
 -- ---------------------------------------------------------------------------
-test("Volunteer send: sender keeps ownership, fee 30% (20% + band 2 surcharge 10%, 0.5.2 ruling), no duration", function()
+test("Volunteer send: sender keeps ownership, fee 15% (10% + band 2 surcharge 5%, 2026-10-04 ruling), no duration", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local u = H.unit(0, "UNIT_SWORDSMAN", 11, 10)
 	H.send(0, u, 1, S.c1, "VOLUNTEER")
 	local r = H.records()[1]
 	H.notnil(r)
-	H.eq(H.gold(0), 1000 - 108); H.isnil(r.durationTurns); H.eq(r.accessBasis, "ALLIANCE")
+	H.eq(H.gold(0), 1000 - 54); H.isnil(r.durationTurns); H.eq(r.accessBasis, "ALLIANCE")
 	H.turns(2)
 	r = Only()
 	H.eq(r.state, "DEPLOYED"); H.eq(r.onMapPlayerID, 0, "Volunteers stay the sender's")

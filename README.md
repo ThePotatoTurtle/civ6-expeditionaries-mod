@@ -10,8 +10,8 @@ Version 1.0.3.
 
 | Option | Who controls the unit | How long | Cost |
 |---|---|---|---|
-| Expeditionary Force | the partner (ally, teammate or declared friend) | 20 turns, then it comes home | free for a 1-turn trip, otherwise 10 to 30% of the unit's gold price |
-| Volunteers | you | no limit; recall after 10 turns | 20 to 50% of the unit's gold price |
+| Expeditionary Force | the partner (ally, teammate or declared friend) | 20 turns, then it comes home | free for a 1-turn trip, otherwise 5 to 15% of the unit's gold price |
+| Volunteers | you | no limit; recall after 10 turns | 10 to 25% of the unit's gold price |
 | City-State Expeditionary | a city-state you have met | 10 turns, then it comes home from wherever it is | same as Expeditionary |
 | Entrust | the partner, for good | permanent | nothing |
 
@@ -109,10 +109,10 @@ The fee depends on the unit's gold price and the travel time. The gold price is 
 
 | Travel time | 1 turn | 2 turns | 3 turns | 4 turns |
 |---|---|---|---|---|
-| Expeditionary and City-State | free | 10% | 20% | 30% |
-| Volunteers | 20% | 30% | 40% | 50% |
-| Swordsman at Standard speed, Expeditionary | free | 36 gold | 72 gold | 108 gold |
-| Swordsman at Standard speed, Volunteers | 72 gold | 108 gold | 144 gold | 180 gold |
+| Expeditionary and City-State | free | 5% | 10% | 15% |
+| Volunteers | 10% | 15% | 20% | 25% |
+| Swordsman at Standard speed, Expeditionary | free | 18 gold | 36 gold | 54 gold |
+| Swordsman at Standard speed, Volunteers | 36 gold | 54 gold | 72 gold | 90 gold |
 
 You pay once, and nobody receives the gold. The trip home is free. While the unit travels, in either direction, you keep paying its normal gold and strategic resource upkeep. Your treasury and stockpile never go below 0.
 
@@ -188,7 +188,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - A host who declares war on you can use your lent units until the next turn starts.
 
 ## Changelog
-- Unreleased: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land.
+- Unreleased: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land. Send fees are halved: Expeditionary and City-State units are still free for a 1-turn trip, then cost 5, 10 or 15% of the unit's gold price; Volunteers cost 10 to 25%.
 - 1.0.3: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so. Entrust no longer needs a partner at war with the old owner when that owner was a city-state or has been knocked out of the game, so a city-state or a civ's last city can be entrusted now. In the tracker, units lent to you show as Inbound while on their way and Departed once they head home.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.

@@ -1,7 +1,8 @@
 -- @harness native
--- Fee ruling 0.5.2 (designer): Expeditionary and City-State Expeditionary
--- pay 0% / 10% / 20% / 30% of the base gold cost for bands 1-4 (band 1 is
--- free), Volunteers 20% / 30% / 40% / 50%. A fee of 0 must work end to end:
+-- Fee ruling 0.5.2 (designer), halved by the 2026-10-04 ruling (1.0.4):
+-- Expeditionary and City-State Expeditionary pay 0% / 5% / 10% / 15% of the
+-- base gold cost for bands 1-4 (band 1 is free), Volunteers 10% / 15% / 20%
+-- / 25%. A fee of 0 must work end to end:
 -- the rules never report GOLD, the DV5 expectedFee check accepts 0, no gold
 -- is deducted, the picker shows "Free", the confirm dialog reads "Fee: Free"
 -- and the send is accepted. Scenario: H.baseScenario plus a city of the ally
@@ -35,7 +36,7 @@ test("fee 0: band-1 Expeditionary send with 0 gold is accepted; no gold taken; f
 	H.clean()
 end)
 
-test("fee 0: a City-State Expeditionary to a band-1 city-state is free too; a Volunteer to the same city pays 20%", function()
+test("fee 0: a City-State Expeditionary to a band-1 city-state is free too; a Volunteer to the same city pays 10%", function()
 	local S = Scenario()
 	local cs = H.city(4, 14, 16, { name = "LOC_CITY_CS_NEAR" })
 	H.loadEFV()
@@ -44,8 +45,8 @@ test("fee 0: a City-State Expeditionary to a band-1 city-state is free too; a Vo
 	local okC, rC, cC = EFV_EvaluateSend(0, u, 4, cs, "CS_EXPEDITIONARY", store)
 	H.ok(okC, table.concat(rC or {}, ",")); H.eq(cC.band, 1); H.eq(cC.fee, 0)
 	local okV, rV, cV = EFV_EvaluateSend(0, u, 1, S.near, "VOLUNTEER", store)
-	H.ok(okV, table.concat(rV or {}, ",")); H.eq(cV.fee, 72, "Volunteer band 1 = 20% of 360")
-	H.setGold(0, 50)
+	H.ok(okV, table.concat(rV or {}, ",")); H.eq(cV.fee, 36, "Volunteer band 1 = 10% of 360")
+	H.setGold(0, 20)
 	local _, rV2 = EFV_EvaluateSend(0, u, 1, S.near, "VOLUNTEER", store)
 	H.contains(rV2, "GOLD", "the Volunteer fee is still charged")
 	local okC2 = EFV_EvaluateSend(0, u, 4, cs, "CS_EXPEDITIONARY", store)

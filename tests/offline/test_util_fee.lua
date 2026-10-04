@@ -44,9 +44,12 @@ test("Derive: purchase multiplier, speed and percents", function()
 	H.eq(D.PURCHASE_MULTIPLIER, 4)
 	H.eq(D.SPEED_PCT, 100)
 	H.eq(D.SPEED_SOURCE, "GetGameSpeedType")
-	-- 0.5.2 fee ruling: EXP / CS 0% + surcharge, VOL 20% + surcharge.
-	H.deq(D.FEE_PCT, { EXPEDITIONARY = 0, VOLUNTEER = 20, CS_EXPEDITIONARY = 0 })
-	H.deq(D.SURCHARGE_PCT, { 0, 10, 20, 30 })
+	-- 2026-10-04 fee ruling (1.0.4, halves 0.5.2): EXP / CS 0% + surcharge,
+	-- VOL 10% + surcharge. ToPct keeps the 0.05 steps exact integers.
+	H.deq(D.FEE_PCT, { EXPEDITIONARY = 0, VOLUNTEER = 10, CS_EXPEDITIONARY = 0 })
+	H.deq(D.SURCHARGE_PCT, { 0, 5, 10, 15 })
+	for _, v in pairs(D.FEE_PCT) do H.eq(v, math.floor(v), "integer FEE_PCT") end
+	for _, v in ipairs(D.SURCHARGE_PCT) do H.eq(v, math.floor(v), "integer SURCHARGE_PCT") end
 end)
 
 test("Derive: speed falls back to GetValue, then to Standard with an error", function()
@@ -68,20 +71,20 @@ test("Derive: no speed API at all -> 100 and an ERROR line", function()
 end, { allowErrors = true })
 
 -- Worked table (Standard speed; Swordsman base 360, Galley 260, Warrior 160)
--- with the 0.5.2 fee ruling: EXP / CS 0% / 10% / 20% / 30% (band 1 free),
--- VOL 20% / 30% / 40% / 50%.
+-- with the 2026-10-04 fee ruling (1.0.4): EXP / CS 0% / 5% / 10% / 15%
+-- (band 1 free), VOL 10% / 15% / 20% / 25%.
 local FEES = {
-	{ "UNIT_SWORDSMAN", "EXPEDITIONARY", { 0, 36, 72, 108 } },
-	{ "UNIT_SWORDSMAN", "CS_EXPEDITIONARY", { 0, 36, 72, 108 } },
-	{ "UNIT_SWORDSMAN", "VOLUNTEER", { 72, 108, 144, 180 } },
-	{ "UNIT_GALLEY", "EXPEDITIONARY", { 0, 26, 52, 78 } },
-	{ "UNIT_GALLEY", "CS_EXPEDITIONARY", { 0, 26, 52, 78 } },
-	{ "UNIT_GALLEY", "VOLUNTEER", { 52, 78, 104, 130 } },
-	{ "UNIT_WARRIOR", "EXPEDITIONARY", { 0, 16, 32, 48 } },
-	{ "UNIT_WARRIOR", "VOLUNTEER", { 32, 48, 64, 80 } },
+	{ "UNIT_SWORDSMAN", "EXPEDITIONARY", { 0, 18, 36, 54 } },
+	{ "UNIT_SWORDSMAN", "CS_EXPEDITIONARY", { 0, 18, 36, 54 } },
+	{ "UNIT_SWORDSMAN", "VOLUNTEER", { 36, 54, 72, 90 } },
+	{ "UNIT_GALLEY", "EXPEDITIONARY", { 0, 13, 26, 39 } },
+	{ "UNIT_GALLEY", "CS_EXPEDITIONARY", { 0, 13, 26, 39 } },
+	{ "UNIT_GALLEY", "VOLUNTEER", { 26, 39, 52, 65 } },
+	{ "UNIT_WARRIOR", "EXPEDITIONARY", { 0, 8, 16, 24 } },
+	{ "UNIT_WARRIOR", "VOLUNTEER", { 16, 24, 32, 40 } },
 }
 
-test("EFV_Fee: worked table (Standard speed, 0.5.2 fee ruling; band 1 free for EXP / CS)", function()
+test("EFV_Fee: worked table (Standard speed, 2026-10-04 fee ruling; band 1 free for EXP / CS)", function()
 	H.world{}
 	H.loadEFV()
 	for _, f in ipairs(FEES) do
@@ -103,10 +106,10 @@ end)
 -- Other speeds: fee = ceil(Cost * speed * 4 * pct / 10000); Quick (67) checks
 -- the ceiling. { speed, EXP / CS bands 1-4, VOL bands 1-4 } for the Swordsman.
 local SPEEDS = {
-	{ "GAMESPEED_MARATHON", { 0, 108, 216, 324 }, { 216, 324, 432, 540 } },
-	{ "GAMESPEED_EPIC", { 0, 54, 108, 162 }, { 108, 162, 216, 270 } },
-	{ "GAMESPEED_QUICK", { 0, 25, 49, 73 }, { 49, 73, 97, 121 } },   -- 24.12 / 48.24 / 72.36 / 96.48 / 120.6 rounded up
-	{ "GAMESPEED_ONLINE", { 0, 18, 36, 54 }, { 36, 54, 72, 90 } },
+	{ "GAMESPEED_MARATHON", { 0, 54, 108, 162 }, { 108, 162, 216, 270 } },
+	{ "GAMESPEED_EPIC", { 0, 27, 54, 81 }, { 54, 81, 108, 135 } },
+	{ "GAMESPEED_QUICK", { 0, 13, 25, 37 }, { 25, 37, 49, 61 } },   -- 12.06 / 24.12 / 36.18 / 48.24 / 60.3 rounded up
+	{ "GAMESPEED_ONLINE", { 0, 9, 18, 27 }, { 18, 27, 36, 45 } },
 }
 for _, sp in ipairs(SPEEDS) do
 	test("EFV_Fee Swordsman EXP / CS / VOL at " .. sp[1], function()
@@ -128,10 +131,10 @@ test("EFV_Fee is an integer (no float artefacts) for every trainable combat unit
 			for band = 1, 4 do
 				local fee = EFV_Fee(row.UnitType, "VOLUNTEER", band)
 				H.eq(fee, math.floor(fee), row.UnitType)
-				local n = row.Cost * 67 * 4 * (10 + band * 10)   -- VOL 20% + surcharge (band - 1) * 10%
+				local n = row.Cost * 67 * 4 * (5 + band * 5)   -- VOL 10% + surcharge (band - 1) * 5%
 				H.eq(fee, math.ceil(n / 10000 - 1e-9), row.UnitType .. " band " .. band)
 				local e = EFV_Fee(row.UnitType, "EXPEDITIONARY", band)
-				H.eq(e, math.ceil(row.Cost * 67 * 4 * (band - 1) * 10 / 10000 - 1e-9), row.UnitType .. " EXP band " .. band)
+				H.eq(e, math.ceil(row.Cost * 67 * 4 * (band - 1) * 5 / 10000 - 1e-9), row.UnitType .. " EXP band " .. band)
 			end
 		end
 	end

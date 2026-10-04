@@ -20,7 +20,7 @@
 
 local N = function(name) return "EFV_NOTIF_" .. name end
 local CS = "CS_EXPEDITIONARY"
-local FEE_EXP = { 0, 36, 72, 108 }   -- Swordsman, Standard speed (0.5.2 fee ruling: band 1 free)
+local FEE_EXP = { 0, 18, 36, 54 }   -- Swordsman, Standard speed (2026-10-04 fee ruling: band 1 free)
 
 local function Only() local r = H.records(); H.len(r, 1, "exactly one record"); return r[1] end
 local function Rec(id) return EFV_Records.Get(EFV_Records.Load(), id) end

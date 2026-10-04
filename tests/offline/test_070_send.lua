@@ -17,7 +17,7 @@
 -- "Armagh" (Armagh (50,20)).
 
 local EXP, VOL, CS = "EXPEDITIONARY", "VOLUNTEER", "CS_EXPEDITIONARY"
-local FEE_EXP = { 0, 36, 72, 108 }   -- Swordsman, Standard speed (0.5.2 fee ruling)
+local FEE_EXP = { 0, 18, 36, 54 }   -- Swordsman, Standard speed (2026-10-04 fee ruling)
 local EM, EN = "\226\128\148", "\226\128\147"
 
 local function Scenario(opts)
@@ -100,17 +100,17 @@ test("item 1: EFV_UI_PickerRowText formats one line per row (EXP, band 1, VOL, C
 	local function Row(pid, city, calc)
 		return { recipientID = pid, cityID = city.id, destX = city.x, destY = city.y, calc = calc }
 	end
-	H.eq(EFV_UI_PickerRowText(Row(1, S.c1, { distance = 34, transit = 4, fee = 108, duration = 20 }), EXP),
-		"Rome - Roma - 34 tiles - 4 turns - 108 [ICON_Gold] - 20 turns")
+	H.eq(EFV_UI_PickerRowText(Row(1, S.c1, { distance = 34, transit = 4, fee = 54, duration = 20 }), EXP),
+		"Rome - Roma - 34 tiles - 4 turns - 54 [ICON_Gold] - 20 turns")
 	H.eq(EFV_UI_PickerRowText(Row(1, S.c1, { distance = 1, transit = 1, fee = 0, duration = 20 }), EXP),
 		"Rome - Roma - 1 tile - 1 turn - Free - 20 turns", "band 1: singular words, Free")
 	H.eq(EFV_UI_PickerRowText(Row(1, S.c1b, { distance = 8, transit = 1, fee = 45, duration = nil }), VOL),
 		"Rome - Antium - 8 tiles - 1 turn - 45 [ICON_Gold] - Unlimited", "Volunteers serve without limit")
-	H.eq(EFV_UI_PickerRowText(Row(5, S.c5, { distance = 11, transit = 2, fee = 36, duration = 10 }), CS),
-		"Armagh - 11 tiles - 2 turns - 36 [ICON_Gold] - 10 turns", "city-state name not repeated")
+	H.eq(EFV_UI_PickerRowText(Row(5, S.c5, { distance = 11, transit = 2, fee = 18, duration = 10 }), CS),
+		"Armagh - 11 tiles - 2 turns - 18 [ICON_Gold] - 10 turns", "city-state name not repeated")
 	local obuasi = H.city(4, 34, 24, { name = "Obuasi", radius = 1 })
-	H.eq(EFV_UI_PickerRowText(Row(4, obuasi, { distance = 20, transit = 2, fee = 36, duration = 10 }), CS),
-		"Kumasi - Obuasi - 20 tiles - 2 turns - 36 [ICON_Gold] - 10 turns", "a second, differently named city stays")
+	H.eq(EFV_UI_PickerRowText(Row(4, obuasi, { distance = 20, transit = 2, fee = 18, duration = 10 }), CS),
+		"Kumasi - Obuasi - 20 tiles - 2 turns - 18 [ICON_Gold] - 10 turns", "a second, differently named city stays")
 	H.eq(EFV_UI_PickerRowText(Row(1, S.c1, nil), EXP), "Rome - Roma - 20 turns", "no calc: service only")
 	H.eq(EFV_UI_PickerRowText(Row(1, S.c1, nil), VOL), "Rome - Roma - Unlimited")
 	H.eq(EFV_UI_PickerRowText(Row(4, S.c4, nil), CS), "Kumasi - 10 turns")
@@ -140,7 +140,7 @@ test("item 1: picker end to end: HeaderLabel, one RowLabel per row, no LOC_ and 
 	H.len(rows, 3, "Roma, Antium, Mbanza Kongo")
 	local d = H.dist(S.c0, S.c1)
 	H.eq(d, 12)
-	H.eq(RowFor(S.c1).RowLabel.text, Line({ "Rome", "Roma", "12 tiles", "2 turns", "36 [ICON_Gold]", "20 turns" }))
+	H.eq(RowFor(S.c1).RowLabel.text, Line({ "Rome", "Roma", "12 tiles", "2 turns", "18 [ICON_Gold]", "20 turns" }))
 	for _, r in ipairs(rows) do
 		NoLocNoDash(r.RowLabel.text, "row")
 		H.ok(not r.RowButton.disabled, r.RowLabel.text)

@@ -163,26 +163,28 @@ end)
 -- ---------------------------------------------------------------------------
 -- Fee column and send
 -- ---------------------------------------------------------------------------
-test("fee column: Volunteer 20% + band surcharge (Swordsman 72/108/144/180, 0.5.2 ruling); picker rows and the charge use it", function()
+test("fee column: Volunteer 10% + band surcharge (Swordsman 36/54/72/90, 2026-10-04 ruling); picker rows and the charge use it", function()
 	local S = H.baseScenario()
 	H.loadEFV()
-	local vol, exp = {}, {}
+	local vol, exp, cs = {}, {}, {}
 	for b = 1, 4 do
 		vol[b] = EFV_Fee("UNIT_SWORDSMAN", "VOLUNTEER", b)
 		exp[b] = EFV_Fee("UNIT_SWORDSMAN", "EXPEDITIONARY", b)
+		cs[b] = EFV_Fee("UNIT_SWORDSMAN", "CS_EXPEDITIONARY", b)
 	end
-	H.deq(vol, { 72, 108, 144, 180 }, "P3.4 Volunteer column")
-	H.deq(exp, { 0, 36, 72, 108 }, "Expeditionary column for contrast (band 1 free)")
+	H.deq(vol, { 36, 54, 72, 90 }, "P3.4 Volunteer column (10/15/20/25% of 360)")
+	H.deq(exp, { 0, 18, 36, 54 }, "Expeditionary column for contrast (band 1 free, then 5/10/15%)")
+	H.deq(cs, { 0, 18, 36, 54 }, "City-State Expeditionary column = Expeditionary")
 	local u = H.unit(0, "UNIT_SWORDSMAN", 11, 10)
 	local rows = EFV_DestinationRows(0, u, "VOLUNTEER", EFV_Records.Load())
 	local row = nil
 	for _, r in ipairs(rows) do
 		if r.cityID == S.c1.id then row = r end
 	end
-	H.notnil(row); H.ok(row.ok); H.eq(row.calc.band, 2); H.eq(row.calc.fee, 108); H.isnil(row.calc.duration)
+	H.notnil(row); H.ok(row.ok); H.eq(row.calc.band, 2); H.eq(row.calc.fee, 54); H.isnil(row.calc.duration)
 	H.send(0, u, 1, S.c1, "VOLUNTEER", row.calc.fee)
-	H.eq(H.gold(0), 1000 - 108)
-	H.eq(H.record().feePaid, 108)
+	H.eq(H.gold(0), 1000 - 54)
+	H.eq(H.record().feePaid, 54)
 	H.clean()
 end)
 

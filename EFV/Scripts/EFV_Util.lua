@@ -442,8 +442,8 @@ end
 -- Integer math: n = Cost * SPEED_PCT * PURCHASE_MULTIPLIER
 -- * (FEE_PCT[forceType] + SURCHARGE_PCT[band]); fee = floor((n + 9999) / 10000)
 -- (= ceil(n / 10000), spec 5.2; no float artefacts). Swordsman at Standard
--- (base 360 gold), fees of the 0.5.2 ruling: EXP/CS 0/36/72/108 (band 1
--- free: 0 is a valid fee), VOL 72/108/144/180.
+-- (base 360 gold), fees of the 2026-10-04 ruling: EXP/CS 0/18/36/54 (band
+-- 1 free: 0 is a valid fee), VOL 36/54/72/90.
 -- Params:  unitType string (or index), forceType EFV_Config.FT_*, band 1..4.
 -- Returns: integer gold, or nil for an unknown type / force type / band.
 -- PLAN 2.2; spec 5.2. APIs: A51.
