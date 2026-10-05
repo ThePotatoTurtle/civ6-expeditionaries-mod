@@ -27,6 +27,13 @@ include("EFV_Config")
 -- EFV:GLOBALS EFV_DestinationRows EFV_PartnerBasis EFV_VolunteerBasis EFV_UI_TrackerRows EFV_UI_EntrustState
 
 local PREFIX = "[EFV][Dev][UI]"
+-- Dev-tools version and the VEF build they are made for (EFV_Dev 1.0.4.1;
+-- keep equal to EFV_Dev.VERSION / EFV_Dev.FOR_EFV in EFV_Dev_Gameplay.lua,
+-- test_dev_mod checks it). The panel title shows both and the VEF version
+-- that is really loaded (EFV_Config.VERSION from VEF's own files), so a
+-- tester sees at a glance whether the local copy or the Workshop copy runs.
+local DEV_VERSION = "1.0.4.1"
+local DEV_FOR_EFV = "1.0.4"
 local m_ButtonIM = InstanceManager:new("DevButtonInstance", "Button", Controls.ButtonStack)
 local m_HeaderIM = InstanceManager:new("DevHeaderInstance", "Header", Controls.ButtonStack)
 local m_Targets = {}
@@ -164,6 +171,16 @@ local function RecordText(unit)
 end
 
 local m_EligStatus = nil     -- short T1 / T2 result shown in the panel
+
+-- Title line: "VEF Dev 1.0.4.1 | VEF 1.0.4  (Ctrl+Shift+D)", or a warning
+-- when the loaded VEF is not the build these tools are made for.
+local function TitleText()
+	local v = (EFV_Config ~= nil) and EFV_Config.VERSION or nil
+	if v ~= DEV_FOR_EFV then
+		return "VEF Dev " .. DEV_VERSION .. " | WRONG VEF " .. Str(v) .. ", needs " .. DEV_FOR_EFV
+	end
+	return "VEF Dev " .. DEV_VERSION .. " | VEF " .. Str(v) .. "  (Ctrl+Shift+D)"
+end
 
 local function RefreshInfo()
 	local s = SessionText() .. " | Local " .. PlayerName(LocalID()) .. " | turn " .. Str(Game.GetCurrentGameTurn())
@@ -1413,7 +1430,7 @@ local BUTTONS = {
 	{ label = "Shot 3 Tracker",         shot = "shot3" },
 	{ label = "Shot 4 Entrust",         shot = "shot4" },
 	{ label = "Shot 5 Mutiny",          shot = "shot5" },
-	{ header = "Test sessions (EFV/TESTING_1.0.3.md, older: TESTING_FINAL.md): start a NEW game; one click sets up each step" },
+	{ header = "Test sessions (EFV/TESTING_1.0.4.md, older: TESTING_FINAL.md): start a NEW game; one click sets up each step" },
 	{ label = "S0 Setup session",       scn = "scn_setup" },
 	{ label = "S1 Arrive next turn",    scn = "scn_arrive" },
 	{ label = "S2 Expire CS unit (off its land)", scn = "scn_expire_cs" },
@@ -1434,6 +1451,8 @@ local BUTTONS = {
 	{ label = "S17 Tracker labels",     shot = "scn_labels" },
 	{ label = "S18 Entrust city-state", scn = "scn_entrust_cs" },
 	{ label = "S19 Entrust major",      scn = "scn_entrust_major" },
+	{ label = "S20 War sends home",     scn = "scn_war_home" },
+	{ label = "S21 Veteran home",       scn = "scn_vet_home" },
 	{ label = "V Veteran spike",        ui = "VsStart" },
 	{ label = "T1 Volunteer partners",  elig = "elig_t1", test = "T1" },
 	{ label = "T2 Shared enemy",        elig = "elig_t2", test = "T2" },
@@ -1589,6 +1608,7 @@ local function Initialize()
 	Controls.TargetPrev:RegisterCallback(Mouse.eLClick, OnTargetPrev)
 	Controls.TargetNext:RegisterCallback(Mouse.eLClick, OnTargetNext)
 	Controls.TypeEdit:SetText("UNIT_SWORDSMAN")
+	Controls.TitleLabel:SetText(TitleText())
 	ContextPtr:SetUpdate(OnUpdate)
 	BuildButtons()
 	Subscribe("Events.LoadGameViewStateDone", function() return Events.LoadGameViewStateDone end, AttachLaunchButton)
@@ -1602,7 +1622,7 @@ local function Initialize()
 	Subscribe("Events.UnitRemovedFromMap (audit)", function() return Events.UnitRemovedFromMap end, function() ScheduleAudit("unit removed") end)
 	Subscribe("Events.UnitKilledInCombat (audit)", function() return Events.UnitKilledInCombat end, function() ScheduleAudit("unit killed") end)
 	RebuildTargets()
-	Log("ready (Ctrl+Shift+D); EFV_UIShared loaded=" .. tostring(m_UIShared and EFV_UI_ReadStore ~= nil))
+	Log("ready (Ctrl+Shift+D); EFV_UIShared loaded=" .. tostring(m_UIShared and EFV_UI_ReadStore ~= nil) .. "; " .. TitleText())
 end
 
 Initialize()

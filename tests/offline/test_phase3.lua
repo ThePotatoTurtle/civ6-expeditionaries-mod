@@ -76,14 +76,14 @@ end
 -- ---------------------------------------------------------------------------
 -- Release and eligibility (D2, "D2 reconfirmed"; war overrides everything)
 -- ---------------------------------------------------------------------------
-test("release: Volunteers and Recall are released (FLAG_RELEASED), version 1.0.3", function()
+test("release: Volunteers and Recall are released (FLAG_RELEASED), version 1.0.4", function()
 	H.baseScenario()
 	H.loadEFV()
 	H.eq(EFV_Config.FLAG_RELEASED.VOLUNTEER, true)
 	H.eq(EFV_Config.FLAG_RELEASED.RECALL, true)
-	H.eq(EFV_Config.VERSION, "1.0.3")
+	H.eq(EFV_Config.VERSION, "1.0.4")
 	local mi = __py_read("EFV/EFV.modinfo")
-	H.ok(string.find(mi, "<en_US>Volunteers &amp; Expeditionary Forces v1.0.3</en_US>", 1, true) ~= nil,
+	H.ok(string.find(mi, "<en_US>Volunteers &amp; Expeditionary Forces v1.0.4</en_US>", 1, true) ~= nil,
 		"mod title = the designer's name")
 end)
 

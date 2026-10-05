@@ -1788,3 +1788,109 @@ test("1.0.3.2 panel: the new session buttons exist", function()
 		H.notnil(FAKE_UI.FindButton(label), label)
 	end
 end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.4.1: the VEF 1.0.4 session (EFV/TESTING_1.0.4.md): S20 war
+-- sends lent units home, S21 veteran home with three promotions.
+-- ---------------------------------------------------------------------------
+test("1.0.4.1 S20: VEF-LENT at B's capital, VEF-BORROWED at yours, friendship ended, war with B; next turn both go home", function()
+	local S = Setup()
+	Dev("scn_war_home", { stamp = 20 })
+	H.ok(CheckLine("WAR_HOME", "INFO"))
+	local lent, borrowed = Named(1, "VEF-LENT"), Named(0, "VEF-BORROWED")
+	H.notnil(lent, "your Swordsman, controlled by B"); H.notnil(borrowed, "B's Swordsman, controlled by you")
+	H.eq(Map.GetPlot(lent.x, lent.y):GetOwner(), 1, "on B's land"); H.ok(H.dist(lent, S.c1) <= 2, "next to B's capital")
+	H.eq(Map.GetPlot(borrowed.x, borrowed.y):GetOwner(), 0, "on your land"); H.ok(H.dist(borrowed, S.c0) <= 2)
+	H.eq(lent:GetMovesRemaining(), 0, "held until the next turn start")
+	local d0 = Players[0]:GetDiplomacy()
+	H.ok(not d0:HasDeclaredFriendship(1), "friendship ended")
+	H.ok(d0:IsAtWarWith(1), "at war with B")
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.focus.stamp, 20); H.eq(st.focus.x, lent.x); H.eq(st.focus.y, lent.y)
+	local recL = Recs(function(r) return r.senderID == 0 end)[1]
+	local recB = Recs(function(r) return r.senderID == 1 end)[1]
+	H.notnil(recL); H.notnil(recB)
+	for _, r in ipairs({ recL, recB }) do
+		H.eq(r.forceType, "EXPEDITIONARY"); H.eq(r.state, "DEPLOYED"); H.eq(r.durationTurns, EFV_Config.EXPEDITIONARY_DURATION)
+	end
+	H.eq(recL.onMapPlayerID, 1); H.eq(recL.onMapUnitID, lent.id); H.eq(recL.recipientID, 1)
+	H.eq(recB.onMapPlayerID, 0); H.eq(recB.onMapUnitID, borrowed.id); H.eq(recB.recipientID, 0)
+	H.endTurn()
+	for _, id in ipairs({ recL.id, recB.id }) do
+		local r = EFV_Records.Get(EFV_Records.Load(), id)
+		H.notnil(r, "record kept for the trip home")
+		H.eq(r.state, "RETURNING"); H.eq(r.returnReason, "WAR")
+		H.ok(H.hasLine("[War] sent home id=" .. id))
+	end
+	H.ok(not H.unitAlive(lent), "VEF-LENT gone from B's land"); H.ok(not H.unitAlive(borrowed), "VEF-BORROWED gone from yours")
+	H.isnil(Named(0, "VEF-LENT"), "not switched to you in place")
+	H.len(H.notifs(0, "EFV_NOTIF_RETURNING"), 1, "you: Unit Coming Home (VEF-LENT)")
+	H.len(H.notifs(0, "EFV_NOTIF_REVERTED"), 1, "you: Lent Unit Gone Home (VEF-BORROWED)")
+	Dev("scn_war_home")
+	H.ok(CheckLine("WAR_HOME", "CHECK"), "a second press: already at war")
+	H.ok(H.hasLine("you are already at war with B"))
+	H.len(H.records(), 2, "nothing new")
+	H.clean()
+end)
+
+test("1.0.4.1 S21: a 3-promotion Swordsman comes home from F; all three promotions in the arrival turn, level 4, XP 100/150, 0 moves", function()
+	local S = Setup({ routeB = true })
+	Dev("scn_vet_home", { stamp = 21 })
+	H.ok(CheckLine("VET_HOME", "INFO"))
+	local r = H.records()[1]
+	H.eq(r.state, "RETURNING"); H.eq(r.forceType, "EXPEDITIONARY"); H.eq(r.senderID, 0); H.eq(r.recipientID, 2)
+	H.eq(r.arrivalTurn, FAKE.turn + 1); H.eq(r.returnX, S.c0.x); H.eq(r.returnY, S.c0.y)
+	H.eq(r.unitType, "UNIT_SWORDSMAN"); H.eq(r.veteranName, "VEF-VETERAN")
+	H.eq(r.level, 4); H.eq(r.experience, 100); H.eq(r.xpNext, 150); H.eq(r.damage, 0)
+	H.deq(r.promotions, { "PROMOTION_BATTLECRY", "PROMOTION_TORTOISE", "PROMOTION_COMMANDO" })
+	H.eq(H.prop("EFV_DEV_SCN").focus.stamp, 21)
+	H.endTurn()
+	local t1 = FAKE.turn
+	H.len(H.records(), 0, "arrived")
+	local u = Named(0, "VEF-VETERAN")
+	H.notnil(u, "home")
+	H.ok(H.dist(u, S.c0) <= 5, "next to your capital")
+	include("fake_ui")
+	FAKE_UI.Enable()
+	FAKE_UI.promoteEndsTurn = true
+	local vet = FAKE_UI.LoadContext("EFV/UI/EFV_VetRestore.lua")
+	Pump({ vet }, 16)
+	H.eq(FAKE.turn, t1, "still the arrival turn")
+	H.deq(H.promotionTypes(u), { "PROMOTION_BATTLECRY", "PROMOTION_COMMANDO", "PROMOTION_TORTOISE" }, "all three back")
+	H.eq(u:GetExperience():GetLevel(), 4, "level kept")
+	H.eq(u:GetExperience():GetExperiencePoints(), 100); H.eq(u:GetExperience():GetExperienceForNextLevel(), 150)
+	H.eq(u:GetMovesRemaining(), 0, "0 moves on the arrival turn")
+	H.ok(#H.lines("[Vet] refill id=") == 2, "a refill after each promotion but the last")
+	FAKE_UI.AsGameplay(function() H.endTurn() end)
+	H.eq(u:GetMovesRemaining(), u:GetMaxMoves(), "next turn: full moves")
+	H.clean()
+end)
+
+test("1.0.4.1 panel: S20 and S21 send their scenario requests; the header names TESTING_1.0.4.md", function()
+	Setup()
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	for _, def in ipairs({ { "S20 War sends home", "scn_war_home" }, { "S21 Veteran home", "scn_vet_home" } }) do
+		local b = FAKE_UI.FindButton(def[1])
+		H.notnil(b, def[1])
+		b:Click()
+		local p = FAKE_UI.requests[#FAKE_UI.requests].params
+		H.eq(p.cmd, def[2]); H.notnil(p.stamp, "stamped like every scenario button")
+	end
+	H.ok(string.find(__py_read("EFV_Dev/UI/EFV_Dev_Panel.lua"), "Test sessions (EFV/TESTING_1.0.4.md", 1, true) ~= nil)
+end)
+
+test("1.0.4.1 panel title: dev tools and loaded VEF version; a VEF build other than FOR_EFV is named as wrong", function()
+	FreshBoot()
+	local src = __py_read("EFV_Dev/UI/EFV_Dev_Panel.lua")
+	H.ok(string.find(src, 'local DEV_VERSION = "' .. EFV_Dev.VERSION .. '"', 1, true) ~= nil, "panel DEV_VERSION = EFV_Dev.VERSION")
+	H.ok(string.find(src, 'local DEV_FOR_EFV = "' .. EFV_Dev.FOR_EFV .. '"', 1, true) ~= nil, "panel DEV_FOR_EFV = EFV_Dev.FOR_EFV")
+	local panel = PanelUI()
+	H.eq(panel.Controls.TitleLabel:GetText(), "VEF Dev " .. EFV_Dev.VERSION .. " | VEF " .. EFV_Config.VERSION .. "  (Ctrl+Shift+D)")
+	local real = EFV_Config.VERSION
+	EFV_Config.VERSION = "1.0.3"
+	local old = FAKE_UI.LoadContext("EFV_Dev/UI/EFV_Dev_Panel.lua")
+	EFV_Config.VERSION = real
+	local t = old.Controls.TitleLabel:GetText()
+	H.ok(string.find(t, "WRONG VEF", 1, true) ~= nil, "mismatch shown: " .. tostring(t))
+end)

@@ -8,7 +8,11 @@
   -DevOnly:    checks and installs ONLY EFV_Dev\ (the dev tools), for testing against VEF from the Steam
                Workshop: <Mods>\EFV is not touched. Warns when a local <Mods>\EFV exists (it has the same
                mod id as the Workshop VEF: remove it so the game loads the Workshop copy).
-  Installing refuses to run while Civilization VI is running (the game locks and caches mod files).
+  -Uninstall:  removes ONLY the local copy of VEF (<Mods>\EFV) after a test of an unreleased build;
+               <Mods>\EFV_Dev stays. Resubscribe to VEF on the Steam Workshop afterwards.
+  Installing and -Uninstall refuse to run while Civilization VI is running (the game locks and caches
+  mod files). Installing EFV\ warns when VEF from the Steam Workshop is still subscribed ($WorkshopDir):
+  both copies have the same mod id, so unsubscribe from the Workshop item while testing a local build.
   -Watch:      after installing, tails Lua.log live, filtered to EFV lines and Lua errors.
                Start it after the game's main menu is up: the game recreates Lua.log at launch
                (the tail re-attaches when the file is recreated). Lua.log is buffered while playing;
@@ -22,6 +26,7 @@
   powershell -ExecutionPolicy Bypass -File tools\install.ps1
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Dev -Watch
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -DevOnly
+  powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Uninstall
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs
   powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Force -Src D:\other\EFV
 #>
@@ -29,6 +34,7 @@
 param(
     [switch]$Dev,
     [switch]$DevOnly,
+    [switch]$Uninstall,
     [switch]$Watch,
     [switch]$WatchOnly,
     [switch]$CheckLogs,
@@ -39,6 +45,7 @@ param(
     [string]$DevSrc,
     [string]$ModsDir = "S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods",
     [string]$LogsDir = (Join-Path $env:LOCALAPPDATA "Firaxis Games\Sid Meier's Civilization VI\Logs"),
+    [string]$WorkshopDir = "M:\Steam\steamapps\workshop\content\289070\3810156577",
     [string]$Python = "python",
     [string]$Pattern = "EFV|Runtime Error|Syntax Error|stack traceback"
 )
@@ -125,6 +132,25 @@ $game = Get-Process -Name "CivilizationVI*" -ErrorAction SilentlyContinue
 if ($game) {
     Write-Host "Civilization VI is running ($($game[0].ProcessName)). Quit the game, then run this again." -ForegroundColor Red
     exit 3
+}
+if ($Uninstall) {
+    # only <Mods>\<leaf of EFV\>, never anything else (EFV_Dev stays)
+    $leaf = Split-Path -Leaf $Src
+    if ($leaf -ne "EFV") { throw "refusing to remove $leaf (only the EFV folder is removed)" }
+    $localEfv = Join-Path $ModsDir $leaf
+    if (Test-Path -LiteralPath $localEfv -PathType Container) {
+        Remove-Item -LiteralPath $localEfv -Recurse -Force
+        Write-Host "Removed the local copy of VEF: $localEfv" -ForegroundColor Green
+    } else {
+        Write-Host "No local copy of VEF in $ModsDir (nothing to remove)."
+    }
+    Write-Host "The dev tools (EFV_Dev) stay. Resubscribe to VEF on the Steam Workshop to play with the released version."
+    exit 0
+}
+if (-not $DevOnly -and (Test-Path -LiteralPath $WorkshopDir -PathType Container)) {
+    Write-Host "WARNING: VEF from the Steam Workshop is still installed ($WorkshopDir). It has the same mod id as" -ForegroundColor Yellow
+    Write-Host "         the local copy; unsubscribe from it in Steam while you test the local build, then" -ForegroundColor Yellow
+    Write-Host "         check that Additional Content lists VEF once, with the local version number." -ForegroundColor Yellow
 }
 if ($DevOnly) {
     $localEfv = Join-Path $ModsDir (Split-Path -Leaf $Src)

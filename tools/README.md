@@ -61,10 +61,12 @@ python tools\api_audit.py --regen          # rebuild api_allowlist.json and .lua
 powershell -ExecutionPolicy Bypass -File tools\install.ps1                # checks, then copy EFV\
 powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Dev -Watch     # also EFV_Dev\, then follow Lua.log
 powershell -ExecutionPolicy Bypass -File tools\install.ps1 -DevOnly        # only EFV_Dev\ (VEF from the Steam Workshop)
+powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Uninstall      # remove the local Mods\EFV again (EFV_Dev stays)
 powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs      # only scan the last run's logs
 ```
 
-- Stops at once while Civilization VI is running. `-DevOnly` checks and copies only `EFV_Dev`, for tests against the Workshop VEF, and warns when a local `Mods\EFV` is left over (same mod id as the Workshop copy: delete it).
+- Stops at once while Civilization VI is running. `-DevOnly` checks and copies only `EFV_Dev`, for tests against the Workshop VEF, and warns when a local `Mods\EFV` is left over (same mod id as the Workshop copy: delete it). Installing `EFV` itself warns while the Workshop VEF is still subscribed (`-WorkshopDir`, default `M:\Steam\steamapps\workshop\content\289070\3810156577`): unsubscribe from it while you test a local build, and check that Additional Content lists VEF once, with the local version number.
+- `-Uninstall` removes only `Mods\EFV` (the local VEF) after such a test; `EFV_Dev` stays. Then resubscribe on the Workshop. It also refuses to run while the game is running.
 - Runs `check_all.py` first. Errors stop the install unless you pass `-Force` (`-SkipChecks` skips the checks, `-Strict` also stops on warnings).
 - Mirrors the folders into `S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods\EFV` (and `EFV_Dev`). It refuses targets outside `-ModsDir` or folders not named `EFV*`. Files deleted in the source are deleted in the copy too.
 - `-Watch` / `-WatchOnly` follow `Lua.log`, filtered by `-Pattern` (default `EFV|Runtime Error|Syntax Error|stack traceback`), and pick the file up again when the game recreates it.

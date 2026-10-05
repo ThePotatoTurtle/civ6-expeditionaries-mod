@@ -54,9 +54,11 @@ EFV_Dev = {}
 -- 1.0.2.2; rebuilt for the EFV 1.0.3 release without changes: 1.0.3.1; the
 -- 1.0.3 test session (S17 tracker labels, S18 / S19 Entrust rules) and the
 -- veteran one-turn restore spike (V button, Data/EFV_Dev_Spike.xml):
--- 1.0.3.2); a mismatch of FOR_EFV with the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.3.2"
-EFV_Dev.FOR_EFV = "1.0.3"
+-- 1.0.3.2; the VEF 1.0.4 session (S20 war sends lent units home, S21
+-- veteran home with three promotions): 1.0.4.1); a mismatch of FOR_EFV with
+-- the loaded EFV build is logged at load.
+EFV_Dev.VERSION = "1.0.4.1"
+EFV_Dev.FOR_EFV = "1.0.4"
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -3919,6 +3921,113 @@ local function EvalVS(st, t)
 	if t <= t0 or t > t0 + VS_TURNS or vs.logged == t then return end
 	vs.logged = t
 	for _, c in ipairs(vs.c or {}) do VsLog(c.k, "turn start", FindUnit(st.me, tonumber(c.u) or -1)) end
+end
+
+-- ===========================================================================
+-- The VEF 1.0.4 session (EFV_Dev 1.0.4.1; EFV/TESTING_1.0.4.md). Both
+-- buttons only set the scene up and write one INFO line; the tester checks
+-- the result by eye (no verdict lines).
+-- ---------------------------------------------------------------------------
+-- S20 War sends lent units home (VEF 1.0.4, designer ruling 2026-09-30):
+-- two Expeditionary Swordsmen, DEPLOYED (MakeRecord, the Shot 2 / S15
+-- pattern): "VEF-LENT", yours, lent to B and controlled by B next to B's
+-- capital (held in place until the next turn start), and "VEF-BORROWED", B's,
+-- lent to you and controlled by you next to your capital. Then your declared
+-- friendship with B ends (an alliance too, if the game lets it) and you
+-- declare war on B (DeclareWar: B declares on you if yours does not take).
+-- At the end of your turn VEF sends both home on the normal return trip: you
+-- get "Unit Coming Home" for VEF-LENT (tracker: Returning) and "Lent Unit
+-- Gone Home" for VEF-BORROWED (tracker: Departed). Once per game: a second
+-- press while at war with B changes nothing.
+-- ---------------------------------------------------------------------------
+CMD.scn_war_home = function(me, p)
+	local st = Session("WAR_HOME", me)
+	if st == nil then return end
+	local B = st.ally
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil then Check("WAR_HOME", "CHECK", "your capital or B's capital is missing"); return end
+	if AtWar(me, B) then
+		Check("WAR_HOME", "CHECK", "you are already at war with B (S20 works once per game): start a new game to repeat it")
+		return
+	end
+	local store = EFV_Records.Load()
+	local D = EFV_Config.EXPEDITIONARY_DURATION
+	local t = Turn()
+	local lent = NewUnit("scn_war_home", B, "UNIT_SWORDSMAN", FindPlot(capB:GetX(), capB:GetY(), 2, OwnedBy(B), 1), "VEF-LENT")
+	local recL = nil
+	if lent ~= nil then
+		recL = MakeRecord(store, lent, { force = FT_EXP, sender = me, recipient = B, basis = EFV_PartnerBasis(me, B) or "FRIEND",
+			origin = cap, dest = capB, duration = D, deployedTurn = t - 3 })
+		Hold(store, lent)
+	end
+	local borrowed = NewUnit("scn_war_home", me, "UNIT_SWORDSMAN", FindPlot(cap:GetX(), cap:GetY(), 2, OwnedBy(me), 1), "VEF-BORROWED")
+	local recB = nil
+	if borrowed ~= nil then
+		recB = MakeRecord(store, borrowed, { force = FT_EXP, sender = B, recipient = me, basis = EFV_PartnerBasis(B, me) or "FRIEND",
+			origin = capB, dest = cap, duration = D, deployedTurn = t - 3 })
+	end
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	-- No war on a declared friend: the friendship ends first.
+	SetDiploPair("scn_war_home", me, B, "SetHasDeclaredFriendship", false)
+	if Diplo(me, "HasAllied", B) then SetDiploPair("scn_war_home", me, B, "SetHasAllied", false) end
+	DeclareWar(me, B)
+	local war = AtWar(me, B)
+	st.s20 = { turn = t, lent = recL and recL.id or -1, borrowed = recB and recB.id or -1 }
+	if lent ~= nil then Focus(st, lent:GetX(), lent:GetY(), nil, nil, p.stamp) else Focus(st, capB:GetX(), capB:GetY(), nil, nil, p.stamp) end
+	ScnSave(st)
+	local ok = recL ~= nil and recB ~= nil and war
+	Check("WAR_HOME", ok and "INFO" or "CHECK", "VEF-LENT (yours, held by " .. PlayerName(B) .. ") " ..
+		(recL and ("record " .. recL.id .. " at " .. lent:GetX() .. "," .. lent:GetY()) or "MISSING") .. "; VEF-BORROWED (" ..
+		PlayerName(B) .. "'s, held by you) " .. (recB and ("record " .. recB.id .. " at " .. borrowed:GetX() .. "," .. borrowed:GetY()) or "MISSING") ..
+		"; at war with B=" .. tostring(war) .. ": end the turn, both must go home")
+end
+
+-- ---------------------------------------------------------------------------
+-- S21 Veteran home (VEF 1.0.4 one-turn restore, designer ruling 2026-10-05):
+-- a RETURNING Expeditionary record of yours (the S12 pattern) coming home
+-- from F at the next turn start: "VEF-VETERAN", a Swordsman at level 4 with
+-- three promotions (VsPicks: two level-1 and one level-2 of its class, takeable
+-- in that order), XP 100/150, no damage. VEF recreates it next to your
+-- capital through its normal return path and your UI takes the promotions
+-- back with the PROMOTE command; since 1.0.4 all three land in the arrival
+-- turn, and the unit ends that turn with 0 moves. F is the partner, so S20's
+-- war with B never touches it.
+-- ---------------------------------------------------------------------------
+local VET_HOME_NAME = "VEF-VETERAN"
+local VET_HOME_TYPE = "UNIT_SWORDSMAN"
+local VET_HOME_XP, VET_HOME_NEXT = 100, 150
+
+CMD.scn_vet_home = function(me, p)
+	local st = Session("VET_HOME", me)
+	if st == nil then return end
+	local F = st.friend
+	local cap, capF = Capital(me), (F ~= nil) and Capital(F) or nil
+	if cap == nil or capF == nil then Check("VET_HOME", "CHECK", "your capital or F's capital is missing"); return end
+	local promos = VsPicks(VET_HOME_TYPE)
+	if #promos < 3 then Check("VET_HOME", "CHECK", VET_HOME_TYPE .. " has fewer than 3 takeable promotions"); return end
+	local t = Turn()
+	local D = EFV_Config.EXPEDITIONARY_DURATION
+	local store = EFV_Records.Load()
+	local rec = EFV_Records.New(store, {
+		forceType = FT_EXP, state = ST.RET, senderID = me, recipientID = F, accessBasis = EFV_PartnerBasis(me, F) or "FRIEND",
+		originCityID = cap:GetID(), originX = cap:GetX(), originY = cap:GetY(),
+		destCityID = capF:GetID(), destX = capF:GetX(), destY = capF:GetY(), rerouted = 0,
+		sentTurn = t - D - 2, deployedTurn = t - D - 1, durationTurns = D, arrivalTurn = t + 1, transitTurns = 1, band = 1,
+		distance = Dist(cap:GetX(), cap:GetY(), capF:GetX(), capF:GetY()),
+		lapsed = 0, spawnFailCount = 0, feePaid = 0, maintGoldPaid = 0,
+		returnCityID = cap:GetID(), returnX = cap:GetX(), returnY = cap:GetY(), returnReason = "EXPIRED",
+		unitType = VET_HOME_TYPE, veteranName = VET_HOME_NAME, damage = 0, experience = VET_HOME_XP, xpNext = VET_HOME_NEXT,
+		level = 1 + #promos, promotions = promos, formation = 0, snapTurn = t, lastX = capF:GetX(), lastY = capF:GetY(),
+	})
+	if rec == nil then Check("VET_HOME", "CHECK", "record creation failed"); return end
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	st.s21 = { id = rec.id, turn = t }
+	Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+	ScnSave(st)
+	Check("VET_HOME", "INFO", "record " .. rec.id .. ": " .. VET_HOME_NAME .. " (" .. VET_HOME_TYPE .. ", level " .. (1 + #promos) .. ", " ..
+		table.concat(promos, "+") .. ", XP " .. VET_HOME_XP .. "/" .. VET_HOME_NEXT .. ") comes home next to your capital at the next turn start")
 end
 
 -- ---------------------------------------------------------------------------
