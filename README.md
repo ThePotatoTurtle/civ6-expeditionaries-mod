@@ -4,7 +4,7 @@ A Civilization VI mod for Gathering Storm. It lets you lend combat units to the 
 
 Get it on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3810156577
 
-Version 1.0.3.
+Version 1.0.4.
 
 ## The four options
 
@@ -191,7 +191,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - The gold per turn in the top bar doesn't count the upkeep of your units on their way, but VEF still charges it each turn. The VEF tracker shows that upkeep and your real net gold per turn.
 
 ## Changelog
-- Unreleased: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land. Send fees are halved: Expeditionary and City-State units are still free for a 1-turn trip, then cost 5, 10 or 15% of the unit's gold price; Volunteers cost 10 to 25%. Returning veterans now get all their promotions back on the turn they arrive, not one per turn. The tracker now shows the upkeep of your units on their way and your real net gold per turn, since the top bar leaves that upkeep out.
+- 1.0.4: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land. Send fees are halved: Expeditionary and City-State units are still free for a 1-turn trip, then cost 5, 10 or 15% of the unit's gold price; Volunteers cost 10 to 25%. Returning veterans now get all their promotions back on the turn they arrive, not one per turn. The tracker now shows the upkeep of your units on their way and your real net gold per turn, since the top bar leaves that upkeep out. The mod description in the game's Additional Content screen is rewritten and shorter. New known issues: a host who declares war on you can use your lent units until the next turn starts, and air units can't be sent yet.
 - 1.0.3: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so. Entrust no longer needs a partner at war with the old owner when that owner was a city-state or has been knocked out of the game, so a city-state or a civ's last city can be entrusted now. In the tracker, units lent to you show as Inbound while on their way and Departed once they head home.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.
