@@ -5,7 +5,8 @@
 --           (TrackerWindow, TrackerTitle, TrackerCloseButton, TrackerHeader
 --           > SortUnit/Partner/Force/State/Turns/DestButton > ..Stack >
 --           ..Label + ..Hint,
---           TrackerScroll, TrackerStack, TrackerEmptyLabel, TrackerSummary);
+--           TrackerScroll, TrackerStack, TrackerEmptyLabel, TrackerSummary,
+--           TrackerUpkeep);
 --           instances EFV_TrackerRowInstance (RowButton, AlertHighlight,
 --           UnitLabel, PartnerLabel, ForceLabel, StateLabel, TurnsLabel,
 --           PlaceLabel), LaunchBarItem (LaunchItemButton, LaunchItemLabel,
@@ -23,7 +24,10 @@
 --     Lapse: .. / Returning / Blocked), turns remaining, destination or
 --     return city for units in transit; GRACE / MUTINY rows first, red text
 --     on a red highlight (D9); row tooltip = status tooltip + click hint;
---     summary line (sent / received / must return). Column sort (0.7.1):
+--     summary line (sent / received / must return); upkeep line (1.0.4,
+--     bottom right, hidden at 0): the local player's transit upkeep per
+--     turn and the real net gold per turn (top bar minus that upkeep,
+--     refreshed on every poll while open). Column sort (0.7.1):
 --     a click on a header label sorts by that column, A-Z / ascending, then
 --     Z-A / descending, then back to the default order (one column at a
 --     time; EFV_UI_TrackerSortClick / _SortRows); while sorted, every row
@@ -316,7 +320,29 @@ local function RefreshLaunchButton(sent, received, alerts)
 end
 
 -- ---------------------------------------------------------------------------
+-- RefreshUpkeep(localID)   (1.0.4)
+-- The upkeep line TrackerUpkeep: the local player's transit upkeep
+-- (EFV_UI_TransitUpkeep) and the real net gold per turn = the top bar's
+-- figure (EFV_UI_TopBarGoldPerTurn) minus that upkeep
+-- (EFV_UI_TransitUpkeepText). Hidden while the upkeep is 0. Runs on every
+-- RefreshPanel call, also between rebuilds, so the poll keeps it current
+-- when the gold per turn changes without an EFV_Rev change. UI only.
+-- Params:  localID player ID.
+-- Returns: nil.
+-- APIs: U07, GetTreasury / GetGoldYield / GetTotalMaintenance (UI).
+-- ---------------------------------------------------------------------------
+local function RefreshUpkeep(localID)
+	local text = EFV_UI_TransitUpkeepText(EFV_UI_TransitUpkeep(localID), EFV_UI_TopBarGoldPerTurn(localID))
+	if text ~= nil then
+		Controls.TrackerUpkeep:SetText(text)
+	end
+	Controls.TrackerUpkeep:SetHide(text == nil)
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- RefreshPanel(force)
+-- While the panel is open, the upkeep line first (RefreshUpkeep, every call).
 -- If the panel is open and (force or (EFV_Rev, turn) changed): rebuild rows
 -- from EFV_UI_TrackerRows(local) (default order: MUTINY, GRACE, DEPLOYED,
 -- OUTBOUND, RETURNING), re-ordered by the column sort m_Sort
@@ -331,6 +357,7 @@ local function RefreshPanel(force)
 	if not m_PanelOpen then
 		return nil
 	end
+	RefreshUpkeep(LocalPlayer())
 	local store = EFV_UI_ReadStore()
 	local turn = CurrentTurn()
 	if not force and store.rev == m_LastRev and turn == m_LastTurn then

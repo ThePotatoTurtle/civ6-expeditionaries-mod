@@ -21,8 +21,18 @@
 --     resend after RESEND_S; nothing offered -> logged once, wait (the
 --     job has no time limit since 0.7.4; the engine offers the next
 --     promotion on a later turn).
+-- One-turn restore (1.0.4): gameplay gives the unit its moves back after
+-- each synced promotion (EFV_Veteran Refill, job.rt = that turn), so the
+-- engine offers the next promotion at once and this context chains the
+-- PROMOTEs in the arrival turn: PROMOTE -> UnitPromoted -> EFV_VetStep ->
+-- refill + store commit -> UnitMovementPointsChanged / next poll -> next
+-- PROMOTE. When gameplay lent moves this turn (job.rt == current turn) and
+-- still no wanted promotion is offered after STALL_S, EFV_VetStep is sent
+-- once per (unit, got) with stall = 1, so gameplay takes the lent moves
+-- back.
 -- Triggers: ContextPtr:SetUpdate poll every POLL_S (EFV_UI_ReadStore is
 -- cached by EFV_Rev and turn), plus Events.UnitPromoted,
+-- Events.UnitMovementPointsChanged (the refill; local player's units),
 -- Events.UnitAddedToMap and Events.PlayerTurnActivated (poll at once).
 -- m_Units is presentation memory only (what was sent when), pruned when a
 -- job disappears.
@@ -33,10 +43,19 @@ include("EFV_UIShared")
 local LOG_TAG = "UIVet"
 local POLL_S = 0.25
 local RESEND_S = 3.0
+local STALL_S = 1.5
 
 local m_Clock = 0
 local m_NextPoll = 0
-local m_Units = {}   -- uid -> { step = { have, at }, promote = { got, at, n }, waitGot }
+local m_Units = {}   -- uid -> { step = { have, at }, promote = { got, at, n }, waitGot, stall = { got, since, sent } }
+
+local function CurrentTurn()
+	local ok, t = pcall(function() return Game.GetCurrentGameTurn() end)
+	if ok and type(t) == "number" then
+		return t
+	end
+	return -1
+end
 
 local function LocalID()
 	local ok, pid = pcall(function() return Game.GetLocalPlayer() end)
@@ -116,8 +135,22 @@ local function ProcessJob(job, localID)
 			EFV_Log(2, LOG_TAG, "waiting uid=%s id=%s got=%s: no wanted promotion offered now", tostring(job.u),
 				tostring(job.rid), tostring(got))
 		end
+		-- 1.0.4: moves lent this turn but the chain cannot go on -> give
+		-- them back (once per (unit, got), after STALL_S).
+		if job.rt ~= nil and tonumber(job.rt) == CurrentTurn() then
+			local s = m.stall
+			if s == nil or s.got ~= got then
+				m.stall = { got = got, since = m_Clock, sent = false }
+			elseif not s.sent and m_Clock - s.since >= STALL_S then
+				s.sent = true
+				EFV_Log(2, LOG_TAG, "stalled uid=%s id=%s got=%s: lent moves given back", tostring(job.u),
+					tostring(job.rid), tostring(got))
+				EFV_UI_Request(EFV_Config.REQ_VETSTEP, { unitID = job.u, have = have, stall = 1 })
+			end
+		end
 		return
 	end
+	m.stall = nil
 	local p = m.promote
 	if p == nil or p.got ~= got then
 		m.promote = { got = got, at = m_Clock, n = 1 }
@@ -153,10 +186,26 @@ local function Poll()
 	end
 end
 
+local m_InPoll = false
+
 local function PollNow()
+	if m_InPoll then
+		return   -- an event fired from inside a poll (no re-entry)
+	end
+	m_InPoll = true
 	local ok, err = pcall(Poll)
+	m_InPoll = false
 	if not ok then
 		EFV_Log(1, LOG_TAG, "poll failed: %s", tostring(err))
+	end
+end
+
+-- Events.UnitMovementPointsChanged(playerID, unitID, ...): the refill of a
+-- local unit (1.0.4) lets the next PROMOTE go out without waiting for the
+-- poll.
+local function OnMovesChanged(playerID)
+	if playerID == LocalID() then
+		PollNow()
 	end
 end
 
@@ -175,6 +224,7 @@ local function Initialize()
 	ContextPtr:SetHide(false)
 	ContextPtr:SetUpdate(OnUpdate)
 	Events.UnitPromoted.Add(PollNow)
+	Events.UnitMovementPointsChanged.Add(OnMovesChanged)
 	Events.UnitAddedToMap.Add(PollNow)
 	Events.PlayerTurnActivated.Add(PollNow)
 	EFV_Log(2, LOG_TAG, "initialized")

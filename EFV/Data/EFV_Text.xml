@@ -508,6 +508,8 @@
 		       LOC_EFV_TRACKER_TO / _FROM   1 Civ (partner)
 		       LOC_EFV_TRACKER_TT_TRANSIT   1 City (destination or return city)
 		       LOC_EFV_TRACKER_SUMMARY      1 N sent, 2 N received, 3 N must return
+		       LOC_EFV_TRACKER_UPKEEP       1 N upkeep, 2 Net (signed text; 1.0.4)
+		       LOC_EFV_TRACKER_UPKEEP_ONLY  1 N upkeep (1.0.4)
 		     all other tracker keys: none. -->
 		<Row Tag="LOC_EFV_TRACKER_ST_OUTBOUND" Language="en_US">
 			<Text>Outbound</Text>
@@ -560,6 +562,18 @@
 		</Row>
 		<Row Tag="LOC_EFV_TRACKER_SUMMARY" Language="en_US">
 			<Text>Sent: {1_Num}   Received: {2_Num}   Must return: {3_Num}</Text>
+		</Row>
+		<!-- Upkeep line (1.0.4), shown only while the local player has units in
+		     transit with upkeep: 1 N upkeep per turn, 2 signed net gold per turn
+		     as text ("+12", "-3"); _ONLY when the top-bar figure is unavailable. -->
+		<Row Tag="LOC_EFV_TRACKER_UPKEEP" Language="en_US">
+			<Text>Transit upkeep: -{1_Num} [ICON_Gold] per turn (net {2_Net} [ICON_Gold] per turn)</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_UPKEEP_ONLY" Language="en_US">
+			<Text>Transit upkeep: -{1_Num} [ICON_Gold] per turn</Text>
+		</Row>
+		<Row Tag="LOC_EFV_TRACKER_UPKEEP_TT" Language="en_US">
+			<Text>Your units on their way to a partner or back home still cost their normal upkeep, and VEF charges it at the start of each turn. The gold per turn in the top bar leaves this out. The net figure here is the top bar's gold per turn minus this upkeep.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_BANNER_ALERT" Language="en_US">
 			<Text>VEF: {1_Num} {1_Num : plural 1?unit; other?units;} must return - {2_Num} in mutiny</Text>

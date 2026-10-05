@@ -256,7 +256,7 @@ test("0.7.2 step 5: a fallback in the arrival turn pays the exhaust (owner turne
 	H.clean()
 end)
 
-test("AI owner: clamp path (promotions set, level 1, XP 14), no job", function()
+test("AI owner: clamp path (promotions set, level 1, XP 14), no job; 1.0.4: no refill, the usual pending exhaust", function()
 	H.baseScenario()
 	H.loadEFV{ routeB = true }
 	local u = Restore(1)
@@ -264,6 +264,12 @@ test("AI owner: clamp path (promotions set, level 1, XP 14), no job", function()
 	H.eq(Xp(u), 14); H.eq(Next(u), 15)
 	H.len(Jobs(), 0)
 	H.ok(H.hasLine("route=classic"))
+	H.eq(u:GetMovesRemaining(), 0)
+	local pend = EFV_Records.Load().pending
+	H.len(pend, 1); H.eq(pend[1].u, u.id)
+	H.request(1, { OnStart = "EFV_VetStep", unitID = u.id, have = 2 })   -- no job, AI requester
+	H.eq(u:GetMovesRemaining(), 0)
+	H.ok(not H.hasLine("[Vet] refill"))
 	H.clean()
 end)
 
@@ -284,10 +290,11 @@ test("a snapshot without known promotions uses the classic path (nothing to prom
 	H.eq(Xp(u), 14)
 end, { allowErrors = true })
 
--- 0.7.4 (designer decision): no time limit. In game the engine allows one
--- promotion per turn and taking it uses the unit's remaining moves, so a
--- veteran with N promotions needs about N turns; the 0.7.0 deadline
--- (t + 2 -> SetPromotion + clamp) reset every 3+ promotion veteran.
+-- 0.7.4 (designer decision): no time limit. Before 1.0.4 the engine's one
+-- promotion per turn (a promotion ends the unit's turn) made a veteran with
+-- N promotions need about N turns, and the 0.7.0 deadline (t + 2 ->
+-- SetPromotion + clamp) reset every 3+ promotion veteran. 1.0.4 restores
+-- them in one turn (below); a job still never times out.
 test("0.7.4: a job nobody advances stays open for many turns (no fallback), XP kept at the next threshold", function()
 	H.baseScenario()
 	H.loadEFV{ routeB = true }
@@ -303,44 +310,233 @@ test("0.7.4: a job nobody advances stays open for many turns (no fallback), XP k
 	H.clean()
 end)
 
-test("0.7.4: a 4-promotion veteran gets one promotion back per turn over 4 turns and keeps its level (no fallback)", function()
+-- ---------------------------------------------------------------------------
+-- 1.0.4 one-turn restore (designer ruling 2026-10-05, EFV_Dev 1.0.3.2 spike
+-- V2). In game a landed promotion ends the unit's turn
+-- (FAKE_UI.promoteEndsTurn) and PROMOTE needs moves
+-- (FAKE_UI.promoteNeedsMoves), which made route B one promotion per turn.
+-- Gameplay now refills the moves after each promotion the EFV_VetStep
+-- request syncs (ChangeMovesRemaining, job.rt = the loan's turn) and the UI
+-- chains the next PROMOTE in the same turn.
+local FOUR = { BATTLECRY, COMMANDO, "PROMOTION_ZWEIHANDER", "PROMOTION_ELITE_GUARD" }
+local FOUR_HELD = { BATTLECRY, COMMANDO, "PROMOTION_ELITE_GUARD", "PROMOTION_ZWEIHANDER" }   -- DB order
+
+local function FourRec(fields)
+	local rec = VetRec({ promotions = FOUR, experience = 160, xpNext = 225, level = 5 })
+	for k, v in pairs(fields or {}) do rec[k] = v end
+	return rec
+end
+
+-- The owner's UI, with the engine rule that a promotion ends the unit's turn.
+local function BootUIEndsTurn()
+	local env = BootUI()
+	FAKE_UI.promoteEndsTurn = true
+	return env
+end
+
+-- Counts the unit's ChangeMovesRemaining calls and the highest moves value
+-- they left.
+local function WatchMoves(u)
+	local w = { calls = 0, peak = u.moves }
+	local orig = u.ChangeMovesRemaining
+	u.ChangeMovesRemaining = function(self, d)
+		w.calls = w.calls + 1
+		orig(self, d)
+		if self.moves > w.peak then w.peak = self.moves end
+	end
+	return w
+end
+
+test("1.0.4: a 4-promotion veteran gets every promotion back in the arrival turn: level 5, XP 160/225, damage 30, then 0 moves", function()
 	H.baseScenario()
 	H.loadEFV{ routeB = true }
-	local promos = { BATTLECRY, COMMANDO, "PROMOTION_ZWEIHANDER", "PROMOTION_ELITE_GUARD" }
 	local t0 = FAKE.turn
-	local u = Restore(0, VetRec({ promotions = promos, experience = 160, xpNext = 225, level = 5 }), t0)
-	H.len(Jobs()[1].want, 4)
-	-- The engine rule seen in game: taking a promotion uses the unit's
-	-- remaining moves, so PROMOTE is offered again only next turn.
-	local env = BootUI()
-	local apply = FAKE_UI.ApplyUnitCommands
-	FAKE_UI.ApplyUnitCommands = function()
-		local before = #H.promotionTypes(u)
-		apply()
-		if #H.promotionTypes(u) > before then u.moves = 0 end
-	end
-	Pump(env, 8)
-	H.len(H.promotionTypes(u), 0, "arrival turn: 0 moves, nothing offered")
-	local nextXP = { 45, 90, 150 }
-	for k = 1, 4 do
-		H.endTurn()
-		H.eq(FAKE.turn, t0 + k)
-		H.len(Jobs(), 1, "open at the start of turn t + " .. k)
-		Pump(env, 8)
-		H.len(H.promotionTypes(u), k, "one promotion in turn t + " .. k)
-		if k < 4 then
-			H.len(Jobs(), 1)
-			H.eq(Xp(u), nextXP[k], "next promotion available")
-		end
-	end
-	H.len(Jobs(), 0, "done at t + 4")
-	H.len(Promotes(), 4, "one PROMOTE per turn")
-	H.deq(H.promotionTypes(u), { BATTLECRY, COMMANDO, "PROMOTION_ELITE_GUARD", "PROMOTION_ZWEIHANDER" }, "all four (DB order)")
+	local u = Restore(0, FourRec(), t0)
+	HumanTurnStart(0)
+	local env = BootUIEndsTurn()
+	local w = WatchMoves(u)
+	Pump(env, 16)
+	H.eq(FAKE.turn, t0, "still the arrival turn")
+	H.len(Promotes(), 4, "four PROMOTEs, all in the arrival turn")
+	H.deq(H.promotionTypes(u), FOUR_HELD)
 	H.eq(u:GetExperience():GetLevel(), 5, "level kept")
 	H.eq(Xp(u), 160); H.eq(Next(u), 225)
-	H.eq(u:GetDamage(), 30, "promotion heals undone")
-	H.ok(H.hasLine("[Vet] done id=7"))
+	H.eq(u:GetDamage(), 30, "every promotion heal undone")
+	H.len(Jobs(), 0, "done")
+	H.len(H.lines("[Vet] refill id=7"), 3, "a refill after each promotion but the last")
+	H.eq(w.calls, 3)
+	H.ok(w.peak <= u.maxMoves, "never above the unit's max moves")
+	H.eq(u:GetMovesRemaining(), 0, "0 moves on the arrival turn once the level is back")
+	H.ok(H.hasLine("[Vet] exhaust id=7"))
 	H.ok(not H.hasLine("[Vet] fallback"))
+	H.endTurn()
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "next turn: full moves")
+	H.clean()
+end)
+
+test("1.0.4: a job the arrival turn could not start (0 moves) restores everything in one later turn; no free moves, no exhaust", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local t0 = FAKE.turn
+	local u = Restore(0, FourRec(), t0)
+	local env = BootUIEndsTurn()
+	Pump(env, 8)
+	H.len(H.promotionTypes(u), 0, "arrival turn: 0 moves, nothing offered")
+	H.endTurn()
+	H.eq(FAKE.turn, t0 + 1)
+	local before = u:GetMovesRemaining()
+	H.eq(before, u.maxMoves)
+	local w = WatchMoves(u)
+	Pump(env, 16)
+	H.eq(FAKE.turn, t0 + 1, "all in one later turn")
+	H.len(Jobs(), 0)
+	H.deq(H.promotionTypes(u), FOUR_HELD)
+	H.eq(u:GetExperience():GetLevel(), 5)
+	H.eq(Xp(u), 160); H.eq(Next(u), 225)
+	H.eq(u:GetDamage(), 30, "damage floor kept")
+	H.eq(w.calls, 3)
+	H.ok(w.peak <= before, "a refill never lifts the moves above what the unit had before the step")
+	H.eq(u:GetMovesRemaining(), 0, "the last promotion ends the turn as in the base game; nothing lent is kept")
+	H.ok(not H.hasLine("[Vet] exhaust id=7"), "no arrival exhaust in a later turn")
+	H.clean()
+end)
+
+test("1.0.4: the owner turned AI mid-chain: the lent moves are taken back and the fallback sets the rest (arrival turn, later turn)", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0, FourRec())
+	HumanTurnStart(0)
+	local env = BootUIEndsTurn()
+	Pump(env, 2)
+	H.len(H.promotionTypes(u), 1, "one promotion landed")
+	H.eq(Jobs()[1].rt, FAKE.turn, "the refill is an open loan of this turn")
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "moves lent for the next PROMOTE")
+	Players[0].human = false
+	GameEvents.OnGameTurnEnded(FAKE.turn)
+	H.len(Jobs(), 0)
+	H.ok(H.hasLine("why=NOT_HUMAN"))
+	H.ok(H.hasLine("[Vet] refill undone id=7"))
+	H.ok(H.hasLine("[Vet] exhaust id=7"))
+	H.eq(u:GetMovesRemaining(), 0, "no lent moves kept in the arrival turn")
+	H.deq(H.promotionTypes(u), FOUR_HELD, "the rest set by the fallback")
+	H.eq(u:GetDamage(), 30, "damage floor kept")
+	-- A later turn: the loan is taken back the same way, no arrival exhaust.
+	Players[0].human = true
+	local v = Restore(0, FourRec({ id = 8 }))
+	H.endTurn()
+	Pump(env, 2)
+	H.len(H.promotionTypes(v), 1)
+	H.eq(Jobs()[1].rt, FAKE.turn)
+	H.eq(v:GetMovesRemaining(), v.maxMoves)
+	Players[0].human = false
+	GameEvents.OnGameTurnEnded(FAKE.turn)
+	H.ok(H.hasLine("[Vet] refill undone id=8"))
+	H.eq(v:GetMovesRemaining(), 0, "back to what the promotion left")
+	H.ok(not H.hasLine("[Vet] exhaust id=8"), "no arrival exhaust in a later turn")
+	H.clean()
+end)
+
+test("1.0.4: nothing wanted offered after a refill -> the UI reports the stall once, gameplay takes the lent moves back; the rest comes next turn", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local t0 = FAKE.turn
+	local u = Restore(0, FourRec(), t0)
+	HumanTurnStart(0)
+	local env = BootUIEndsTurn()
+	Pump(env, 2)
+	H.len(H.promotionTypes(u), 1)
+	H.eq(u:GetMovesRemaining(), u.maxMoves)
+	FAKE_UI.canPromote = false     -- the engine offers nothing now
+	Pump(env, 10)
+	H.len(H.lines("[UIVet] stalled"), 1, "reported once")
+	H.ok(H.hasLine("why=STALL"))
+	H.eq(u:GetMovesRemaining(), 0, "lent moves given back")
+	local j = Jobs()[1]
+	H.notnil(j, "job still open"); H.isnil(j.rt); H.eq(j.got, 1)
+	Pump(env, 10)
+	H.len(H.lines("[UIVet] stalled"), 1, "not again for the same step")
+	FAKE_UI.canPromote = true
+	H.endTurn()
+	Pump(env, 16)
+	H.eq(FAKE.turn, t0 + 1)
+	H.len(Jobs(), 0)
+	H.deq(H.promotionTypes(u), FOUR_HELD)
+	H.eq(u:GetExperience():GetLevel(), 5)
+	H.eq(u:GetMovesRemaining(), 0)
+	H.clean()
+end)
+
+test("1.0.4: stall = 1 without a loan of this turn, or right after a new promotion, takes no moves", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0, FourRec())
+	HumanTurnStart(0)
+	H.request(0, { OnStart = "EFV_VetStep", unitID = u.id, have = 0, stall = 1 })
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "no loan: nothing taken")
+	-- A promotion landed (moves 0, as in game); the request syncs it and
+	-- lends the moves, the stall flag does not undo that step.
+	u.promotions[GameInfo.UnitPromotions[BATTLECRY].Index] = true; u.level = 2; u.moves = 0
+	H.request(0, { OnStart = "EFV_VetStep", unitID = u.id, have = 1, stall = 1 })
+	H.eq(Jobs()[1].got, 1)
+	H.eq(Jobs()[1].rt, FAKE.turn)
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "the step's refill stays")
+	H.request(2, { OnStart = "EFV_VetStep", unitID = u.id, have = 1, stall = 1 })   -- not the owner
+	H.eq(u:GetMovesRemaining(), u.maxMoves)
+	H.clean()
+end)
+
+test("1.0.4: a boundary that finds a new promotion syncs it without a refill (only EFV_VetStep lends moves)", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0, FourRec())
+	u.promotions[GameInfo.UnitPromotions[BATTLECRY].Index] = true; u.level = 2; u.moves = 0
+	GameEvents.OnGameTurnEnded(FAKE.turn)
+	H.eq(Jobs()[1].got, 1, "synced")
+	H.isnil(Jobs()[1].rt)
+	H.eq(u:GetMovesRemaining(), 0)
+	H.ok(not H.hasLine("[Vet] refill id="))
+	H.clean()
+end)
+
+test("1.0.4: a loan still open when its turn ends is dropped next turn without taking the new turn's moves", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local u = Restore(0, FourRec())
+	HumanTurnStart(0)
+	local env = BootUIEndsTurn()
+	Pump(env, 2)
+	H.eq(Jobs()[1].rt, FAKE.turn)
+	H.endTurn()   -- the UI does not run in between (no stall report)
+	H.eq(u:GetMovesRemaining(), u.maxMoves, "the new turn's moves")
+	H.isnil(Jobs()[1].rt, "loan dropped at the turn start")
+	H.ok(H.hasLine("[Vet] refill dropped id=7"))
+	H.ok(not H.hasLine("[Vet] refill undone"))
+	H.clean()
+end)
+
+test("1.0.4: save and load mid-chain: the job and its loan survive, a fresh UI finishes the restore in the same turn", function()
+	H.baseScenario()
+	H.loadEFV{ routeB = true }
+	local t0 = FAKE.turn
+	local u = Restore(0, FourRec(), t0)
+	HumanTurnStart(0)
+	local env = BootUIEndsTurn()
+	Pump(env, 2)
+	H.len(H.promotionTypes(u), 1)
+	FAKE_UI.AsGameplay(H.reloadEFV)
+	local j = Jobs()[1]
+	H.notnil(j)
+	H.eq(j.rt, t0, "the loan is in the saved job"); H.eq(j.ex, 1, "the arrival exhaust is still owed"); H.eq(j.got, 1)
+	local env2 = FAKE_UI.LoadContext("EFV/UI/EFV_VetRestore.lua")   -- the UI comes back with empty memory
+	Pump(env2, 16)
+	H.eq(FAKE.turn, t0)
+	H.len(Jobs(), 0)
+	H.deq(H.promotionTypes(u), FOUR_HELD)
+	H.eq(u:GetExperience():GetLevel(), 5)
+	H.eq(Xp(u), 160); H.eq(Next(u), 225)
+	H.eq(u:GetDamage(), 30)
+	H.eq(u:GetMovesRemaining(), 0, "arrival turn: 0 moves")
+	H.ok(H.hasLine("[Vet] exhaust id=7"))
 	H.clean()
 end)
 

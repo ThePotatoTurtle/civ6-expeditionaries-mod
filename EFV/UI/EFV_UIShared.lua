@@ -25,6 +25,8 @@
 -- 0.7.1 (tracker column sort): EFV_UI_TRACKER_SORT_COLS,
 -- EFV_UI_TrackerSortClick, EFV_UI_TrackerSortRows, EFV_UI_TrackerSortMark.
 -- 0.7.3: EFV_UI_TrackerSortHint (the "sortable" mark on unsorted headers).
+-- 1.0.4 (tracker upkeep line): EFV_UI_TransitUpkeep, EFV_UI_TopBarGoldPerTurn,
+-- EFV_UI_SignedNumText, EFV_UI_TransitUpkeepText.
 -- 0.5.2 (fee ruling, band 1 free): EFV_UI_FeeText.
 -- 0.7 (INTERFACES note 33): EFV_UI_PickerRowText, EFV_UI_PickerHeaderText
 -- (one formatted line per picker row; EFV_UI_FeeCell removed);
@@ -55,7 +57,9 @@
 --     LOC_EFV_TRACKER_ST_LAPSE_PAUSED {1_State} {2_Num} (0.5.1);
 --     LOC_EFV_TRACKER_TO / _FROM {1_Civ}; LOC_EFV_TRACKER_TT_TRANSIT {1_City};
 --     LOC_EFV_TRACKER_TT_SELECT / _LOOK none;
---     LOC_EFV_TRACKER_SUMMARY {1_Num} sent {2_Num} received {3_Num} alerts.
+--     LOC_EFV_TRACKER_SUMMARY {1_Num} sent {2_Num} received {3_Num} alerts;
+--     LOC_EFV_TRACKER_UPKEEP {1_Num} upkeep {2_Net} signed net text;
+--     LOC_EFV_TRACKER_UPKEEP_ONLY {1_Num} upkeep (1.0.4).
 -- ===========================================================================
 
 if EFV_UIShared ~= nil and EFV_UIShared.LOADED == 1 then
@@ -1007,6 +1011,89 @@ function EFV_UI_TrackerCounts(localID)
 		end
 	end
 	return sent, received, alerts
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TransitUpkeep(localID, store) -> gold   (added 1.0.4)
+-- The gold upkeep VEF charges the local player at each turn start for their
+-- units in transit (EFV_Transit.ChargeTransitMaintenance): the sum of
+-- GameInfo.Units[rec.unitType].Maintenance over the records where localID is
+-- the SENDER and the state is OUTBOUND or RETURNING. Received units and
+-- units on the map (the engine already counts those) are left out. No
+-- balance cap here: the figure is the upkeep due, not what an empty
+-- treasury actually pays. Pure over the given store.
+-- Params:  localID player ID; store UI store (nil -> EFV_UI_ReadStore()).
+-- Returns: number >= 0.
+-- APIs: A06 (via EFV_UI_ReadStore), GameInfo.Units.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TransitUpkeep(localID, store)
+	local total = 0
+	if type(localID) ~= "number" or localID < 0 then
+		return total
+	end
+	for _, rec in ipairs(StoreRecords(store or EFV_UI_ReadStore())) do
+		if rec.senderID == localID
+				and (rec.state == EFV_Config.ST_OUTBOUND or rec.state == EFV_Config.ST_RETURNING) then
+			local row = GameInfo.Units[rec.unitType]
+			total = total + ((row ~= nil and tonumber(row.Maintenance)) or 0)
+		end
+	end
+	return total
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TopBarGoldPerTurn(pid) -> number or nil   (added 1.0.4)
+-- The top bar's gold per turn: GetGoldYield() - GetTotalMaintenance() of
+-- the player's treasury (base TopPanel.lua:146, GS Replacements
+-- TopPanel.lua:140). nil when the call fails.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TopBarGoldPerTurn(pid)
+	local ok, v = pcall(function()
+		local pTreasury = Players[pid]:GetTreasury()
+		return pTreasury:GetGoldYield() - pTreasury:GetTotalMaintenance()
+	end)
+	if ok and type(v) == "number" then
+		return v
+	end
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_SignedNumText(n) -> text   (added 1.0.4)
+-- n with its sign and at most one decimal, like the top bar's
+-- "+#,###.#;-#,###.#" (TopPanel.lua FormatValuePerTurn): 12 -> "+12",
+-- -3 -> "-3", 2.5 -> "+2.5", 1234 -> "+1,234", 0 -> "0". Pure.
+-- ---------------------------------------------------------------------------
+function EFV_UI_SignedNumText(n)
+	n = tonumber(n) or 0
+	local r = math.floor(math.abs(n) * 10 + 0.5) / 10
+	if r == 0 then
+		return "0"
+	end
+	local s = (r == math.floor(r)) and string.format("%d", r) or string.format("%.1f", r)
+	local int, frac = string.match(s, "^(%d+)(.*)$")
+	int = string.gsub(string.reverse(int), "(%d%d%d)", "%1,")
+	int = string.gsub(string.reverse(int), "^,", "")
+	return ((n < 0) and "-" or "+") .. int .. frac
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_TransitUpkeepText(upkeep, topBar) -> text or nil   (added 1.0.4)
+-- The tracker's upkeep line. upkeep <= 0 -> nil (the line is hidden).
+-- topBar = the top bar's gold per turn (EFV_UI_TopBarGoldPerTurn); the real
+-- net is topBar - upkeep: LOC_EFV_TRACKER_UPKEEP {1_Num} upkeep {2_Net}
+-- signed net (EFV_UI_SignedNumText). topBar nil -> LOC_EFV_TRACKER_UPKEEP_ONLY
+-- {1_Num}. Pure apart from Locale.Lookup.
+-- ---------------------------------------------------------------------------
+function EFV_UI_TransitUpkeepText(upkeep, topBar)
+	upkeep = tonumber(upkeep) or 0
+	if upkeep <= 0 then
+		return nil
+	end
+	if type(topBar) ~= "number" then
+		return SafeLookup("LOC_EFV_TRACKER_UPKEEP_ONLY", upkeep)
+	end
+	return SafeLookup("LOC_EFV_TRACKER_UPKEEP", upkeep, EFV_UI_SignedNumText(topBar - upkeep))
 end
 
 -- ---------------------------------------------------------------------------

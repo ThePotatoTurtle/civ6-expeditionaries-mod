@@ -403,8 +403,13 @@ class Validator:
             if gameplay:
                 # The live cache holds the DB of the last game played, including rows of mods that were
                 # enabled (e.g. EFV itself or the spike). Drop EFV-prefixed rows from the COPY first.
+                # The ability tables hold the EFV_Dev 1.0.3.2 veteran spike rows (Data/EFV_Dev_Spike.xml)
+                # once a game with EFV_Dev enabled was played.
                 purged = 0
-                for tbl, col in (("Notifications", "NotificationType"), ("Types", "Type")):
+                for tbl, col in (("Notifications", "NotificationType"), ("Types", "Type"), ("TypeTags", "Type"),
+                                 ("UnitAbilities", "UnitAbilityType"), ("UnitAbilityModifiers", "UnitAbilityType"),
+                                 ("DynamicModifiers", "ModifierType"), ("Modifiers", "ModifierId"),
+                                 ("ModifierArguments", "ModifierId")):
                     try:
                         purged += con.execute("DELETE FROM \"%s\" WHERE \"%s\" LIKE 'EFV%%'" % (tbl, col)).rowcount
                     except sqlite3.Error:

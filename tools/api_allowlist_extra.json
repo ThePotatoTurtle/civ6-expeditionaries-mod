@@ -855,6 +855,26 @@
   }
  },
  "methods": {
+  "GetGoldYield": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/TopPanel.lua:146 and GAME/DLC/Expansion2/UI/Replacements/TopPanel.lua:140 (playerTreasury:GetGoldYield() - playerTreasury:GetTotalMaintenance() = the top-bar gold per turn)",
+    "GAME/Base/Assets/UI/ToolTipHelper_PlayerYields.lua:16, 18, 49 (playerTreasury:GetGoldYield())"
+   ],
+   "note": "1.0.4 tracker transit upkeep line (EFV_Tracker.lua): the local player's top-bar net gold per turn"
+  },
+  "GetTotalMaintenance": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/TopPanel.lua:146 and GAME/DLC/Expansion2/UI/Replacements/TopPanel.lua:140 (playerTreasury:GetGoldYield() - playerTreasury:GetTotalMaintenance())",
+    "GAME/Base/Assets/UI/ToolTipHelper_PlayerYields.lua:16, 20, 55 (playerTreasury:GetTotalMaintenance())"
+   ],
+   "note": "1.0.4 tracker transit upkeep line (EFV_Tracker.lua): the local player's top-bar net gold per turn"
+  },
   "SetHide": {
    "ctx": {
     "UI": "C"
@@ -2355,12 +2375,10 @@
     "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_UnitCommands.lua:665-666 (local maxMoves = pUnit:GetMaxMoves(); pUnit:ChangeMovesRemaining(maxMoves): moves for the current turn)",
     "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1506, 1513, 1525 (ChangeMovesRemaining(extra / -movesRemaining / maxMoves))",
     "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_UnitCommands.lua:175 (pUnit:ChangeMovesRemaining(-1))",
-    "research/R2_unit_map_apis.md:43 (unit:ChangeMovesRemaining(n): delta, CONFIRMED G); static form UnitManager.ChangeMovesRemaining(unit, n) at AustraliaScenario.lua:918, 1429"
+    "research/R2_unit_map_apis.md:43 (unit:ChangeMovesRemaining(n): delta, CONFIRMED G); static form UnitManager.ChangeMovesRemaining(unit, n) at AustraliaScenario.lua:918, 1429",
+    "Lua.log 2026-10-05 (EFV_Dev 1.0.3.2 spike V2, in game: after each landed promotion ChangeMovesRemaining(max - remaining) let the next PROMOTE land in the same turn, 3/3)"
    ],
-   "note": "EFV_Dev 1.0.3.2 only: veteran one-turn restore spike (V button)",
-   "only_paths": [
-    "EFV_Dev/"
-   ]
+   "note": "PLAN Appendix A A63. EFV_Dev 1.0.3.2 veteran spike (V button); EFV 1.0.4 one-turn veteran restore (EFV_Veteran Refill)"
   }
  },
  "events": {

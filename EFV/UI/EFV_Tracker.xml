@@ -25,6 +25,9 @@
      BodyTextDark14 (dark on the light WindowFrameTitle body); the summary
      sits 33 px above the bottom edge (0.7.1: 3 px higher), clear of the
      frame border (TrackerScroll ends at 76 + 360 = 436).
+     1.0.4: TrackerUpkeep, the transit upkeep line, sits on the summary's
+     row at the right edge (same style and bottom offset; Lua hides it
+     while the local player has no upkeep in transit).
      0.7.1: each header column is a plain Button (SortXButton, same width as
      the row column); a click sorts by that column (A-Z, Z-A, default).
      0.7.3 (designer, candidate B of workshop/ui_icons): the button holds a
@@ -97,6 +100,7 @@
 			</ScrollPanel>
 			<Label ID="TrackerEmptyLabel" Anchor="C,C" Style="BodyTextDark16" String="LOC_EFV_TRACKER_EMPTY" Hidden="1"/>
 			<Label ID="TrackerSummary" Anchor="L,B" Offset="22,33" Style="BodyTextDark14"/>
+			<Label ID="TrackerUpkeep" Anchor="R,B" Offset="22,33" Style="BodyTextDark14" ToolTip="LOC_EFV_TRACKER_UPKEEP_TT" Hidden="1"/>
 		</Grid>
 	</Container>
 

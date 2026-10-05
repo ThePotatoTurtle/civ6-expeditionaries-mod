@@ -19,8 +19,33 @@
 --     take, snapshot order }, got = promotions held when last synced,
 --     xp = target XP (snapshot), dmg = damage floor against the promotion
 --     heal, n = steps synced, ex = 1 while the arrival-turn exhaust is
---     owed (0.7.2) }
+--     owed (0.7.2), rt = turn of an open moves refill (1.0.4, see below) }
 -- Jobs are independent of records (a returned record is deleted at arrival).
+--
+-- One-turn restore (1.0.4, designer ruling 2026-10-05, EFV_Dev 1.0.3.2
+-- veteran spike V2): a landed promotion ends the unit's turn (moves 0) and
+-- the engine offers no further PROMOTE that turn, which made route B one
+-- promotion per turn. So when the EFV_VetStep request syncs a landed
+-- promotion and wanted promotions remain, Refill gives the unit its moves
+-- back (pUnit:ChangeMovesRemaining(max - remaining), the V2 call) and the
+-- owner's UI chains the next PROMOTE at once: every promotion lands in the
+-- turn the unit comes home. The refill is a loan (job.rt = its turn):
+--   * the next promotion uses it up (the step clears rt);
+--   * the last promotion gets no refill, so the job ends at the moves the
+--     engine leaves after a promotion (0), and PayExhaust zeroes them in the
+--     arrival turn as before;
+--   * a refill happens only from 0 moves (a unit whose promotion kept its
+--     moves needs none), so the moves before it were always 0: Unloan takes
+--     the loan back with UnitManager.FinishMoves when the job is
+--     interrupted in the refill's turn (Fallback NOT_HUMAN, or the owner's
+--     UI reports that no wanted promotion is offered: EFV_VetStep stall = 1);
+--   * a loan from an earlier turn is dropped without touching the unit (the
+--     engine has given it the moves of the new turn since).
+-- So the unit never keeps more moves than the engine would leave it after
+-- the promotions, in the arrival turn or in a later one (a job resumed
+-- after a load, or one whose promotions were not offered in the arrival
+-- turn). The refill runs only in the EFV_VetStep handler (synced on every
+-- client); turn boundaries never refill.
 --
 -- Arrival-turn moves (0.7.2, re-test 0.7 step 5): the engine offers PROMOTE
 -- only to a unit with movement points (arrival turn at 0 moves: nothing
@@ -32,7 +57,8 @@
 -- at once), plus a pending entry for the case the owner's
 -- PTSC is still to come. A job that ends later owes nothing any more (the
 -- arrival turn is over). Known edge: when no promotion can be taken in the
--- arrival turn at all, the unit keeps its moves for that turn.
+-- arrival turn at all, the unit keeps its moves for that turn (never more
+-- than the engine gave it: a refill needs a landed promotion first).
 --
 -- Flow (FIXPLAN_0.7 item 7):
 --   1. EFV_Units.Recreate -> UseRouteB -> Begin (XP to the first threshold,
@@ -42,13 +68,15 @@
 --   3. Sync (EFV_VetStep handler, every boundary, pipeline step 0e): state
 --      derived and idempotent. New promotions -> undo the promotion heal,
 --      strike them from want (a promotion picked by hand replaces one, never
---      adds one), raise XP to the next threshold; want empty -> XP target,
+--      adds one), raise XP to the next threshold, refill the moves (1.0.4,
+--      EFV_VetStep only, see "One-turn restore"); want empty -> XP target,
 --      job removed.
---   4. No time limit (designer ruling, 0.7.4): the engine allows one
---      promotion per turn, so a veteran with N promotions needs about N
---      turns, and the 0.7.0 deadline (turn >= t + 2 -> Fallback("TIMEOUT"))
---      cost 3+ promotion veterans their level. A job stays open until it
---      is done. Fallback (SetPromotion for the rest, XP target with the
+--   4. No time limit (designer ruling, 0.7.4): before 1.0.4 the engine
+--      allowed one promotion per turn, so a veteran with N promotions
+--      needed about N turns, and the 0.7.0 deadline (turn >= t + 2 ->
+--      Fallback("TIMEOUT")) cost 3+ promotion veterans their level. With the
+--      refill the job normally ends in the arrival turn; it still stays
+--      open until it is done. Fallback (SetPromotion for the rest, XP target with the
 --      clamp, damage floor) only on concrete causes: the owner is no longer
 --      human (Sync, "NOT_HUMAN") or the unit is about to leave the map
 --      (step 5, "SNAPSHOT"). A job that cannot progress leaves the unit
@@ -61,7 +89,9 @@
 -- MP (INTERFACES note 33): gameplay owns all state; the UI only issues the
 -- engine's own PROMOTE for the local player's jobs. EFV_VetStep only makes
 -- gameplay Sync the requester's own job (key = requester, unitID), so a
--- forged or early request changes nothing Sync would not. No
+-- forged or early request changes nothing Sync would not (the 1.0.4 refill
+-- needs a promotion the unit really holds; stall = 1 only takes back moves
+-- VEF lent the requester's own unit this turn). No
 -- Game.GetLocalPlayer here; jobs are walked in array order (deterministic).
 --
 -- Include rule: this file must NOT include EFV_Units, EFV_Transit or
@@ -212,6 +242,63 @@ local function PayExhaust(store, job, pUnit)
 		tostring(moves), ok and "" or (" FinishMoves failed err=" .. ErrText(err)))
 end
 
+local function MovesOf(pUnit)
+	local ok, m = pcall(function() return pUnit:GetMovesRemaining() end)
+	if ok and type(m) == "number" then
+		return m
+	end
+	return nil
+end
+
+-- One-turn restore (1.0.4, see the header): after a landed promotion with
+-- wanted promotions left, gives the unit its moves back so the owner's UI
+-- can send the next PROMOTE this turn (EFV_Dev 1.0.3.2 spike V2,
+-- PiratesScenario_UnitCommands.lua:665-666). Only from 0 moves; records
+-- the loan (job.rt = this turn). Logs "[Vet] refill ...".
+local function Refill(store, job, pUnit)
+	local before = MovesOf(pUnit)
+	if before == nil or before > 0 then
+		return false
+	end
+	local maxM = nil
+	pcall(function() maxM = pUnit:GetMaxMoves() end)
+	if type(maxM) ~= "number" or maxM <= 0 then
+		return false
+	end
+	local ok, err = pcall(function() pUnit:ChangeMovesRemaining(maxM - before) end)
+	if not ok then
+		EFV_Log(1, TAG, "refill id=%s uid=%s failed err=%s", tostring(job.rid), tostring(job.u), ErrText(err))
+		return false
+	end
+	job.rt = CurrentTurn()
+	Touch(store)
+	EFV_Log(2, TAG, "refill id=%s uid=%s moves=%s -> %s/%s left=%s", tostring(job.rid), tostring(job.u), tostring(before),
+		tostring(MovesOf(pUnit)), tostring(maxM), List(job.want))
+	return true
+end
+
+-- Takes back an open refill (job.rt): in the refill's turn the moves go back
+-- to what the promotion left, 0 (UnitManager.FinishMoves, as PayExhaust);
+-- a loan from an earlier turn is only dropped (the engine has given the
+-- unit the moves of the new turn since). Logs "[Vet] refill undone ...".
+local function Unloan(store, job, pUnit, why)
+	if job.rt == nil then
+		return false
+	end
+	local rt = tonumber(job.rt)
+	job.rt = nil
+	Touch(store)
+	if pUnit == nil or rt ~= CurrentTurn() then
+		EFV_Log(3, TAG, "refill dropped id=%s uid=%s turn=%s why=%s (earlier turn)", tostring(job.rid), tostring(job.u),
+			tostring(rt), tostring(why))
+		return false
+	end
+	local ok, err = pcall(function() UnitManager.FinishMoves(pUnit) end)
+	EFV_Log(2, TAG, "refill undone id=%s uid=%s why=%s moves=%s%s", tostring(job.rid), tostring(job.u), tostring(why),
+		tostring(MovesOf(pUnit)), ok and "" or (" FinishMoves failed err=" .. ErrText(err)))
+	return ok
+end
+
 -- ---------------------------------------------------------------------------
 -- EFV_Veteran.UseRouteB(ownerID, rec) -> bool
 -- true when FLAG_VET_ROUTE_B is on, the owner is human and the snapshot has
@@ -271,8 +358,9 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_Veteran.Fallback(store, job, pUnit, why)
 -- SetPromotion for the rest of want, XP target then the clamp
--- (EFV_Units.RestoreXPClamped), damage floor, job removed. pUnit nil -> the
--- job is only removed. Logs "[Vet] fallback id= why=".
+-- (EFV_Units.RestoreXPClamped), damage floor, an open refill of this turn
+-- taken back (not for SNAPSHOT), the arrival exhaust, job removed. pUnit
+-- nil -> the job is only removed. Logs "[Vet] fallback id= why=".
 -- why: "NOT_HUMAN" | "SNAPSHOT" (no "TIMEOUT" since 0.7.4)
 -- ---------------------------------------------------------------------------
 function EFV_Veteran.Fallback(store, job, pUnit, why)
@@ -299,9 +387,12 @@ function EFV_Veteran.Fallback(store, job, pUnit, why)
 		if why == "SNAPSHOT" then
 			-- A removal snapshot follows (send, return): the unit
 			-- leaves the map, and exhausting it here would make the send
-			-- that asked for the snapshot fail NOT_FULL_MOVES.
+			-- that asked for the snapshot fail NOT_FULL_MOVES. An open
+			-- refill is dropped the same way (the moves do not travel).
 			job.ex = nil
+			job.rt = nil
 		else
+			Unloan(store, job, pUnit, why)
 			PayExhaust(store, job, pUnit)
 		end
 	end
@@ -322,7 +413,11 @@ end
 --     hand) drop as many entries from the end of want, got / n updated;
 --     else job.dmg follows the unit's damage (round heal, combat);
 --   * want empty -> XP raised to job.xp (never lowered), job removed, DONE;
---     else XP raised to the next threshold (promotion available), OPEN.
+--     else XP raised to the next threshold (promotion available), OPEN;
+--   * 1.0.4 one-turn restore: a refill from an earlier turn is dropped; a
+--     new promotion uses up the open refill; hook "EFV_VetStep" with a new
+--     promotion and want not empty -> Refill (moves back for the next
+--     PROMOTE this turn). Boundaries and SETTLE never refill.
 -- ---------------------------------------------------------------------------
 function EFV_Veteran.Sync(store, job, pUnit, hook)
 	if type(store) ~= "table" or job == nil or pUnit == nil then
@@ -335,9 +430,16 @@ function EFV_Veteran.Sync(store, job, pUnit, hook)
 	if type(job.want) ~= "table" then
 		job.want = {}
 	end
+	if job.rt ~= nil and tonumber(job.rt) ~= CurrentTurn() then
+		Unloan(store, job, pUnit, "STALE")
+	end
 	local held = Held(pUnit)
 	local got = tonumber(job.got) or 0
+	local stepped = false
 	if #held > got then
+		stepped = true
+		-- The promotion used up an open refill (it ended the turn again).
+		job.rt = nil
 		RestoreFloor(job, pUnit)
 		local heldSet = {}
 		for _, name in ipairs(held) do
@@ -386,6 +488,9 @@ function EFV_Veteran.Sync(store, job, pUnit, hook)
 			EFV_Log(2, TAG, "xp kept id=%s uid=%s xp=%s target=%s (never lowered)", tostring(job.rid),
 				tostring(job.u), tostring(xp), tostring(target))
 		end
+		if job.rt ~= nil then
+			Unloan(store, job, pUnit, "DONE")
+		end
 		PayExhaust(store, job, pUnit)
 		EFV_Records.RemoveVetJob(store, job.p, job.u)
 		EFV_Log(2, TAG, "done id=%s owner=%s uid=%s promotions=%s xp=%s/%s next=%s steps=%s",
@@ -394,6 +499,9 @@ function EFV_Veteran.Sync(store, job, pUnit, hook)
 		return "DONE"
 	end
 	XPToThreshold(pUnit)
+	if stepped and hook == "EFV_VetStep" then
+		Refill(store, job, pUnit)
+	end
 	return "OPEN"
 end
 
@@ -446,10 +554,15 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_Veteran.OnRequestStep(playerID, params)
 -- Handler of the EFV_VetStep request (EFV_Config.REQ_VETSTEP; params
--- unitID n, have n). Contract: INTERFACES section 6 (pcall, human requester,
--- load, validate, commit); the requester only reaches its own job
--- (FindVetJob(store, playerID, unitID)); "have" is logged only (gameplay
--- reads the promotions itself).
+-- unitID n, have n, stall n optional). Contract: INTERFACES section 6
+-- (pcall, human requester, load, validate, commit); the requester only
+-- reaches its own job (FindVetJob(store, playerID, unitID)); "have" is
+-- logged only (gameplay reads the promotions itself). Sync runs with hook
+-- "EFV_VetStep", so a landed promotion gets the 1.0.4 refill.
+-- stall = 1 (1.0.4): the owner's UI found no wanted promotion offered after
+-- a refill; when this Sync took no step, the open refill of this turn is
+-- taken back (Unloan "STALL"). It can only take moves from the requester's
+-- own unit, and only moves VEF lent this turn.
 -- ---------------------------------------------------------------------------
 function EFV_Veteran.OnRequestStep(playerID, params)
 	local store = nil
@@ -475,9 +588,13 @@ function EFV_Veteran.OnRequestStep(playerID, params)
 			DropGone(store, job, why)
 			return
 		end
+		local n0 = tonumber(job.n) or 0
 		local result = EFV_Veteran.Sync(store, job, pUnit, "EFV_VetStep")
-		EFV_Log(2, TAG, "step request player=%s uid=%s have=%s -> %s", tostring(playerID), tostring(uid),
-			tostring(params.have), tostring(result))
+		if tonumber(params.stall) == 1 and result == "OPEN" and (tonumber(job.n) or 0) == n0 then
+			Unloan(store, job, pUnit, "STALL")
+		end
+		EFV_Log(2, TAG, "step request player=%s uid=%s have=%s%s -> %s", tostring(playerID), tostring(uid),
+			tostring(params.have), tonumber(params.stall) == 1 and " stall=1" or "", tostring(result))
 	end)
 	if not ok then
 		EFV_Log(1, TAG, "step handler failed player=%s: %s", tostring(playerID), ErrText(err))

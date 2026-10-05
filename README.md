@@ -17,7 +17,7 @@ Version 1.0.3.
 
 Some basics:
 - A lent unit leaves the map for 1 to 4 turns and then appears next to the city you picked.
-- It keeps its type, promotions, damage and name, on the way out and on the way home. Units you control keep their level too: a unit coming home to you and your Volunteers. A unit controlled by the AI, for example an Expeditionary unit lent to an AI ally, restarts at level 1 with its promotions.
+- It keeps its type, promotions, damage and name, on the way out and on the way home. Units you control keep their level too, both a unit coming home to you and your Volunteers. They get all their promotions and their level back on the turn they arrive.
 - If the host upgrades the unit, it comes home upgraded. That includes the host's unique unit, for example a Macedonian Hypaspist.
 - The host does not need the tech for a unit it receives. It can host units it cannot build.
 - When its time is up, an Expeditionary unit has to be on the host's land or yours. If it is anywhere else it gets 5 turns of grace and then mutinies. City-State units never mutiny: they simply come home after their 10 turns.
@@ -45,6 +45,8 @@ The VEF button on the launch bar (top left) opens a list of every unit you sent 
 - State: Outbound, Deployed, Service ended, Grace, Mutiny, Lapse, Returning, or Blocked (arrival delayed). A paused lapse reads "Lapse: Grace 3 (paused)".
 - Turns: until arrival, until the service ends, of grace left, or until a mutinying unit dies. Volunteers have no limit and show "-".
 - Destination, for units on the way.
+
+While some of your units are on their way, a line at the bottom right shows their upkeep per turn and, in brackets, your real net gold per turn. Units off the map still cost their normal upkeep, but the gold per turn in the top bar doesn't count it.
 
 Units in grace or mutiny are listed first, in red. Click a column title to sort by it: once for A to Z (or lowest first), twice for Z to A, a third time for the usual order. The sorted column shows a single arrow next to its title, and every other title shows a faded up and down pair. While a column is sorted, units in grace or mutiny stay red but are no longer kept on top. Hover a row for details. Click a row to go to the unit: your own unit gets selected, a unit you lent out is shown if you can see it, and for a unit on the way the map shows its destination. Esc closes the list.
 
@@ -179,16 +181,17 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 
 ## Known issues
 - The AI never sends units or entrusts cities. It does use the units it receives.
-- Veterans get their level back only when they come home to a human player. The game allows one promotion per turn, so a unit with four promotions needs about four turns. A veteran controlled by the AI (for example an Expeditionary unit while an AI ally commands it) restarts at level 1 but keeps its promotions.
 - Entrust adds no grievance penalty for the new owner. The capturer takes the normal penalty; the game gives mods no way to add grievances.
 - A unit whose owner has none of its strategic resource doesn't heal. This is a Gathering Storm rule and covers lent units too (a host without Iron can't heal a lent Swordsman). VEF warns you before you send and while it happens.
 - If the host upgrades a lent unit and moves it away in the same turn, VEF can't be sure it's the same unit and reports it lost. The same applies to a city-state unit levied by its suzerain when it can't be told apart from the city-state's own units.
 - If the host is eliminated, anything a deployed Expeditionary unit gained after the host's last city fell is lost.
 - A mutinying unit may briefly show a "+HP" animation before VEF takes the healing back.
 - A host who declares war on you can use your lent units until the next turn starts.
+- Air units (planes) can't be sent yet.
+- The gold per turn in the top bar doesn't count the upkeep of your units on their way, but VEF still charges it each turn. The VEF tracker shows that upkeep and your real net gold per turn.
 
 ## Changelog
-- Unreleased: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land. Send fees are halved: Expeditionary and City-State units are still free for a 1-turn trip, then cost 5, 10 or 15% of the unit's gold price; Volunteers cost 10 to 25%.
+- Unreleased: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land. Send fees are halved: Expeditionary and City-State units are still free for a 1-turn trip, then cost 5, 10 or 15% of the unit's gold price; Volunteers cost 10 to 25%. Returning veterans now get all their promotions back on the turn they arrive, not one per turn. The tracker now shows the upkeep of your units on their way and your real net gold per turn, since the top bar leaves that upkeep out.
 - 1.0.3: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so. Entrust no longer needs a partner at war with the old owner when that owner was a city-state or has been knocked out of the game, so a city-state or a civ's last city can be entrusted now. In the tracker, units lent to you show as Inbound while on their way and Departed once they head home.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.
 - 1.0.1: Fixed: Expeditionary sends were allowed without a shared enemy. The game keeps every civ at war with the Free Cities and VEF counted that, so any partner passed. Free Cities no longer count as a shared enemy (they still do for Entrust), and Volunteers now lapse when the real shared war ends.

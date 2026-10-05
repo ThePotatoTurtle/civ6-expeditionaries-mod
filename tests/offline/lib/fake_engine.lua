@@ -1264,7 +1264,10 @@ function FAKE.NewPlayer(id, opts)
 		GetGoldBalance = function() return gold end,
 		ChangeGoldBalance = function(_, n) gold = gold + n end,
 		SetGoldBalance = function(_, n) gold = n end,
-		GetGoldYield = function() return 0 end,
+		-- Top-bar gold per turn = GetGoldYield() - GetTotalMaintenance()
+		-- (TopPanel.lua:146); tests set p.goldYield / p.totalMaintenance.
+		GetGoldYield = function() return p.goldYield or 0 end,
+		GetTotalMaintenance = function() return p.totalMaintenance or 0 end,
 	}
 	local res = {}
 	p.resources = {
