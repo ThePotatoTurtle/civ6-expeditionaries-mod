@@ -20,6 +20,11 @@ the veteran spike results (V0-V3) as findings, which never fail the run:
     Step  7  CHECK  Grace (S3): record 2 state=DEPLOYED grace=nil (expected GRACE with 5 turns)
     Step 12  -      Recall and friendship restored: not run
 
+Expected fees follow the VEF version line in the log ("EFV_Gameplay loading version="): the old
+table before 1.0.4, the halved one from 1.0.4. Step 1 of each step mode checks the VEF and
+EFV_Dev build that session was written for (0.7.2-dev for the default, --retest and --s14 modes,
+1.0.3 for --v103), so a newer build shows CHECK there by design.
+
 Sources: the "[EFV][CHECK] <ID> <PASS|CHECK|INFO> T<turn> <detail>" lines written by the
 EFV_Dev scenario buttons (EFV_Dev 0.7.2-dev.1) and a few of EFV's own log lines (version,
 [Send] ok, [Entrust] ok, loads). Lua.log is buffered while the game runs: quit to the
