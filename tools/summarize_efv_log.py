@@ -46,8 +46,22 @@ EFV_RE = re.compile(r"\[EFV\]\[T(-?\d+)\]\[([A-Za-z]+)\] (.*)$")
 SEND_RE = re.compile(r"ok id=(\d+) force=(\S+) sender=\d+ recipient=(\d+) unit=\S+ type=(\S+) fee=(\d+) band=(\S+)")
 SPEED_RE = re.compile(r"derived PM=(\d+) speedPct=(\d+)")
 
-FEE_PCT = {"EXPEDITIONARY": 0, "CS_EXPEDITIONARY": 0, "VOLUNTEER": 20}
-SURCHARGE_PCT = {1: 0, 2: 10, 3: 20, 4: 30}
+# Fee tables by VEF version (percent of the base gold cost). The log's
+# "EFV_Gameplay loading version=" line picks the table; 1.0.4 halved the fees.
+FEE_TABLES = {
+    "pre-1.0.4": ({"EXPEDITIONARY": 0, "CS_EXPEDITIONARY": 0, "VOLUNTEER": 20}, {1: 0, 2: 10, 3: 20, 4: 30}),
+    "1.0.4": ({"EXPEDITIONARY": 0, "CS_EXPEDITIONARY": 0, "VOLUNTEER": 10}, {1: 0, 2: 5, 3: 10, 4: 15}),
+}
+LOAD_VERSION_RE = re.compile(r"EFV_Gameplay loading version=(\S+)")
+
+
+def fee_table_for(version):
+    """Fee table for a VEF version string; unknown or missing -> the current table."""
+    try:
+        parts = tuple(int(p) for p in version.split("-")[0].split("."))
+    except (AttributeError, ValueError):
+        return FEE_TABLES["1.0.4"]
+    return FEE_TABLES["pre-1.0.4"] if parts < (1, 0, 4) else FEE_TABLES["1.0.4"]
 
 
 class Log:
@@ -125,9 +139,10 @@ def expected_fee(ctx, unit_type, force, band):
         b = int(band)
     except (TypeError, ValueError):
         return None
-    if pm is None or speed is None or cost is None or force not in FEE_PCT or b not in SURCHARGE_PCT:
+    fee_pct, surcharge_pct = fee_table_for(ctx.get("version"))
+    if pm is None or speed is None or cost is None or force not in fee_pct or b not in surcharge_pct:
         return None
-    n = cost * speed * pm * (FEE_PCT[force] + SURCHARGE_PCT[b])
+    n = cost * speed * pm * (fee_pct[force] + surcharge_pct[b])
     return int(math.floor((n + 9999) / 10000))
 
 
@@ -610,6 +625,9 @@ def main(argv=None):
         m = SPEED_RE.search(ln)
         if m:
             ctx["pm"], ctx["speed"] = int(m.group(1)), int(m.group(2))
+        m = LOAD_VERSION_RE.search(ln)
+        if m:
+            ctx["version"] = m.group(1)
     if a.eligibility:
         print("VEF eligibility tests (%s, %d check lines)" % (a.log, len(log.checks)))
         bad = eligibility_report(log)
