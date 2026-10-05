@@ -10,9 +10,9 @@ python tools\check_all.py EFV EFV_Dev     # explicit folders (a mod folder or a 
 python tools\check_all.py EFV --strict    # warnings fail too
 ```
 
-`check_all.py` runs `check_lua.py`, `validate_data.py` and `api_audit.py` and exits non-zero on any error. Findings look like `path:line: LEVEL [code] message`. At the end it prints a per-tool summary and a list of engine calls that still wait for an in-game test. `--info` shows INFO lines, `--basic` skips the Lua runtime, `--db PATH` picks another gameplay database.
+`check_all.py` runs `check_lua.py`, `validate_data.py` and `api_audit.py` and exits non-zero on any error. Findings look like `path:line: LEVEL [code] message`. At the end it prints a per-tool summary and a list of engine calls that still wait for an in-game test. `--info` shows INFO lines, `--basic` skips the Lua runtime, `--db PATH` picks another gameplay database, `--no-checklist` leaves out the list of untested calls (the install script uses it).
 
-The tools test themselves with `python tools\test_tools.py` (26 tests on `tools\fixtures`).
+The tools test themselves with `python tools\test_tools.py` (28 tests on `tools\fixtures`, including the `summarize_efv_log.py` modes and the test runner's XFAIL rule). The Lua tests of the mod itself are `python tests\offline\run_tests.py`.
 
 ## check_lua.py: Lua syntax and globals
 
@@ -68,26 +68,37 @@ powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs      # onl
 - Stops at once while Civilization VI is running. `-DevOnly` checks and copies only `EFV_Dev`, for tests against the Workshop VEF, and warns when a local `Mods\EFV` is left over (same mod id as the Workshop copy: delete it). Installing `EFV` itself warns while the Workshop VEF is still subscribed (`-WorkshopDir`, default `M:\Steam\steamapps\workshop\content\289070\3810156577`): unsubscribe from it while you test a local build, and check that Additional Content lists VEF once, with the local version number.
 - `-Uninstall` removes only `Mods\EFV` (the local VEF) after such a test; `EFV_Dev` stays. Then resubscribe on the Workshop. It also refuses to run while the game is running.
 - Runs `check_all.py` first. Errors stop the install unless you pass `-Force` (`-SkipChecks` skips the checks, `-Strict` also stops on warnings).
-- Mirrors the folders into `S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods\EFV` (and `EFV_Dev`). It refuses targets outside `-ModsDir` or folders not named `EFV*`. Files deleted in the source are deleted in the copy too.
+- Mirrors the folders into `S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods\EFV` (and `EFV_Dev`). It refuses targets outside `-ModsDir` or folders not named `EFV*`. Files deleted in the source are deleted in the copy too. `-Src` / `-DevSrc` pick other source folders and `-Python` another Python.
 - `-Watch` / `-WatchOnly` follow `Lua.log`, filtered by `-Pattern` (default `EFV|Runtime Error|Syntax Error|stack traceback`), and pick the file up again when the game recreates it.
 - `-CheckLogs` runs `tools\check_logs.py` on Database.log, Modding.log, Lua.log and UserInterface.log. Exit code 1 on errors that involve the mod.
 - Logs: `-LogsDir` defaults to `%LOCALAPPDATA%\Firaxis Games\Sid Meier's Civilization VI\Logs`. The copy under `Documents\My Games` is stale. `Lua.log` is buffered while you play, so read it after quitting to the menu or the desktop.
 
-## summarize_efv_log.py: result of the final in-game session
+## summarize_efv_log.py: results of an in-game test session
 
 ```
-python tools\summarize_efv_log.py [--retest | --s14 | --eligibility | --v103] [--log PATH] [--db PATH] [-v]
+python tools\summarize_efv_log.py [--retest | --s14 | --v103 | --eligibility] [--log PATH] [--db PATH] [-v]
 ```
 
-`--retest` reads the short 0.7 re-test (`EFV/TESTING_RETEST_0.7.md`), `--s14` the mutiny-death check (`EFV/TESTING_S14.md`) and `--v103` the VEF 1.0.3 session (`EFV/TESTING_1.0.3.md`, VEF Dev Tools 1.0.3.2); `--v103` also lists the veteran spike results (V0 to V3) as findings that never fail the run. Every mode ends with the error count and the "Badge audit" line of VEF Dev Tools 0.7.2-dev.1.
+Reads `Lua.log` after a test session and prints one line per step, for example `Step  7  PASS   Grace (S3): ...`. A step is PASS, CHECK (look at it) or `-` (not run). It uses the `[EFV][CHECK]` lines written by the VEF Dev Tools buttons, plus a few of the mod's own lines: the versions, every send with its fee, Entrust, and the number of game loads. Quit the game before running it: `Lua.log` is buffered while you play.
 
-Reads `Lua.log` after the session in `EFV/TESTING_FINAL.md` and prints one line per step, for example `Step  7  PASS   Grace (S3): ...`. A step is PASS, CHECK (look at it) or `-` (not run). It uses the `[EFV][CHECK]` lines written by the VEF Dev Tools scenario buttons, plus a few of the mod's own lines: the versions, every send with its fee (compared with the expected fee from the game database), Entrust, and the number of game loads. The last line counts error lines. `-v` also prints every CHECK line. Quit the game before running it.
+| Mode | Session |
+|---|---|
+| (none) | the full session, `EFV/TESTING_FINAL.md` (written for 0.6.1) |
+| `--retest` | the short 0.7 re-test, `EFV/TESTING_RETEST_0.7.md` |
+| `--s14` | the mutiny-death check, `EFV/TESTING_S14.md` |
+| `--v103` | the VEF 1.0.3 session, `EFV/TESTING_1.0.3.md` (VEF Dev Tools 1.0.3.2); also lists the veteran spike results (V0 to V3) as findings that never fail the run |
+| `--eligibility` | the T1 and T2 buttons: the last run of each, one line per civ and city-state, for the gameplay and the UI rules |
+
+The VEF 1.0.4 session (`EFV/TESTING_1.0.4.md`) is checked by eye and has no mode. Step 1 of each mode checks the versions that session was written for: VEF 0.7.2-dev with VEF Dev Tools 0.7.2-dev.1 (no mode, `--retest`, `--s14`) or VEF 1.0.3 with 1.0.3.2 (`--v103`). On a log of a newer build that step reads CHECK with "expected VEF ..."; the other steps still work. Every mode ends with the error count; all but `--eligibility` also print the "Badge audit" line (VEF Dev Tools 0.7.2-dev.1 or later). `-v` also prints every CHECK line. Exit code 0 when every step that ran passed, 1 otherwise, 2 when `Lua.log` is missing.
+
+Send fees are compared with the fee expected from the game database (unit cost, game speed). The fee table follows the VEF version in the log's `EFV_Gameplay loading version=` line: the old table before 1.0.4 (Volunteers 20 %, band surcharge 0 / 10 / 20 / 30 %), the halved one from 1.0.4 on (Volunteers 10 %, band surcharge 0 / 5 / 10 / 15 %). A log without that line uses the 1.0.4 table.
 
 ## Fixtures
 
 - `fixtures\good\EFV_Fixture`: a small mod shaped like VEF. 0 errors and 2 known warnings expected.
 - `fixtures\bad\EFV_Broken`: one planted mistake per rule, each marked with a comment.
 - `fixtures\logs\{good,bad}`: made-up logs for `check_logs.py`.
+- `fixtures\logs\retest`: a made-up `Lua.log` of a passing 0.7 re-test, and `fixtures\logs\retest_070` the real 0.7.0 re-test log, for `summarize_efv_log.py --retest`.
 
 ## Limits
 
