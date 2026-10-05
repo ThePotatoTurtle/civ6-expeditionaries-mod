@@ -54,7 +54,7 @@
 -- EFV_NOTIF_ACCESS_LAPSE      sender (lapse reason PARTNER)       HIGH       0        0        122 DIPLO_ALLIANCE_EXPIRED
 -- EFV_NOTIF_UNIT_LOST         sender (and recipient when NO_CITY) MID        0        0        53  UNIT_LOST
 -- EFV_NOTIF_MERGED            both                                MID        0        0        52  UNIT_DISBANDED
--- EFV_NOTIF_REVERTED          unit holder (host; both until 1.0.3) HIGH       0        0        55  UNIT_CAPTURED
+-- EFV_NOTIF_REVERTED          unit holder (host; both until 1.0.3) HIGH       0        0        0   GENERIC (1.0.4; was 55 UNIT_CAPTURED)
 --   REVERTED: since 1.0.4 sent only to the player that held the unit (the
 --   host): a sender-host war sends the unit home. The sender gets the
 --   RETURNING _WAR text instead.
@@ -108,7 +108,7 @@ INSERT INTO Notifications (NotificationType, SeverityType, ExpiresEndOfTurn, Aut
 	('EFV_NOTIF_ACCESS_LAPSE',    'HIGH',      0, 0, 'ICON_NOTIFICATION_DIPLO_ALLIANCE_EXPIRED'),
 	('EFV_NOTIF_UNIT_LOST',       'MID',       0, 0, 'ICON_NOTIFICATION_UNIT_LOST'),
 	('EFV_NOTIF_MERGED',          'MID',       0, 0, 'ICON_NOTIFICATION_UNIT_DISBANDED'),
-	('EFV_NOTIF_REVERTED',        'HIGH',      0, 0, 'ICON_NOTIFICATION_UNIT_CAPTURED'),
+	('EFV_NOTIF_REVERTED',        'HIGH',      0, 0, 'ICON_NOTIFICATION_GENERIC'),
 	('EFV_NOTIF_REQUEST_FAILED',  'LOW',       1, 0, 'ICON_NOTIFICATION_GENERIC'),
 	('EFV_NOTIF_LAPSE_CANCELLED', 'MID',       1, 0, 'ICON_NOTIFICATION_DIPLOMATIC_PROMISE_TO_KEPT'),
 	('EFV_NOTIF_LAPSE_PAUSED',    'HIGH',      0, 0, 'ICON_NOTIFICATION_COMMAND_UNITS');
