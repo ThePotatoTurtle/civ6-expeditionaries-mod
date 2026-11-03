@@ -19,6 +19,9 @@
 -- (PLAN 2.3, 6.3; checked by tools/api_audit.py). Adapters in this file:
 --   PartnerState      G: HasAllied / HasDeclaredFriendship (A37, A38)
 --                     UI: GetDiplomaticAI():GetDiplomaticStateIndex (U20)
+--   DenouncedPair     G: GetAi_Diplomacy():GetDiplomaticState (A64) / UI:
+--                     GetDiplomaticAI():GetDiplomaticStateIndex (U20); both
+--                     directions, fail closed (1.0.5 proxy war)
 --   EFV_HasOpenBordersFrom  UI: HasOpenBordersFrom (A39)
 --                     G: deal scan (A40; HasOpenBordersFrom is nil in G,
 --                        Session A T09; the scan is confirmed in game by
@@ -29,6 +32,9 @@
 --   TinyLake          G only: IsLake + GetArea():GetPlotCount (A14)
 --   HasFullMovesCtx   both: GetMovesRemaining / GetMaxMoves (A23, CONFIRMED
 --                     in both contexts; no branch needed)
+--   CarrierHasPlanes  both: Units.GetUnitsInPlot (A15) + Players[p]:GetUnits()
+--                     :Members() by position (A17), CONFIRMED in both
+--                     contexts; no branch needed (CARRIER_LOADED, 1.0.5)
 -- Calls available in both contexts but unverified in G (IsRevealed,
 -- GetUnitsInPlotLayerID) go through pcall with a logged, documented fallback.
 --
@@ -41,7 +47,9 @@
 -- city-state the sender HasMet (CS_NOT_MET otherwise; majors, Free Cities
 -- and barbarians are never CS recipients); NO shared-enemy requirement
 -- (designer ruling 1.0.2, "proxy wars": NO_COMMON_WAR is never emitted for
--- CS; Expeditionary to majors and Volunteers keep it); not at war with the
+-- CS; Expeditionary to majors and Volunteers keep it; since 1.0.5 an
+-- Expeditionary send to a major also passes on a proxy war,
+-- EFV_ProxyWarEnemies); not at war with the
 -- city-state (AT_WAR_WITH_RECIPIENT); fee FEE_CS_EXPEDITIONARY (= the Expeditionary
 -- column); duration CS_EXPEDITIONARY_DURATION (10); naval dry run as the
 -- city-state (future owner); valid return territory = the city-state's or
@@ -80,6 +88,7 @@ EFV_Rules.ALL_REASON_CODES = {
 	-- unit level
 	"NOT_HUMAN_MAJOR", "NOT_OWNER", "CLASS_NEVER", "FORMATION", "DAMAGED",
 	"NOT_OWN_TERRITORY", "EMBARKED", "NOT_FULL_MOVES", "ALREADY_TRACKED",
+	"CARRIER_LOADED",
 	-- destination level
 	"NOT_PARTNER", "VOL_NEEDS_ACCESS", "CS_NOT_MET", "AT_WAR_WITH_RECIPIENT",
 	"NO_COMMON_WAR", "CITY_NOT_OWNED", "NOT_REVEALED", "GOLD", "NAVAL_NO_SPAWN",
@@ -103,6 +112,20 @@ EFV_Rules.ALL_REASON_CODES = {
 --                      row's recipient, so it is not in NAME_REASON_CODES;
 --   all other codes    no arguments.
 EFV_Rules.NAME_REASON_CODES = { "NOT_PARTNER", "VOL_NEEDS_ACCESS", "CS_NOT_MET", "AT_WAR_WITH_RECIPIENT", "NO_COMMON_WAR" }
+
+-- EFV_ReasonTextKey(code, forceType) -> text key   (1.0.5, F4)
+-- "LOC_EFV_REASON_" .. code, except NO_COMMON_WAR on an Expeditionary send
+-- while FLAG_PROXY_WAR is on: "LOC_EFV_NO_COMMON_WAR_EXP", whose text also
+-- names the proxy war (same {1_Name} argument, so NAME_REASON_CODES still
+-- applies). Deliberately not a LOC_EFV_REASON_* key: tools/validate_data.py
+-- ties those to EFV_Rules.ALL_REASON_CODES ("text-unused" otherwise).
+-- Used by EFV_UI_ReasonsText (UI) and EFV_Transit ReasonText (G).
+function EFV_ReasonTextKey(code, forceType)
+	if code == "NO_COMMON_WAR" and forceType == EFV_Config.FT_EXP and EFV_Config.FLAG_PROXY_WAR == true then
+		return "LOC_EFV_NO_COMMON_WAR_EXP"
+	end
+	return "LOC_EFV_REASON_" .. tostring(code)
+end
 
 -- ---------------------------------------------------------------------------
 -- File-local state and helpers
@@ -273,6 +296,57 @@ local function PartnerState(s, r)
 	return allied, friend
 end
 
+local DIPLO_DENOUNCED = "DIPLO_STATE_DENOUNCED"
+
+-- One direction of the pair's diplomatic state. Returns denounced, readable.
+-- G (A64, SPIKES 8.1): Players[a]:GetAi_Diplomacy():GetDiplomaticState(b)
+--   returns the StateType string (GetDiplomaticAI is nil in G).
+-- UI (U20): Players[a]:GetDiplomaticAI():GetDiplomaticStateIndex(b) ->
+--   GameInfo.DiplomaticStates[i].StateType (GetAi_Diplomacy is nil in UI).
+local function DenouncedOneWay(a, b)
+	local ok, st = false, nil
+	if EFV_IsGameplay() then
+		-- EFV:G-ONLY begin
+		ok, st = pcall(function() return Players[a]:GetAi_Diplomacy():GetDiplomaticState(b) end)
+		-- EFV:G-ONLY end
+	else
+		-- EFV:UI-ONLY begin
+		ok, st = pcall(function()
+			local row = GameInfo.DiplomaticStates[Players[a]:GetDiplomaticAI():GetDiplomaticStateIndex(b)]
+			return row ~= nil and row.StateType or nil
+		end)
+		-- EFV:UI-ONLY end
+	end
+	if not ok or type(st) ~= "string" then
+		return false, false
+	end
+	return st == DIPLO_DENOUNCED, true
+end
+
+-- The pair (a, b) is in a denouncement, read both ways ("either side
+-- denounced"; one read is enough in game, both keep the rule right if a
+-- patch ever makes the state directional). Unreadable both ways -> false
+-- (fail closed = the 1.0.4 rule), ERROR logged once per context.
+local function DenouncedPair(a, b)
+	if a == nil or b == nil or a == b then
+		return false
+	end
+	local d1, r1 = DenouncedOneWay(a, b)
+	if d1 then
+		return true
+	end
+	local d2, r2 = DenouncedOneWay(b, a)
+	if d2 then
+		return true
+	end
+	if not r1 and not r2 then
+		LogOnce("denounce" .. (EFV_IsGameplay() and "G" or "UI"), 1,
+			"denouncement reader unavailable in %s (players %s, %s): proxy wars do not count",
+			EFV_IsGameplay() and "G" or "UI", tostring(a), tostring(b))
+	end
+	return false
+end
+
 -- Predicted expiry of an open-borders deal item (Session D 2.2, INTEGRATION
 -- NOTES D item 1): the agreement ends on turn GetEnactedTurn() +
 -- GetDuration(). On that turn the deal is still listed at OnGameTurnStarted
@@ -381,6 +455,71 @@ local function HasFullMovesCtx(pUnit)
 		return true
 	end
 	return moves >= maxMoves
+end
+
+-- A unit of senderID whose type is DOMAIN_AIR (A31, A51). Unreadable -> false.
+local function IsAirUnitOf(pU, senderID)
+	if pU == nil then
+		return false
+	end
+	local ok, res = pcall(function()
+		if pU:GetOwner() ~= senderID then
+			return false
+		end
+		local r = GameInfo.Units[pU:GetType()]
+		return r ~= nil and r.Domain == "DOMAIN_AIR"
+	end)
+	return ok and res == true
+end
+
+-- Loaded carrier (designer ruling 2026-10-05, CARRIER_LOADED; FIXPLAN_air_units
+-- section 9): a unit whose type has AirSlots > 0 (DB: the Aircraft Carrier, 2)
+-- and a DOMAIN_AIR unit of the sender on its plot. Planes aboard a carrier
+-- cannot be told apart from planes based in a city or harbour on the same
+-- tile (no confirmed gameplay reader for unit:GetAirUnits, FIXPLAN E10), so
+-- any sender plane on that plot blocks (fail safe). Two confirmed sources in
+-- both contexts, no branch: Units.GetUnitsInPlot(plot) (A15) and, because a
+-- based plane may be missing from the plot list (FIXPLAN E11), the sender's
+-- Players[p]:GetUnits():Members() matched by GetX/GetY (A17, A31). If neither
+-- list can be read, a carrier is blocked (logged once).
+local function CarrierHasPlanes(pUnit, senderID, row)
+	if row == nil or type(row.AirSlots) ~= "number" or row.AirSlots <= 0 then
+		return false
+	end
+	local okP, x, y = pcall(function() return pUnit:GetX(), pUnit:GetY() end)
+	if not okP or type(x) ~= "number" or type(y) ~= "number" then
+		return true
+	end
+	local plot = Map.GetPlot(x, y)
+	local okL, list = pcall(function() return Units.GetUnitsInPlot(plot) end)
+	if okL and type(list) == "table" then
+		for _, pU in ipairs(list) do
+			if IsAirUnitOf(pU, senderID) then
+				return true
+			end
+		end
+	end
+	local found = false
+	local okM = pcall(function()
+		for _, pU in Players[senderID]:GetUnits():Members() do
+			if pU ~= nil and IsAirUnitOf(pU, senderID) then
+				local okXY, ux, uy = pcall(function() return pU:GetX(), pU:GetY() end)
+				if okXY and ux == x and uy == y then
+					found = true
+					break
+				end
+			end
+		end
+	end)
+	if found then
+		return true
+	end
+	if not okM and not (okL and type(list) == "table") then
+		LogOnce("carrierPlanes", 2, "unit lists unreadable in %s; carrier blocked as loaded (fail safe)",
+			EFV_IsGameplay() and "G" or "UI")
+		return true
+	end
+	return false
 end
 
 -- Levy / foreign-origin test (D4, spec 1.2 "levied units"): owner differs
@@ -609,6 +748,38 @@ function EFV_HasCommonWar(s, r)
 		end
 	end
 	return false
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_ProxyWarEnemies(s, r) -> enemies   (1.0.5, F4 option b)
+-- Every alive player e (EFV_SortedAlivePlayers: ascending, deterministic),
+-- e ~= s, e ~= r, EFV_PlayerKind(e) == "MAJOR", with r at war with e
+-- (AtWar, A36) and DenouncedPair(s, e). s's own war with e is not looked
+-- at: a war replaces DENOUNCED, and then EFV_HasCommonWar decides.
+-- {} when FLAG_PROXY_WAR is off, on nil arguments or s == r.
+-- City-states, Barbarians and the Free Cities never qualify (not MAJOR;
+-- the DB's DENOUNCE triggers are FULL_CIV vs FULL_CIV).
+-- Params:  s sender player ID, r recipient player ID.
+-- Returns: dense ascending array of player IDs.
+-- EFV_HasProxyWar(s, r) -> bool: the list is not empty.
+-- FIXPLAN_proxy_war.md B1; DECISIONS 2026-10-05, 2026-10-24.
+-- APIs: A36, A64 (G) / U20 (UI) via DenouncedPair.
+-- ---------------------------------------------------------------------------
+function EFV_ProxyWarEnemies(s, r)
+	local out = {}
+	if EFV_Config.FLAG_PROXY_WAR ~= true or s == nil or r == nil or s == r then
+		return out
+	end
+	for _, e in ipairs(EFV_SortedAlivePlayers()) do
+		if e ~= s and e ~= r and EFV_PlayerKind(e) == "MAJOR" and AtWar(r, e) and DenouncedPair(s, e) then
+			out[#out + 1] = e
+		end
+	end
+	return out
+end
+
+function EFV_HasProxyWar(s, r)
+	return #EFV_ProxyWarEnemies(s, r) > 0
 end
 
 -- ---------------------------------------------------------------------------
@@ -849,13 +1020,16 @@ end
 -- a destination rule, WRONG_TERRITORY, 0.7), not embarked (EMBARKED; fallback land unit on
 -- water), full movement points (NOT_FULL_MOVES: moves remaining == max
 -- moves, designer decision replacing spec 6.2.6), not tracked by any record
--- (ALREADY_TRACKED, DV8). All failing conditions are listed (spec 6).
+-- (ALREADY_TRACKED, DV8), and a unit with air slots carries no plane of the
+-- sender (CARRIER_LOADED, designer ruling 2026-10-05, 1.0.5: any
+-- sender DOMAIN_AIR unit on its plot, CarrierHasPlanes). All failing
+-- conditions are listed (spec 6).
 -- A nil unit (not found / not the requester's) returns { "REQ_STALE" }.
 -- Params:  pUnit unit object, senderID player ID, store = gameplay store or
 --          UI store (both expose ids/recs; INTERFACES "Store").
 -- Returns: dense array of reason codes; empty = eligible.
 -- PLAN 2.3; spec 6.2; SPIKES 3 row 6. APIs: A42, A31, A33, A25, A13, A32,
--- A23, A24.
+-- A23, A24, A15, A17.
 -- ---------------------------------------------------------------------------
 function EFV_UnitSendReasons(pUnit, senderID, store)
 	local reasons = {}
@@ -898,14 +1072,20 @@ function EFV_UnitSendReasons(pUnit, senderID, store)
 	if IsTracked(store, owner, pUnit:GetID()) then
 		Add(reasons, "ALREADY_TRACKED")
 	end
+	if CarrierHasPlanes(pUnit, senderID, UnitRowOf(pUnit)) then
+		Add(reasons, "CARRIER_LOADED")
+	end
 	return reasons
 end
 
 -- Recipient-level evaluation, shared by all cities of one recipient.
--- Returns { reasons = {codes}, basis = accessBasis or nil }.
+-- Returns { reasons = {codes}, basis = accessBasis or nil,
+--           warBasis = "COMMON" / "PROXY" / nil, proxyEnemies = array (PROXY
+--           only) }.
 -- Order: basis (NOT_PARTNER / VOL_NEEDS_ACCESS / CS_NOT_MET),
--- AT_WAR_WITH_RECIPIENT, NO_COMMON_WAR (spec 6.1.2-6.1.4; EXP and VOL only:
--- City-State sends need no shared enemy, designer ruling 1.0.2).
+-- AT_WAR_WITH_RECIPIENT, NO_COMMON_WAR (spec 6.1.2-6.1.4; EXP: neither a
+-- real common war nor a proxy war, 1.0.5; VOL: no real common war; never
+-- for CS: City-State sends need no shared enemy, designer ruling 1.0.2).
 local function RecipientInfo(senderID, recipientID, forceType)
 	local info = { reasons = {}, basis = nil }
 	if recipientID == nil or recipientID == senderID or Players[recipientID] == nil or not IsAlive(recipientID) then
@@ -941,8 +1121,19 @@ local function RecipientInfo(senderID, recipientID, forceType)
 	if AtWar(senderID, recipientID) then
 		Add(info.reasons, "AT_WAR_WITH_RECIPIENT")
 	end
-	if forceType ~= EFV_Config.FT_CS and not EFV_HasCommonWar(senderID, recipientID) then
-		Add(info.reasons, "NO_COMMON_WAR")
+	if forceType ~= EFV_Config.FT_CS then
+		if EFV_HasCommonWar(senderID, recipientID) then
+			info.warBasis = "COMMON"
+		elseif forceType == EFV_Config.FT_EXP then
+			local enemies = EFV_ProxyWarEnemies(senderID, recipientID)
+			if #enemies > 0 then
+				info.warBasis = "PROXY"
+				info.proxyEnemies = enemies
+			end
+		end
+		if info.warBasis == nil then
+			Add(info.reasons, "NO_COMMON_WAR")
+		end
 	end
 	return info
 end
@@ -954,7 +1145,9 @@ end
 -- send whose conditions stop holding in transit is cancelled). Same codes
 -- and order as the picker / send handler, so the rules cannot drift:
 -- basis (NOT_PARTNER / VOL_NEEDS_ACCESS / CS_NOT_MET), AT_WAR_WITH_RECIPIENT,
--- NO_COMMON_WAR (EXP and VOL only). Unknown force type or an error ->
+-- NO_COMMON_WAR (EXP and VOL only; for EXP since 1.0.5 it means "no common
+-- war and no proxy war", which makes the transit cancel of a proxy-war send
+-- automatic). Unknown force type or an error ->
 -- { "REQ_STALE" } (callers treat that as "could not evaluate").
 -- Returns: dense array (copy) of codes, empty = the recipient qualifies;
 --          the basis ("TEAM" / "ALLIANCE" / "FRIEND" / "FRIEND_OB" /
@@ -1033,6 +1226,10 @@ local function EvaluateCore(uctx, recipientID, pCity, forceType, rinfo)
 				fee      = EFV_Fee(uctx.unitType, forceType, band),
 				duration = EFV_Duration(forceType),
 				basis    = rinfo.basis,
+				-- 1.0.5 (display only; the array is shared by the rows of
+				-- one recipient and is read-only)
+				warBasis     = rinfo.warBasis,
+				proxyEnemies = rinfo.proxyEnemies,
 			}
 		end
 	end
@@ -1132,8 +1329,9 @@ end
 -- (CITY_NOT_OWNED), revealed to sender (NOT_REVEALED; G: A59 NEW-VERIFY,
 -- skipped with a log line if unavailable), basis present (EXP: NOT_PARTNER,
 -- VOL: VOL_NEEDS_ACCESS / NOT_PARTNER, CS: CS_NOT_MET), not at war
--- sender-recipient (AT_WAR_WITH_RECIPIENT), common war (NO_COMMON_WAR; EXP
--- and VOL only, 1.0.2), gold
+-- sender-recipient (AT_WAR_WITH_RECIPIENT), common war (NO_COMMON_WAR; EXP:
+-- a real common war or a proxy war since 1.0.5; VOL: a real common war;
+-- never for CS, 1.0.2), gold
 -- floor(GetGoldBalance()) >= fee (GOLD), naval dry run
 -- EFV_SpawnCandidates(city, "SEA", futureOwner) ~= nil (NAVAL_NO_SPAWN;
 -- futureOwner = recipient for EXP/CS, sender for VOL). A nil city -> REQ_STALE;
@@ -1146,7 +1344,8 @@ end
 -- Returns: ok boolean; reasons dense array of codes (empty when ok);
 --          calc table or nil (shape INTERFACES "calc"):
 --          { origin = senderCity, band, distance, transit, fee, duration,
---            basis }
+--            basis, warBasis ("COMMON" / "PROXY" / nil, 1.0.5),
+--            proxyEnemies (array, PROXY only) }
 -- PLAN 2.3; spec 6. APIs: A46, A59, A36, A49 + those of the helpers.
 -- ---------------------------------------------------------------------------
 function EFV_EvaluateSend(senderID, pUnit, recipientID, pCity, forceType, store)

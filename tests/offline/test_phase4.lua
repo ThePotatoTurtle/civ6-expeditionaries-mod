@@ -439,14 +439,17 @@ test("levy: expiry while levied recalls the unit from the suzerain at once, even
 	H.clean()
 end)
 
-test("levy: no candidate -> DISBANDED as before; a combat marker wins over a levied twin (KILLED)", function()
+test("levy: no candidate -> the city-state disbanded it: home (1.0.5); a combat marker wins over a levied twin (KILLED)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local r, cu = SendAndArrive(S)
 	H.killUnit(cu)                                    -- gone, nothing levied
 	H.endTurn()
-	H.len(H.records(), 0)
-	H.ok(string.find(Summary(Sent(0, "UNIT_LOST")[1]), Locale.Lookup("LOC_EFV_LOSS_DISBANDED"), 1, true))
+	local rr = Only()
+	H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "DISBANDED")
+	H.len(Sent(0, "UNIT_LOST"), 0)
+	H.turns(rr.arrivalTurn - FAKE.turn)
+	H.len(H.records(), 0, "home")
 	-- Second record: it fought last turn, then its twin shows up with the suzerain.
 	H.clearNotifs()
 	r, cu = SendAndArrive(S)

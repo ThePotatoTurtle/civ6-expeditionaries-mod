@@ -66,6 +66,14 @@ EFV_Log(2, "Init", "EFV_Gameplay loading version=%s", tostring(EFV_Config.VERSIO
 -- Helpers (file-local)
 -- ---------------------------------------------------------------------------
 
+-- Depth of SafeCall nesting (1.0.5, FIXPLAN_upgrade_relink.md "Re-entrancy
+-- guard"): > 0 while an EFV handler, boundary, pipeline step or request
+-- runs. A synchronous engine event fired inside one of them (e.g.
+-- GameEvents.UnitCreated for EFV's own Create) is skipped by the 1.0.5
+-- handlers, so no second copy of the store is loaded or committed. Every
+-- client has the same call stack.
+local m_Depth = 0
+
 -- pcall wrapper: logs "<label> failed: <error>" at level 1 under tag.
 -- Returns true when fn ran without error.
 local function SafeCall(tag, label, fn, ...)
@@ -73,7 +81,9 @@ local function SafeCall(tag, label, fn, ...)
 		EFV_Log(1, tag, "%s: function missing", tostring(label))
 		return false
 	end
+	m_Depth = m_Depth + 1
 	local ok, err = pcall(fn, ...)
+	m_Depth = m_Depth - 1
 	if not ok then
 		EFV_Log(1, tag, "%s failed: %s", tostring(label), tostring(err))
 	end
@@ -328,6 +338,65 @@ function EFV_Gameplay.OnRequestVetStep(playerID, params)
 end
 
 -- ---------------------------------------------------------------------------
+-- EFV_Gameplay.Busy() -> bool   (1.0.5)
+-- true while EFV's own code runs (SafeCall depth > 0): the 1.0.5 unit
+-- event handlers below return at once.
+-- ---------------------------------------------------------------------------
+function EFV_Gameplay.Busy()
+	return m_Depth > 0
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Gameplay.OnUnitMoved(pid, uid)   (1.0.5 F1, INTERFACES note 38)
+-- GameEvents.OnUnitMoved (gameplay; PiratesScenario_StartScript.lua:1615,
+-- CivRoyaleScenario_StartScript.lua:1613): EFV_Lifecycle.OnUnitMoved keeps
+-- a lent unit's last tile current (FLAG_MOVE_TRACK). Skipped while EFV's own
+-- code runs (Busy).
+-- Params:  pid, uid (event arguments).
+-- Returns: nil.
+-- ---------------------------------------------------------------------------
+function EFV_Gameplay.OnUnitMoved(pid, uid)
+	if not EFV_Config.FLAG_MOVE_TRACK or EFV_Gameplay.Busy() then
+		return nil
+	end
+	SafeCall("Move", "OnUnitMoved", EFV_Lifecycle.OnUnitMoved, pid, uid)
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Gameplay.OnUnitCreated(pid, uid) / OnUnitInitialized(pid, uid)
+-- (1.0.5 F2, INTERFACES note 38)
+-- GameEvents.UnitCreated / UnitInitialized (gameplay; PiratesScenario_
+-- StartScript.lua:1622-1623, CivRoyaleScenario_StartScript.lua:1611-1612):
+-- EFV_Lifecycle.OnUnitCreated pairs an upgraded lent unit with its record
+-- at once (FLAG_UPGRADE_RELINK and FLAG_UPGRADE_CREATE_HOOK). Both events may
+-- fire for one unit; the handler is idempotent. Skipped for EFV's own
+-- units (Busy, EFV_Units.IsCreating). A safe no-op if the events never fire.
+-- Params:  pid, uid (event arguments).
+-- Returns: nil.
+-- ---------------------------------------------------------------------------
+local function UpgradeHookOff()
+	return not (EFV_Config.FLAG_UPGRADE_RELINK and EFV_Config.FLAG_UPGRADE_CREATE_HOOK)
+		or EFV_Gameplay.Busy() or EFV_Units.IsCreating()
+end
+
+function EFV_Gameplay.OnUnitCreated(pid, uid)
+	if UpgradeHookOff() then
+		return nil
+	end
+	SafeCall("Upgrade", "OnUnitCreated", EFV_Lifecycle.OnUnitCreated, pid, uid, "UnitCreated")
+	return nil
+end
+
+function EFV_Gameplay.OnUnitInitialized(pid, uid)
+	if UpgradeHookOff() then
+		return nil
+	end
+	SafeCall("Upgrade", "OnUnitInitialized", EFV_Lifecycle.OnUnitCreated, pid, uid, "UnitInitialized")
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_Gameplay.OnPlayerDefeat(pid, defeatType, eventID)
 -- Events.PlayerDefeat (A55, async hint, DV13). Registered unconditionally;
 -- acts only when EFV_Config.FLAG_DEFEAT_HINT -> EFV_Lifecycle.
@@ -385,6 +454,30 @@ EFV_Log(2, "Init", "registered %s", "GameEvents.EFV_VetStep")
 
 Events.PlayerDefeat.Add(EFV_Gameplay.OnPlayerDefeat)
 EFV_Log(2, "Init", "registered %s", "Events.PlayerDefeat")
+
+-- 1.0.5 (FIXPLAN_upgrade_relink.md F1, F2): gameplay events used by Firaxis'
+-- multiplayer scenarios, nil-guarded (whether they fire in a normal game is
+-- the U6 spike's Q-A / Q-B; the handlers do nothing when they never fire).
+do
+	if GameEvents.OnUnitMoved ~= nil then
+		GameEvents.OnUnitMoved.Add(EFV_Gameplay.OnUnitMoved)
+		EFV_Log(2, "Init", "registered %s", "GameEvents.OnUnitMoved")
+	else
+		EFV_Log(1, "Init", "missing %s", "GameEvents.OnUnitMoved")
+	end
+	if GameEvents.UnitCreated ~= nil then
+		GameEvents.UnitCreated.Add(EFV_Gameplay.OnUnitCreated)
+		EFV_Log(2, "Init", "registered %s", "GameEvents.UnitCreated")
+	else
+		EFV_Log(1, "Init", "missing %s", "GameEvents.UnitCreated")
+	end
+	if GameEvents.UnitInitialized ~= nil then
+		GameEvents.UnitInitialized.Add(EFV_Gameplay.OnUnitInitialized)
+		EFV_Log(2, "Init", "registered %s", "GameEvents.UnitInitialized")
+	else
+		EFV_Log(1, "Init", "missing %s", "GameEvents.UnitInitialized")
+	end
+end
 
 -- ---------------------------------------------------------------------------
 -- 3. Store init (PLAN 1.7 step 3): EFV_Init guard, schema migrations.

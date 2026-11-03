@@ -22,6 +22,13 @@
 --
 -- Every line is logged as "[EFV][T<turn>][Dev] <cmd>: ..." so that
 -- tools/install.ps1 -Watch shows it together with EFV's own lines.
+--
+-- Register limit: Civ VI's Havok Script rejects a function that needs too
+-- many registers ("too complex"; 172 loads, 206 fails), and every main-chunk
+-- local holds one register until the end of its block. So each section keeps
+-- its private helpers inside its own do ... end block; only the names other
+-- sections use are declared just before the block, and the turn checks go in
+-- the EV table. tools/check_lua.py (check_all) fails above 180.
 -- ===========================================================================
 
 include("EFV_Config")
@@ -34,7 +41,8 @@ include("EFV_Notify")
 -- EFV:GLOBALS EFV_Spawn EFV_Notify EFV_DestinationRows EFV_PlayerName EFV_CityName EFV_UnitDisplayName
 -- EFV:GLOBALS EFV_Config EFV_Util EFV_Records EFV_Units EFV_SortedAlivePlayers EFV_HasOpenBordersFrom EFV_UnitMatches
 -- EFV:GLOBALS EFV_SortedKeys EFV_PlayerKind EFV_ValidReturnTerritory EFV_IsUpgradeOf EFV_UnitGoneReason EFV_UpgradeTargets
--- EFV:GLOBALS EFV_PartnerBasis EFV_VolunteerBasis EFV_EvaluateSend
+-- EFV:GLOBALS EFV_PartnerBasis EFV_VolunteerBasis EFV_EvaluateSend EFV_HealResourceType
+-- EFV:GLOBALS EFV_ProxyWarEnemies EFV_SendRecipientReasons EFV_UnitSendReasons EFV_Band EFV_Fee
 
 EFV_Dev = {}
 
@@ -55,10 +63,15 @@ EFV_Dev = {}
 -- 1.0.3 test session (S17 tracker labels, S18 / S19 Entrust rules) and the
 -- veteran one-turn restore spike (V button, Data/EFV_Dev_Spike.xml):
 -- 1.0.3.2; the VEF 1.0.4 session (S20 war sends lent units home, S21
--- veteran home with three promotions): 1.0.4.1); a mismatch of FOR_EFV with
--- the loaded EFV build is logged at load.
-EFV_Dev.VERSION = "1.0.4.1"
-EFV_Dev.FOR_EFV = "1.0.4"
+-- veteran home with three promotions): 1.0.4.1; the denouncement reader
+-- spike (D Setup, D Denounce probe): 1.0.4.2; the air-unit spike (A1-A5,
+-- A Status): 1.0.4.3; the Corps spike (C1-C7, C Status): 1.0.4.4; C8
+-- split, C9 Volunteer merges, C10 merge guard and the merge trace:
+-- 1.0.4.5; the VEF 1.0.5 session (P buttons, A9, 3-turn denouncements):
+-- 1.0.5.1; the upgrade spike U1 and its trace, run in the same session:
+-- 1.0.5.2); a mismatch of FOR_EFV with the loaded EFV build is logged at load.
+EFV_Dev.VERSION = "1.0.5.2"
+EFV_Dev.FOR_EFV = "1.0.5"
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -1012,6 +1025,7 @@ local function FoundCityFor(pid, x, y)
 	return c, "new city founded for " .. PlayerName(pid)
 end
 
+local EV = {}   -- turn checks and event handlers of the sections below, for Evaluate (see the do-block note at the top)
 -- ---------------------------------------------------------------------------
 -- S0 Setup, from a brand-new game (after your first End Turn, when every civ
 -- has a city). B, F, C = the three lowest-ID other majors with a city, CS =
@@ -1107,7 +1121,9 @@ end
 -- ---------------------------------------------------------------------------
 -- Watches (return home) and arrivals, used by several steps.
 -- ---------------------------------------------------------------------------
-local function Watch(st, rec)
+local Watch, PlacementProblem
+do
+function Watch(st, rec)
 	local w = Sub(st, "watch")
 	local key = "r" .. rec.id
 	if w[key] == nil then
@@ -1123,7 +1139,7 @@ local function Watch(st, rec)
 	end
 end
 
-local function Observe(st, store, me)
+function EV.Observe(st, store, me)
 	-- the S17 tracker records never come home (removed at the end of the turn)
 	local labels = type(st.s17) == "table" and st.s17.ids or {}
 	for _, id in ipairs(EFV_Records.IDs(store)) do
@@ -1155,7 +1171,7 @@ end
 -- Spawn-rule check of one on-map unit placed by EFV (spec 8): at most
 -- SPAWN_SEARCH_MAX_RING from the city, not another player's city centre,
 -- and a plot the new owner may enter (EFV_SpawnValid rule 5b).
-local function PlacementProblem(u, cx, cy)
+function PlacementProblem(u, cx, cy)
 	local x, y = u:GetX(), u:GetY()
 	local plot = Map.GetPlot(x, y)
 	local owner = u:GetOwner()
@@ -1179,7 +1195,7 @@ local function PlacementProblem(u, cx, cy)
 	return why, ring, po
 end
 
-local function CheckArrivals(st, store, t)
+function EV.CheckArrivals(st, store, t)
 	local seen = Sub(st, "seen")
 	for _, id in ipairs(EFV_Records.IDs(store)) do
 		local rec = EFV_Records.Get(store, id)
@@ -1201,7 +1217,7 @@ local function CheckArrivals(st, store, t)
 	end
 end
 
-local function CheckHome(st, store, t)
+function EV.CheckHome(st, store, t)
 	local w = Sub(st, "watch")
 	for _, k in ipairs(EFV_SortedKeys(w)) do
 		local e = w[k]
@@ -1235,6 +1251,7 @@ local function CheckHome(st, store, t)
 		end
 	end
 end
+end -- Watches
 
 -- ---------------------------------------------------------------------------
 -- S2 (0.7): your newest deployed City-State unit ends its service next turn
@@ -1243,6 +1260,7 @@ end
 -- "City-State units never mutiny": it must start home at once, wherever it
 -- is, with no grace.
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_expire_cs = function(me, p)
 	local st = Session("EXPIRE", me)
 	if st == nil then return end
@@ -1273,7 +1291,7 @@ CMD.scn_expire_cs = function(me, p)
 		" and its service ends at the next turn start")
 end
 
-local function EvalS2(st, store, t)
+function EV.EvalS2(st, store, t)
 	local s = st.s2
 	if type(s) ~= "table" or t <= s.turn then return end
 	st.s2 = nil
@@ -1290,6 +1308,7 @@ local function EvalS2(st, store, t)
 			" (expected RETURNING / EXPIRED)")
 	end
 end
+end -- S2
 
 -- ---------------------------------------------------------------------------
 -- S3: grace and mutiny of your newest Expeditionary unit, one phase per press:
@@ -1297,6 +1316,7 @@ end
 -- GRACE -> 1 grace turn left (MUTINY next turn, 20 damage);
 -- MUTINY -> moved into the host's land (it starts home next turn).
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_grace = function(me, p)
 	local st = Session("GRACE", me)
 	if st == nil then return end
@@ -1348,7 +1368,7 @@ CMD.scn_grace = function(me, p)
 	Check("GRACE", "INFO", "record " .. rec.id .. " prepared; expected at the next turn start: " .. phase)
 end
 
-local function EvalS3(st, store, t)
+function EV.EvalS3(st, store, t)
 	local s = st.s3
 	if type(s) ~= "table" or s.want == nil or t <= s.turn then return end
 	local want = s.want
@@ -1372,6 +1392,7 @@ local function EvalS3(st, store, t)
 			Str(rec and rec.returnReason) .. " damage kept=" .. Str(rec and rec.damage) .. " (expected RETURNING / MUTINY_RETURN)")
 	end
 end
+end -- S3
 
 -- ---------------------------------------------------------------------------
 -- S4: ends (first press) or restores (second press) your Volunteer basis
@@ -1382,6 +1403,7 @@ end
 -- (moved there if needed) the lapse is paused. Restoring renews the
 -- friendship and, if needed, B's open borders.
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_lapse = function(me, p)
 	local st = Session("LAPSE", me)
 	if st == nil then return end
@@ -1418,7 +1440,7 @@ CMD.scn_lapse = function(me, p)
 	ScnSave(st)
 end
 
-local function EvalS4(st, store, t)
+function EV.EvalS4(st, store, t)
 	local s = st.s4
 	if type(s) ~= "table" or s.want == nil or t <= s.turn then return end
 	local rec = EFV_Records.Get(store, s.id)
@@ -1469,6 +1491,7 @@ local function EvalS4(st, store, t)
 		end
 	end
 end
+end -- S4
 
 -- ---------------------------------------------------------------------------
 -- S5: upgrade relink. A Volunteer of yours (deployed, standing in your land)
@@ -1477,6 +1500,7 @@ end
 -- gold are granted, so it also works in a new game; you click Upgrade (no
 -- gameplay upgrade call is proven).
 -- ---------------------------------------------------------------------------
+do
 local function UpgradePair(me)
 	local traits = {}
 	pcall(function()
@@ -1508,6 +1532,7 @@ local function UpgradePair(me)
 	end)
 	return "UNIT_WARRIOR", to or "UNIT_SWORDSMAN", false
 end
+EV.UpgradePair = UpgradePair   -- U1 (upgrade spike) uses the same pair
 
 CMD.scn_upgrade = function(me, p)
 	local st = Session("UPGRADE", me)
@@ -1542,7 +1567,7 @@ CMD.scn_upgrade = function(me, p)
 		(unique and " (your unique unit)" or " (your civilization has no unique upgrade: normal upgrade)") .. "; " .. table.concat(notes, ", "))
 end
 
-local function EvalS5(st, store, t)
+function EV.EvalS5(st, store, t)
 	local s = st.s5
 	if type(s) ~= "table" or t <= s.turn then return end
 	local rec = EFV_Records.Get(store, s.id)
@@ -1561,6 +1586,7 @@ local function EvalS5(st, store, t)
 			("type " .. Str(rec.unitType) .. " unit found=" .. tostring(u ~= nil))))
 	end
 end
+end -- S5
 
 -- ---------------------------------------------------------------------------
 -- S6: veteran level restore (spike T08G idea). Three copies of the selected
@@ -1572,7 +1598,9 @@ end
 -- Gameplay compares the next-level XP threshold (the level is UI-only:
 -- GetLevel is nil in G, Session A T09); the panel adds the UI levels.
 -- ---------------------------------------------------------------------------
-local function PromoRows(u)
+local PromoRows, SetPromo, XPInfo, XPToThreshold, TopUp, PromoCount
+do
+function PromoRows(u)
 	local rows = {}
 	local exp = u:GetExperience()
 	for row in GameInfo.UnitPromotions() do
@@ -1588,11 +1616,11 @@ end
 
 -- exp:SetPromotion from gameplay (the restore VEF uses for AI owners,
 -- EFV_Units.Recreate): S6 routes A / C and the V3 spike copy.
-local function SetPromo(u, idx)
+function SetPromo(u, idx)
 	return pcall(function() u:GetExperience():SetPromotion(idx) end)
 end
 
-local function XPInfo(u)
+function XPInfo(u)
 	local xp, nxt = -1, -1
 	pcall(function()
 		local exp = u:GetExperience()
@@ -1601,17 +1629,17 @@ local function XPInfo(u)
 	return tonumber(xp) or -1, tonumber(nxt) or -1
 end
 
-local function XPToThreshold(u)
+function XPToThreshold(u)
 	local xp, nxt = XPInfo(u)
 	if xp >= 0 and nxt > xp then pcall(function() u:GetExperience():ChangeExperience(nxt - xp) end) end
 end
 
-local function TopUp(u, want)
+function TopUp(u, want)
 	local xp = XPInfo(u)
 	if xp >= 0 and (tonumber(want) or 0) > xp then pcall(function() u:GetExperience():ChangeExperience(want - xp) end) end
 end
 
-local function PromoCount(u, names)
+function PromoCount(u, names)
 	local n = 0
 	pcall(function()
 		local exp = u:GetExperience()
@@ -1704,6 +1732,7 @@ CMD.scn_vetdone = function(me, p)
 	TopUp(b, vet.xp)
 	VetVerdict("VET_B", "B", b, vet)
 end
+end -- S6
 
 -- ---------------------------------------------------------------------------
 -- S7: a unit killed in the fight for its host's last city is not sent home.
@@ -1712,7 +1741,9 @@ end
 -- city-state and get three Tanks next to it. Kill the Warrior, then take the
 -- city in the same turn.
 -- ---------------------------------------------------------------------------
-local function PickCityState(st, me, exclude)
+local PickCityState
+do
+function PickCityState(st, me, exclude)
 	local cap = Capital(me)
 	local best, bestD = nil, nil
 	for _, cs in ipairs(SortedIDs(IsCityStateID)) do
@@ -1758,7 +1789,7 @@ CMD.scn_kill = function(me, p)
 		"'s city with the " .. n .. " Tanks, then take the city this turn (" .. weak .. ")")
 end
 
-local function EvalS7(st, store, t, manual)
+function EV.EvalS7(st, store, t, manual)
 	local s = st.s7
 	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
 	local rec = EFV_Records.Get(store, s.id)
@@ -1776,6 +1807,7 @@ local function EvalS7(st, store, t, manual)
 		Check("KILLED", "CHECK", "record " .. s.id .. " still " .. Str(rec.state) .. ": the Warrior was not killed in time")
 	end
 end
+end -- S7
 
 -- ---------------------------------------------------------------------------
 -- S8: wrong-unit relink guard. A City-State unit of another city-state whose
@@ -1783,6 +1815,7 @@ end
 -- two identical Warriors of that city-state stand within 2 tiles: EFV must
 -- not adopt either (ambiguous) and closes the record instead.
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_guard = function(me, p)
 	local st = Session("GUARD", me)
 	if st == nil then return end
@@ -1816,7 +1849,7 @@ CMD.scn_guard = function(me, p)
 		" identical Warriors of " .. PlayerName(cs) .. " next to its tile")
 end
 
-local function EvalS8(st, store, t)
+function EV.EvalS8(st, store, t)
 	local s = st.s8
 	if type(s) ~= "table" or t <= s.turn then return end
 	st.s8 = nil
@@ -1834,6 +1867,7 @@ local function EvalS8(st, store, t)
 		if w ~= nil then pcall(function() Players[s.cs]:GetUnits():Destroy(w) end) end
 	end
 end
+end -- S8
 
 -- ---------------------------------------------------------------------------
 -- S9: crowded arrival. Every free land tile of rings 1-2 around B's capital
@@ -1845,6 +1879,7 @@ end
 -- a city centre or closed / war land. EFV_Spawn.DryRun at setup time is
 -- logged as info ("expected ring R").
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_place = function(me, p)
 	local st = Session("CROWDED", me)
 	if st == nil then return end
@@ -1894,7 +1929,7 @@ local function InnerValidRings(cx, cy, ring, owner)
 	return out
 end
 
-local function EvalS9(st, store, t)
+function EV.EvalS9(st, store, t)
 	local s = st.s9
 	if type(s) ~= "table" or t <= s.turn then return end
 	st.s9 = nil
@@ -1921,6 +1956,7 @@ local function EvalS9(st, store, t)
 		if w ~= nil then pcall(function() Players[st.ally]:GetUnits():Destroy(w) end) end
 	end
 end
+end -- S9
 
 -- ---------------------------------------------------------------------------
 -- S10: combat during mutiny (T31, EFV/TESTING_FINAL_DRAFT_T31.md). You host
@@ -1935,6 +1971,7 @@ end
 -- Barbarians go to st.cleanup and are removed at GameEvents.OnGameTurnEnded
 -- of that turn (DevCleanup below).
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_t31 = function(me, p)
 	local st = Session("T31", me)
 	if st == nil then return end
@@ -1982,7 +2019,7 @@ end
 -- (the first hook after you end the turn, before the Barbarians act; never
 -- a unit of yours, so no selection problem), so only your fight counts:
 -- about 30 + 20 damage, the unit lives to the verdict.
-local function OnTurnStartedT31(pid)
+function EV.OnTurnStartedT31(pid)
 	local st = ScnLoad()
 	local s = st.s10
 	if type(s) ~= "table" or st.me == nil or pid == st.me or s.combat == nil or s.barbGone ~= nil then return end
@@ -1998,7 +2035,7 @@ end
 
 -- GameEvents.OnCombatOccurred (registered after EFV's own handler): what EFV
 -- could see at the combat event.
-local function OnCombatT31(aP, aU, dP, dU)
+function EV.OnCombatT31(aP, aU, dP, dU)
 	local st = ScnLoad()
 	local s = st.s10
 	if type(s) ~= "table" or st.me == nil then return end
@@ -2021,7 +2058,7 @@ local function OnCombatT31(aP, aU, dP, dU)
 	ScnSave(st)
 end
 
-local function EvalS10(st, store, t)
+function EV.EvalS10(st, store, t)
 	local s = st.s10
 	if type(s) ~= "table" or t <= s.turn then return end
 	local u = FindUnit(st.me, s.uid)
@@ -2052,6 +2089,7 @@ local function EvalS10(st, store, t)
 	end
 	Check("T31", "INFO", #c .. " test unit(s) are removed when you end this turn")
 end
+end -- S10
 
 -- ---------------------------------------------------------------------------
 -- S11: Entrust. A city of C that is not its last one (taking the last city
@@ -2067,7 +2105,9 @@ end
 -- allyWar = false keeps B out of the war (default: B declares war too),
 -- keepOwner = true refuses the owner's last city (taking it would eliminate
 -- the owner, and VEF 1.0.3 then skips the at-war check).
-local function BuildEntrustScene(cmd, me, st, radius, opts)
+local BuildEntrustScene
+do
+function BuildEntrustScene(cmd, me, st, radius, opts)
 	opts = opts or {}
 	local C = opts.owner or st.enemy
 	local cap = Capital(me)
@@ -2115,7 +2155,7 @@ CMD.scn_entrust = function(me, p)
 		" (" .. note .. "; " .. weak .. "): take it and choose Entrust -> " .. PlayerName(st.ally))
 end
 
-local function EvalS11(st, store, t, manual)
+function EV.EvalS11(st, store, t, manual)
 	local s = st.s11
 	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
 	local city = CityManager.GetCityAt(s.cx, s.cy)
@@ -2132,6 +2172,7 @@ local function EvalS11(st, store, t, manual)
 		Check("ENTRUST", s.tries >= 3 and "CHECK" or "INFO", "the city still belongs to " .. PlayerName(owner))
 	end
 end
+end -- S11
 
 -- ---------------------------------------------------------------------------
 -- S12 (0.7): veteran return, route B (FIXPLAN item 7). A RETURNING Volunteer
@@ -2144,9 +2185,11 @@ end
 -- is written once the job is gone (a later turn start, or Check now, which
 -- the panel presses by itself after its UI check VET_RESTORE_LEVEL).
 -- ---------------------------------------------------------------------------
+local LevelOnePromotions
+do
 local VET_NAME = "VEF-VET"
 
-local function LevelOnePromotions(unitType, n)
+function LevelOnePromotions(unitType, n)
 	local out = {}
 	local unit = GameInfo.Units[unitType]
 	local cls = unit and unit.PromotionClass
@@ -2208,7 +2251,7 @@ CMD.scn_vetret = function(me, p)
 		", XP 50/90, 30 damage) comes home next to your capital at the next turn start")
 end
 
-local function EvalS12(st, store, t, manual)
+function EV.EvalS12(st, store, t, manual)
 	local s = st.s12
 	if type(s) ~= "table" or s.done ~= nil then return end
 	local promos = type(s.promos) == "table" and s.promos or {}
@@ -2261,6 +2304,7 @@ local function EvalS12(st, store, t, manual)
 		", damage " .. d .. " (expected " .. (late == 0 and "30" or (minD .. "-30: " .. late .. " round heal(s) of 15 in your land")) ..
 		")" .. (ok and ": level, XP and damage kept" or ""))
 end
+end -- S12
 
 -- ---------------------------------------------------------------------------
 -- S13 (0.7): a unit in B's land (designer ruling "Send from the recipient's
@@ -2270,6 +2314,7 @@ end
 -- open, every other row WRONG_TERRITORY. FROM_LAND passes at the next turn
 -- start when that Spearman was sent to B this turn.
 -- ---------------------------------------------------------------------------
+do
 CMD.scn_inland = function(me, p)
 	local st = Session("FROM_LAND", me)
 	if st == nil then return end
@@ -2303,7 +2348,7 @@ CMD.scn_inland = function(me, p)
 	Check("FROM_LAND", "INFO", "send the selected Spearman as Expeditionary to " .. PlayerName(B) .. " this turn")
 end
 
-local function EvalS13(st, store, t, manual)
+function EV.EvalS13(st, store, t, manual)
 	local s = st.s13
 	if type(s) ~= "table" then return end
 	local rec = Newest(store, function(r)
@@ -2320,6 +2365,7 @@ local function EvalS13(st, store, t, manual)
 		Check("FROM_LAND", "CHECK", "the Spearman standing in B's land was not sent to B in turn " .. Str(s.turn))
 	end
 end
+end -- S13
 
 -- ---------------------------------------------------------------------------
 -- S14 (EFV_Dev 0.7.2-dev.1): mutiny death next to Barbarians. The 0.7.1
@@ -2336,6 +2382,7 @@ end
 -- the record is closed, the Swordsman is gone, and no unit of yours and no
 -- VEF record stands on or points at its tile. All unit IDs are logged.
 -- ---------------------------------------------------------------------------
+do
 local function UnitsAt(x, y)
 	local out = {}
 	for pid = 0, 63 do
@@ -2444,7 +2491,7 @@ CMD.scn_mutdeath = function(me, p)
 		"'s land: attack a Barbarian with the selected one (copy " .. #copies .. "), leave the other, then End Turn")
 end
 
-local function EvalS14(st, store, t, manual)
+function EV.EvalS14(st, store, t, manual)
 	local s = st.s14
 	if type(s) ~= "table" or t <= s.turn then return end
 	st.s14 = nil
@@ -2481,6 +2528,7 @@ local function EvalS14(st, store, t, manual)
 	if w ~= nil then c[#c + 1] = { o = s.wo, u = s.w, ut = UnitTypeName(w) } end
 	Check("MUT_DEATH", "INFO", #c .. " test unit(s) are removed when you end this turn")
 end
+end -- S14
 
 -- ---------------------------------------------------------------------------
 -- S16 Break transit (EFV_Dev 1.0.2.2; VEF transit cancel, designer rulings
@@ -2498,6 +2546,7 @@ end
 -- (not blocked) or ring 1 (blocked), with 0 moves; the expected refund is
 -- half the fee (rounded down).
 -- ---------------------------------------------------------------------------
+do
 local function MyUnitsOfType(pid, unitType)
 	local out = {}
 	pcall(function()
@@ -2571,7 +2620,7 @@ CMD.scn_cancel = function(me, p)
 		" expected refund " .. refund .. "; end the turn")
 end
 
-local function EvalS16(st, store, t, manual)
+function EV.EvalS16(st, store, t, manual)
 	local s = st.s16
 	if type(s) ~= "table" or manual or t <= (tonumber(s.turn) or t) then return end
 	st.s16 = nil
@@ -2603,6 +2652,7 @@ local function EvalS16(st, store, t, manual)
 		": back at " .. u:GetX() .. "," .. u:GetY() .. " ring " .. ring .. " (expected ring " .. want .. ") moves=" .. moves ..
 		" (expected 0) refund expected " .. Str(s.refund) .. " of fee " .. Str(s.fee))
 end
+end -- S16 Break transit
 
 -- ---------------------------------------------------------------------------
 -- End-of-turn cleanup (0.7, FIXPLAN item 10): units queued in st.cleanup
@@ -2611,6 +2661,7 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_Dev 1.0.3.2: records queued in st.cleanRecs (record IDs; the S17
 -- tracker records) are deleted first, through EFV's own record API.
+do
 local function DevCleanRecords(st, turn)
 	local ids = st.cleanRecs
 	if type(ids) ~= "table" or #ids == 0 then return false end
@@ -2629,7 +2680,7 @@ local function DevCleanRecords(st, turn)
 	return true
 end
 
-local function DevCleanup(turn)
+function EV.DevCleanup(turn)
 	local st = ScnLoad()
 	local changed = DevCleanRecords(st, turn)
 	local c = st.cleanup
@@ -2649,6 +2700,7 @@ local function DevCleanup(turn)
 	ScnSave(st)
 	Log("scn", "end of turn " .. Str(turn) .. ": removed " .. n .. " of " .. #c .. " test unit(s)")
 end
+end -- End-of-turn cleanup
 
 -- ===========================================================================
 -- Workshop screenshots (EFV_Dev 0.7.0-dev.1; workshop/SCREENSHOTS.md Part B).
@@ -2659,7 +2711,9 @@ end
 -- (UI.SetMapZoom value, 0 = closest), tx / ty (Shot 4's target city).
 -- One line each: [EFV][CHECK] SHOTn PASS|CHECK ...
 -- ===========================================================================
-local ZOOM_CLOSE, ZOOM_MID = 0.25, 0.5
+local ZOOM_CLOSE, ZOOM_MID
+do
+ZOOM_CLOSE, ZOOM_MID = 0.25, 0.5
 
 local function ShotList(st)
 	if type(st.shot) ~= "table" then st.shot = {} end
@@ -3107,6 +3161,7 @@ CMD.scn_receive = function(me, p)
 	Check("RECEIVE", ok and "PASS" or "CHECK", Row("Expeditionary", recE, e) .. "; " .. Row("Volunteers", recV, v) ..
 		"; next to your capital " .. EFV_CityName(cap))
 end
+end -- Workshop screenshots
 
 -- ---------------------------------------------------------------------------
 -- Eligibility tests T1 / T2 (EFV_Dev 1.0.1.3; VEF 1.0.1 common-war fix;
@@ -3131,9 +3186,11 @@ end
 -- verdict says nothing about VEF. Wars are only declared for the roles that
 -- need one, before any friendship or alliance, and nobody makes peace.
 -- ---------------------------------------------------------------------------
+local CIVIC_ALLY
+do
 local ELIG_CODES = { NOT_PARTNER = true, VOL_NEEDS_ACCESS = true, CS_NOT_MET = true,
 	AT_WAR_WITH_RECIPIENT = true, NO_COMMON_WAR = true }
-local CIVIC_ALLY = "CIVIC_CIVIL_SERVICE"
+CIVIC_ALLY = "CIVIC_CIVIL_SERVICE"
 
 -- war: at war with E. peace: at war with nobody (majors / city-states).
 local ELIG_TESTS = {
@@ -3439,6 +3496,7 @@ CMD.elig_t2 = function(me, p) EligTest("T2", me, p) end
 -- VEF 1.0.3 session (EFV_Dev 1.0.3.2; EFV/TESTING_1.0.3.md). Works against
 -- the released VEF 1.0.3 (Steam Workshop) without changes to it.
 -- ===========================================================================
+end -- Eligibility tests T1 / T2
 
 -- ---------------------------------------------------------------------------
 -- S17 Tracker labels (VEF 1.0.3: the recipient reads Inbound / Departed,
@@ -3456,6 +3514,7 @@ CMD.elig_t2 = function(me, p) EligTest("T2", me, p) end
 -- = TRACKER) and checks its rows with VEF's own UI functions
 -- (TRACKER_LABELS, UI side).
 -- ---------------------------------------------------------------------------
+do
 local LABEL_ROWS = {
 	{ role = "INBOUND",   fromF = true,  state = ST.OUT, force = FT_EXP, ut = "UNIT_SPEARMAN", name = "VEF-IN" },
 	{ role = "DEPARTED",  fromF = true,  state = ST.RET, force = FT_VOL, ut = "UNIT_ARCHER",   name = "VEF-DEPARTED" },
@@ -3520,6 +3579,7 @@ CMD.scn_labels = function(me, p)
 	Check("TRACKER_PREP", #ids == #LABEL_ROWS and "INFO" or "CHECK", #ids .. " record(s) in transit: " .. table.concat(made, "; ") ..
 		"; they are removed when you end this turn")
 end
+end -- S17 Tracker labels
 
 -- ---------------------------------------------------------------------------
 -- S18 Entrust a city-state's city (VEF 1.0.3: Entrust skips the at-war
@@ -3531,6 +3591,7 @@ end
 -- ENTRUST_CS_UI (panel, at the capture) reads VEF's own Entrust state;
 -- ENTRUST_CS (next turn start or Check now) passes when B or F owns it.
 -- ---------------------------------------------------------------------------
+do
 local function EntrustCityState(st, me)
 	local excl = { st.cs, st.killCs or -1, st.guardCs or -1 }
 	for _ = 1, 16 do
@@ -3572,7 +3633,7 @@ CMD.scn_entrust_cs = function(me, p)
 		": take it and choose Entrust -> " .. PlayerName(B))
 end
 
-local function EvalS18(st, store, t, manual)
+function EV.EvalS18(st, store, t, manual)
 	local s = st.s18
 	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
 	local city = CityManager.GetCityAt(s.cx, s.cy)
@@ -3592,6 +3653,7 @@ local function EvalS18(st, store, t, manual)
 		Check("ENTRUST_CS", s.tries >= 3 and "CHECK" or "INFO", "the city still belongs to " .. PlayerName(owner))
 	end
 end
+end -- S18 Entrust a city-state's city
 
 -- ---------------------------------------------------------------------------
 -- S19 Entrust a living major's city: still greyed (VEF 1.0.3 keeps the
@@ -3606,6 +3668,7 @@ end
 -- ENTRUST_MAJOR (next turn start) passes when the city is still yours and
 -- fails when a partner got it.
 -- ---------------------------------------------------------------------------
+do
 local function FourthMajor(st, me)
 	for _, i in ipairs(SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)) do
 		if i ~= st.ally and i ~= st.friend and i ~= st.enemy then return i end
@@ -3636,7 +3699,7 @@ CMD.scn_entrust_major = function(me, p)
 		tostring(bWar) .. ": take it, Entrust must be greyed, then choose Keep")
 end
 
-local function EvalS19(st, store, t, manual)
+function EV.EvalS19(st, store, t, manual)
 	local s = st.s19
 	if type(s) ~= "table" or (t <= s.turn and not manual) then return end
 	local city = CityManager.GetCityAt(s.cx, s.cy)
@@ -3657,6 +3720,7 @@ local function EvalS19(st, store, t, manual)
 		Check("ENTRUST_MAJOR", s.tries >= 3 and "CHECK" or "INFO", "the city still belongs to " .. PlayerName(owner))
 	end
 end
+end -- S19 Entrust a living major's city
 
 -- ===========================================================================
 -- V Veteran spike (EFV_Dev 1.0.3.2): can a returning human-owned veteran
@@ -3698,6 +3762,8 @@ end
 --   exp:SetPromotion / :ChangeExperience / :CanPromote: EFV_Units.lua,
 --     EFV_Veteran.lua (Session A T09: CanPromote in G)
 -- ===========================================================================
+local VsPicks
+do
 local VS_KEYS = { "V0", "V1", "V2", "V3" }
 local VS_KEEP_MOVES = "EFV_DEV_ABILITY_PROMOTE_KEEP_MOVES"
 local VS_LEVEL = "EFV_DEV_ABILITY_VET_LEVEL"
@@ -3741,7 +3807,7 @@ end
 -- The first two level-1 and the first level-2 promotion of the type's
 -- class (DB order). Every level-2 promotion of a class follows one of its
 -- two level-1 promotions, so the three can be taken in this order.
-local function VsPicks(unitType)
+function VsPicks(unitType)
 	local row = GameInfo.Units[unitType]
 	local cls = row and row.PromotionClass
 	local l1, l2 = {}, nil
@@ -3914,7 +3980,7 @@ CMD.vs_off = function(me, p)
 end
 
 -- Your turn starts after the button's turn: one state line per copy.
-local function EvalVS(st, t)
+function EV.EvalVS(st, t)
 	local vs = st.vs
 	if type(vs) ~= "table" then return end
 	local t0 = tonumber(vs.turn) or t
@@ -3922,6 +3988,7 @@ local function EvalVS(st, t)
 	vs.logged = t
 	for _, c in ipairs(vs.c or {}) do VsLog(c.k, "turn start", FindUnit(st.me, tonumber(c.u) or -1)) end
 end
+end -- V Veteran spike
 
 -- ===========================================================================
 -- The VEF 1.0.4 session (EFV_Dev 1.0.4.1; EFV/TESTING_1.0.4.md). Both
@@ -3994,6 +4061,7 @@ end
 -- turn, and the unit ends that turn with 0 moves. F is the partner, so S20's
 -- war with B never touches it.
 -- ---------------------------------------------------------------------------
+do
 local VET_HOME_NAME = "VEF-VETERAN"
 local VET_HOME_TYPE = "UNIT_SWORDSMAN"
 local VET_HOME_XP, VET_HOME_NEXT = 100, 150
@@ -4029,6 +4097,2494 @@ CMD.scn_vet_home = function(me, p)
 	Check("VET_HOME", "INFO", "record " .. rec.id .. ": " .. VET_HOME_NAME .. " (" .. VET_HOME_TYPE .. ", level " .. (1 + #promos) .. ", " ..
 		table.concat(promos, "+") .. ", XP " .. VET_HOME_XP .. "/" .. VET_HOME_NEXT .. ") comes home next to your capital at the next turn start")
 end
+end -- S21 Veteran home
+
+-- ===========================================================================
+-- Denouncement reader spike (EFV_Dev 1.0.4.2; FIXPLAN_proxy_war.md "Spike";
+-- EFV/TESTING_SPIKES.md). Question: can GAMEPLAY Lua (the synced
+-- context) read a denouncement? Readers known so far are UI only
+-- (DiplomacyActionView.lua:1473-1505: GetDiplomaticAI():GetDiplomaticStateIndex
+-- compared with DIPLO_STATE_DENOUNCED, GetDiplomacy():GetDenounceTurn,
+-- Game.GetGameDiplomacy():GetDenounceTimeLimit). Gameplay candidate:
+-- GetAi_Diplomacy():GetDiplomaticState (Debug/Diplomacy.ltp:260, GameCore
+-- tuner); Session D found many Diplomacy getters nil in gameplay
+-- (research/phase0_results/raw/sessionD_Lua.log ~L360-372).
+--   D Denounce probe (denounce_probe): READ ONLY. For you and every major
+--     civ you have met, both directions, every reader in DP_READERS is looked
+--     up BY NAME (a missing method is logged as MISSING, an error as ERROR,
+--     nothing is thrown) and logged as
+--       [EFV][Probe] G <reader>(<a>-><b>)=<value>
+--     The answer for the panel (status and "denounced" hits per reader) goes
+--     to the dev tools' own property EFV_DEV_SCN (st.dprobe); nothing else is
+--     written. The panel then runs the same readers in the UI context ("UI"
+--     lines; keep DP_READERS equal there), compares them with gameplay and
+--     shows a short summary.
+--   D Setup (denounce_setup): the lowest-ID major civ you could denounce
+--     (alive, with a city, not your team, not at war with you, not allied,
+--     not a declared friend: S0's B, F and C never qualify), met and its
+--     capital revealed (S0 helpers). There is no script setter for a
+--     denouncement (UI DiplomacyManager.RequestSession "DENOUNCE"): you
+--     denounce it in the diplomacy screen yourself.
+-- MP style: runs only in this synced handler, players by ascending ID, no
+-- pairs() over state, no random, no local-player call.
+-- ---------------------------------------------------------------------------
+-- kind: turn (hit: a number >= 0), bool (hit: true), state (hit: the value
+-- maps to DIPLO_STATE_DENOUNCED by index or hash, or a string naming it),
+-- mods (hit: a modifier whose text mentions a denouncement).
+local DpMethod
+do
+local DP_READERS = {
+	{ id = "GetDenounceTurn", short = "Turn", acc = "GetDiplomacy", fn = "GetDenounceTurn", kind = "turn" },
+	{ id = "IsDenouncing", short = "IsDen", acc = "GetDiplomacy", fn = "IsDenouncing", kind = "bool" },
+	{ id = "HasDenounced", short = "HasDen", acc = "GetDiplomacy", fn = "HasDenounced", kind = "bool" },
+	{ id = "AiDiplo:GetDiplomaticState", short = "AiState", acc = "GetAi_Diplomacy", fn = "GetDiplomaticState", kind = "state" },
+	{ id = "DiploAI:GetDiplomaticStateIndex", short = "StateIdx", acc = "GetDiplomaticAI", fn = "GetDiplomaticStateIndex", kind = "state" },
+	{ id = "AiDiplo:GetDiplomaticModifiers", short = "AiMods", acc = "GetAi_Diplomacy", fn = "GetDiplomaticModifiers", kind = "mods" },
+	{ id = "DiploAI:GetDiplomaticModifiers", short = "AIMods", acc = "GetDiplomaticAI", fn = "GetDiplomaticModifiers", kind = "mods" },
+}
+
+local function DpPrint(msg)
+	print("[EFV][Probe] G " .. Str(msg))
+end
+
+-- obj[name] when it is a function; else nil and why.
+function DpMethod(obj, name)
+	if obj == nil then return nil, "object is nil" end
+	local ok, f = pcall(function() return obj[name] end)
+	if not ok then return nil, "lookup error " .. Str(f) end
+	if f == nil then return nil, "is nil" end
+	if type(f) ~= "function" then return nil, "is a " .. type(f) end
+	return f, nil
+end
+
+-- Players[a]:<acc>():<fn>(b): "OK", value | "MISSING", why | "ERROR", why.
+local function DpRead(r, a, b)
+	local pl = Players[a]
+	local get, why = DpMethod(pl, r.acc)
+	if get == nil then return "MISSING", "Player." .. r.acc .. " " .. why end
+	local ok, obj = pcall(get, pl)
+	if not ok then return "ERROR", r.acc .. "(): " .. Str(obj) end
+	if obj == nil then return "MISSING", r.acc .. "() returned nil" end
+	local f, why2 = DpMethod(obj, r.fn)
+	if f == nil then return "MISSING", r.acc .. "()." .. r.fn .. " " .. why2 end
+	if b == nil then return "OK", "function" end
+	local ok2, v = pcall(f, obj, b)
+	if not ok2 then return "ERROR", Str(v) end
+	return "OK", v
+end
+
+local function DpStates()
+	local s = { idx = {}, hash = {} }
+	pcall(function()
+		for row in GameInfo.DiplomaticStates() do
+			s.idx[row.Index] = row.StateType
+			s.hash[row.Hash] = row.StateType
+		end
+	end)
+	return s
+end
+
+-- Log text of a value, and whether it says "denounced".
+local function DpFormat(r, v, states)
+	local t = type(v)
+	if r.kind == "turn" then
+		return Str(v) .. (t ~= "number" and (" (" .. t .. ")") or ""), t == "number" and v >= 0
+	elseif r.kind == "bool" then
+		return Str(v) .. (t ~= "boolean" and (" (" .. t .. ")") or ""), v == true
+	elseif r.kind == "state" then
+		local names, hit = {}, false
+		if t == "number" then
+			if states.idx[v] ~= nil then names[#names + 1] = "index " .. states.idx[v] end
+			if states.hash[v] ~= nil then names[#names + 1] = "hash " .. states.hash[v] end
+		end
+		for _, n in ipairs(names) do
+			if string.find(n, "DIPLO_STATE_DENOUNCED", 1, true) then hit = true end
+		end
+		if t == "string" and string.find(string.upper(v), "DENOUNC", 1, true) then hit = true end
+		return Str(v) .. " (" .. t .. (#names > 0 and ("; " .. table.concat(names, ", ")) or "") .. ")", hit
+	end
+	if t ~= "table" then return Str(v) .. " (" .. t .. ")", false end
+	local n, found = 0, {}
+	for _, m in ipairs(v) do
+		n = n + 1
+		local text, score = Str(m), nil
+		if type(m) == "table" then text, score = Str(m.Text), m.Score end
+		-- the raw text (a LOC key) only: a translated text would differ between
+		-- clients, and gameplay stores the hits in a synced property
+		if string.find(string.lower(text), "denounc", 1, true) then
+			found[#found + 1] = Str(score) .. " " .. text
+		end
+	end
+	return n .. " modifier(s)" .. (#found > 0 and ("; denounce: " .. table.concat(found, " / ")) or "; none about a denouncement"), #found > 0
+end
+
+-- Game.GetGameDiplomacy():GetDenounceTimeLimit() as text.
+local function DpLimit()
+	local get, why = DpMethod(Game, "GetGameDiplomacy")
+	if get == nil then return "MISSING (Game.GetGameDiplomacy " .. why .. ")" end
+	local ok, gd = pcall(get)
+	if not ok or gd == nil then return (ok and "MISSING" or "ERROR") .. " (GetGameDiplomacy(): " .. Str(gd) .. ")" end
+	local f, why2 = DpMethod(gd, "GetDenounceTimeLimit")
+	if f == nil then return "MISSING (GetDenounceTimeLimit " .. why2 .. ")" end
+	local ok2, v = pcall(f, gd)
+	if not ok2 then return "ERROR " .. Str(v) end
+	return Str(v)
+end
+
+-- Every reader for (me, b) and (b, me), b in pids. Returns per reader
+-- { s = ok | nil | err | mixed | none, hits = "a>b ..." or "-" } and the limit.
+local function DpRun(me, pids)
+	local states = DpStates()
+	local names = {}
+	for _, b in ipairs(pids) do names[#names + 1] = PlayerName(b) end
+	DpPrint("T" .. Str(Turn()) .. " begin: you " .. PlayerName(me) .. "; met majors (" .. #pids .. "): " ..
+		(#names > 0 and table.concat(names, ", ") or "none"))
+	local limit = DpLimit()
+	DpPrint("GetDenounceTimeLimit()=" .. limit)
+	local res = {}
+	for i, r in ipairs(DP_READERS) do
+		local hs, hv = DpRead(r, me, nil)
+		DpPrint("has " .. r.acc .. "():" .. r.fn .. " = " .. (hs == "OK" and "yes" or (hs .. " (" .. Str(hv) .. ")")))
+		local n, okN, missN, errN, hits = 0, 0, 0, 0, {}
+		for _, b in ipairs(pids) do
+			for _, d in ipairs({ { me, b }, { b, me } }) do
+				local a, o = d[1], d[2]
+				local s, v = DpRead(r, a, o)
+				n = n + 1
+				local text
+				if s == "OK" then
+					okN = okN + 1
+					local okF, t, hit = pcall(DpFormat, r, v, states)
+					if not okF then t, hit = Str(v) .. " (format error " .. Str(t) .. ")", false end
+					text = t
+					if hit then hits[#hits + 1] = a .. ">" .. o .. (r.kind == "turn" and ("=" .. Str(v)) or "") end
+				else
+					if s == "MISSING" then missN = missN + 1 else errN = errN + 1 end
+					text = s .. " (" .. Str(v) .. ")"
+				end
+				DpPrint(r.id .. "(" .. a .. "->" .. o .. ")=" .. text)
+			end
+		end
+		local st = "mixed"
+		if n == 0 then st = "none" elseif okN == n then st = "ok" elseif missN == n then st = "nil" elseif errN == n then st = "err" end
+		res[i] = { s = st, hits = (#hits > 0) and table.concat(hits, " ") or "-" }
+	end
+	local parts = {}
+	for i, r in ipairs(DP_READERS) do parts[#parts + 1] = r.short .. " " .. res[i].s .. " [" .. res[i].hits .. "]" end
+	DpPrint("summary: " .. table.concat(parts, " | ") .. " | limit " .. limit)
+	return res, limit
+end
+
+CMD.denounce_probe = function(me, p)
+	local pids = SortedIDs(function(i) return i ~= me and IsMajorID(i) and Diplo(me, "HasMet", i) end)
+	local res, limit = DpRun(me, pids)
+	local st = ScnLoad()
+	-- (an empty table does not survive the property round trip: no pids then)
+	st.dprobe = { stamp = Num(p.stamp, 0), turn = Turn(), me = me, pids = (#pids > 0) and pids or nil, limit = limit, r = res }
+	ScnSave(st)
+end
+
+CMD.denounce_setup = function(me, p)
+	local st = ScnLoad()
+	local myTeam = -1
+	pcall(function() myTeam = Players[me]:GetTeam() end)
+	local cands = SortedIDs(function(i)
+		return i ~= me and IsMajorID(i) and HasCity(i) and Players[i]:GetTeam() ~= myTeam and not AtWar(me, i) and
+			not Diplo(me, "HasAllied", i) and not Diplo(me, "HasDeclaredFriendship", i)
+	end)
+	-- st.dsetup holds no translated text (the synced property must be the
+	-- same on every client): the panel names the civ itself.
+	local X = cands[1]
+	if X == nil then
+		st.dsetup = { stamp = Num(p.stamp, 0), x = -1 }
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		ScnSave(st)
+		Check("DENOUNCE_SETUP", "CHECK", "no major civ you could denounce (each one is at war with you, allied, a declared friend " ..
+			"or has no city): start a new game")
+		return
+	end
+	MeetPair(me, X)
+	local cap = Capital(X)
+	local revealed = nil
+	if cap ~= nil then revealed = RevealCity(me, cap, nil) end
+	local met = Diplo(me, "HasMet", X)
+	st.dsetup = { stamp = Num(p.stamp, 0), x = X, met = met and 1 or 0, revealed = Str(revealed) }
+	if cap ~= nil then Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp) else Focus(st, -1, -1, nil, nil, p.stamp) end
+	ScnSave(st)
+	Check("DENOUNCE_SETUP", (met and revealed ~= false) and "INFO" or "CHECK", "denounce " .. PlayerName(X) ..
+		" in the diplomacy screen (its leader, Denounce); met=" .. tostring(met) .. ", capital revealed=" .. Str(revealed) ..
+		"; not at war with you, not allied, not a declared friend")
+end
+end -- Denouncement reader spike
+
+-- ===========================================================================
+-- Air-unit spike (EFV_Dev 1.0.4.3; FIXPLAN_air_units.md section 7;
+-- EFV/TESTING_SPIKES.md). A new Ancient-era game after S0: nobody has
+-- Flight, Advanced Flight, Radio or Combined Arms. A script Create ignores
+-- tech (SPIKES S10), so no tech is granted; Deploy and Rebase have no
+-- PrereqTech (UnitOperations.xml:66,72,93), so whether a plane offers them
+-- without Flight is one of the answers.
+--   A1 air_city     Fighter VEF-AIR-1 in your capital, VEF-AIR-2 there too
+--                   (over the one city-centre slot), VEF-AIR-3 on free land
+--                   2-4 tiles away (no base).
+--   A2 air_host     a Fighter for B in B's capital through VEF's own restore
+--                   path (EFV_Units.Recreate, stand-in record: 1 promotion,
+--                   20 damage), as an Expeditionary arrival would make it.
+--   A3 air_fuel     one press per step. 1: VEF-AIR-1 at 30 damage, your
+--                   Aluminium 0. 2 (two rounds after A1: a unit does not heal
+--                   in the round it is created, SPIKES S8 Session E): damage
+--                   read, Aluminium +2 per Aluminium unit you own (the upkeep
+--                   must not eat the top-up). 3 (next turn): damage read.
+--   A4 air_ally     F becomes your ally (Civil Service for both, then the
+--                   alliance flag, as T1); your Fighter VEF-AIR-V in F's
+--                   capital. F, not B: A2's plane fills B's capital slot.
+--   A5 air_carrier  Carrier VEF-CV on free water next to your capital (your
+--                   own water first: a send needs your own land or water),
+--                   Fighter VEF-AIR-CV created on its tile; VEF's send rule
+--                   is asked for B, F and CS. You send the carrier with VEF
+--                   1.0.4's normal button, then press A5 again. The next VEF
+--                   greys that send out (carrier with planes aboard); the
+--                   button stays to show why.
+--   A? air_status   where every spike unit is now; also AIR_TURN at each of
+--                   your turn starts for AIR_WATCH_TURNS turns.
+-- Raw facts: "[EFV][Air] G ..." lines. Unknown readers (plot, district and
+-- unit GetAirSlots / GetAirUnits, UnitManager.CanStartOperation /
+-- GetOperationTargets in gameplay, GetCombat) are looked up BY NAME and
+-- pcall-guarded (MISSING / ERROR, never thrown), so api_audit does not see
+-- them. Operation types by hash from GameInfo.UnitOperations, as
+-- UnitPanel.lua:546-615 does. The panel's answer: st.air.ans (stamp, ASCII
+-- text, no translated names: the property is synced). MP style: the synced
+-- handler only, no pairs() over state, no random, no local-player call.
+-- Own do-block: the main chunk is at Lua's 200-local limit; EvalAir is
+-- reached as EFV_Dev.EvalAir.
+-- ---------------------------------------------------------------------------
+do
+local AIR_UT, CV_UT, AL = "UNIT_FIGHTER", "UNIT_AIRCRAFT_CARRIER", "RESOURCE_ALUMINUM"
+local AIR_WATCH_TURNS = 4
+
+local function AirPrint(msg) print("[EFV][Air] G " .. Str(msg)) end
+
+-- obj:name(...) (static: obj.name(...)) looked up by name:
+-- "OK", r1, r2 | "MISSING", why | "ERROR", why.
+local function AirCall(obj, name, static, ...)
+	local f, why = DpMethod(obj, name)
+	if f == nil then return "MISSING", name .. " " .. Str(why) end
+	local args, n = { ... }, select("#", ...)
+	local r
+	if static then r = { pcall(f, unpack(args, 1, n)) } else r = { pcall(f, obj, unpack(args, 1, n)) } end
+	if not r[1] then return "ERROR", Str(r[2]) end
+	return "OK", r[2], r[3]
+end
+
+local function AirVal(v)
+	if type(v) ~= "table" then return Str(v) end
+	local parts = {}
+	for _, x in ipairs(v) do
+		local okU, s = pcall(function() return x:GetOwner() .. "/" .. x:GetID() end)
+		parts[#parts + 1] = okU and s or Str(x)
+	end
+	return "list#" .. #parts .. (#parts > 0 and ("[" .. table.concat(parts, " ") .. "]") or "")
+end
+
+local function AirRes(s, a, b)
+	if s ~= "OK" then return s .. " (" .. Str(a) .. ")" end
+	return AirVal(a) .. (b ~= nil and (", " .. AirVal(b)) or "")
+end
+
+local function DomainOf(u)
+	local ok, d = pcall(function() return GameInfo.Units[u:GetType()].Domain end)
+	return ok and Str(d) or "?"
+end
+
+local function OpHash(t)
+	local ok, h = pcall(function() return GameInfo.UnitOperations[t].Hash end)
+	return ok and h or nil
+end
+
+-- Every air reader at (x, y), logged; a short text for the panel.
+local function AirProbePlot(label, x, y)
+	local plot = Map.GetPlot(x, y)
+	local parts = {}
+	pcall(function()
+		for _, u in ipairs(Units.GetUnitsInPlot(plot)) do
+			parts[#parts + 1] = Str(u:GetOwner()) .. "/" .. Str(u:GetID()) .. " " .. UnitTypeName(u) .. " " .. DomainOf(u)
+		end
+	end)
+	local okC, cnt = pcall(function() return plot:GetUnitCount() end)
+	AirPrint(label .. " @" .. x .. "," .. y .. ": GetUnitCount=" .. (okC and Str(cnt) or "ERROR") .. "; GetUnitsInPlot #" .. #parts ..
+		" [" .. table.concat(parts, ", ") .. "]; plot:GetAirUnits=" .. AirRes(AirCall(plot, "GetAirUnits")))
+	local okD, d = pcall(function() return CityManager.GetDistrictAt(x, y) end)
+	local slots = "no district"
+	if okD and d ~= nil then
+		local s, v = AirCall(d, "GetAirSlots")
+		slots = (s == "OK") and Str(v) or s
+		AirPrint(label .. " district:GetAirSlots=" .. AirRes(s, v) .. "; district:GetAirUnits=" .. AirRes(AirCall(d, "GetAirUnits")))
+	end
+	return "plot list " .. #parts .. ", G slots " .. slots
+end
+
+-- A unit's facts: position, domain, the plot-list verdict (EFV_UnitMatches:
+-- GONE_PLOT = not in Units.GetUnitsInPlot), the operations (UnitPanel
+-- pattern, by name) and its own air slots (a carrier).
+local function AirProbeUnit(label, u)
+	if u == nil then AirPrint(label .. ": no unit"); return end
+	local okM, m, why = pcall(EFV_UnitMatches, u, u:GetOwner(), u:GetID(), nil)
+	local ops = {}
+	for _, op in ipairs({ "DEPLOY", "REBASE" }) do
+		ops[#ops + 1] = "Can" .. op .. "=" .. AirRes(AirCall(UnitManager, "CanStartOperation", true, u, OpHash("UNITOPERATION_" .. op), nil, false, false))
+	end
+	local s, r = AirCall(UnitManager, "GetOperationTargets", true, u, OpHash("UNITOPERATION_REBASE"))
+	local txt = AirRes(s, r)
+	if s == "OK" and type(r) == "table" then
+		local okP, plots = pcall(function() return r[UnitOperationResults.PLOTS] end)
+		txt = okP and AirVal(plots) or ("PLOTS unreadable: " .. Str(plots))
+	end
+	AirPrint(label .. ": " .. DescribeUnit(u) .. " domain=" .. DomainOf(u) .. " EFV_UnitMatches=" ..
+		(okM and (m and "ok" or Str(why)) or "ERROR") .. " GetCombat=" .. AirRes(AirCall(u, "GetCombat")) ..
+		" GetAirSlots=" .. AirRes(AirCall(u, "GetAirSlots")) .. " GetAirUnits=" .. AirRes(AirCall(u, "GetAirUnits")) ..
+		" " .. table.concat(ops, " ") .. " RebaseTargets=" .. txt)
+end
+
+local function AirState(st)
+	local a = Sub(st, "air")
+	if type(a.units) ~= "table" then a.units = {} end
+	return a
+end
+
+-- Sets (or, u nil, drops) the spike unit with key k.
+local function AirSet(a, k, u)
+	local list = {}
+	for _, e in ipairs(a.units) do if e.k ~= k then list[#list + 1] = e end end
+	if u ~= nil then list[#list + 1] = { k = k, o = u:GetOwner(), u = u:GetID(), t = UnitTypeName(u), turn = Turn() } end
+	a.units = list
+end
+
+local function AirEntry(a, k)
+	for _, e in ipairs(a.units or {}) do if e.k == k then return e end end
+	return nil
+end
+
+-- The live unit of entry e (nil when gone) and a short fact text.
+local function AirFact(e)
+	if e == nil then return nil, "not made" end
+	local u = FindUnit(e.o, e.u)
+	if u == nil or UnitTypeName(u) ~= e.t then return nil, "gone" end
+	local okM, m, why = pcall(EFV_UnitMatches, u, e.o, e.u, e.t)
+	if okM and not m and (why == "GONE_OFFMAP" or why == "GONE_DEAD") then return nil, "gone (" .. why .. ")" end
+	local x, y = u:GetX(), u:GetY()
+	local where = "land"
+	pcall(function()
+		local c = CityManager.GetCityAt(x, y)
+		if c ~= nil then where = "in city of P" .. c:GetOwner() elseif Map.GetPlot(x, y):IsWater() then where = "on water" end
+	end)
+	local listed = (not okM) and "?" or ((not m and why == "GONE_PLOT") and "NO" or "yes")
+	return u, "P" .. e.o .. " @" .. x .. "," .. y .. " " .. where .. ", dmg " .. UnitDamage(u) .. ", in plot list " .. listed
+end
+
+local function AirStatusText(a)
+	local parts = {}
+	for _, e in ipairs(a.units or {}) do
+		local _, t = AirFact(e)
+		parts[#parts + 1] = e.k .. " " .. t
+	end
+	return (#parts > 0) and table.concat(parts, "; ") or "no spike units yet"
+end
+
+local function AirAnswer(st, p, id, text)
+	local a = AirState(st)
+	a.ans = { stamp = Num(p.stamp, 0), text = text }
+	a.last = Turn()
+	ScnSave(st)
+	Check(id, "INFO", text)
+end
+
+local function AlIndex()
+	local row = GameInfo.Resources[AL]
+	return row and row.Index or -1
+end
+
+local function AlAmount(pid)
+	local ok, v = pcall(function() return Players[pid]:GetResources():GetResourceAmount(AlIndex()) end)
+	return ok and (tonumber(v) or -1) or -1
+end
+
+local function AlChange(pid, d)
+	local ok, err = pcall(function() Players[pid]:GetResources():ChangeResourceAmount(AlIndex(), d) end)
+	if not ok then AirPrint("ChangeResourceAmount(" .. AL .. ", " .. d .. ") ERROR " .. Str(err)) end
+end
+
+-- Your units whose heal gate is Aluminium (each one also costs 1 a turn).
+local function AlUnits(pid)
+	local n = 0
+	pcall(function()
+		for _, u in Players[pid]:GetUnits():Members() do
+			if EFV_HealResourceType(UnitTypeName(u)) == AL then n = n + 1 end
+		end
+	end)
+	return n
+end
+
+CMD.air_city = function(me, p)
+	local st = Session("AIR_A1", me)
+	if st == nil then return end
+	local cap = Capital(me)
+	if cap == nil then Check("AIR_A1", "CHECK", "you have no capital"); return end
+	local a = AirState(st)
+	local cx, cy = cap:GetX(), cap:GetY()
+	local function Make(k, plot)
+		local u = NewUnit("air_city", me, AIR_UT, plot, "VEF-" .. k)
+		AirSet(a, k, u)
+		AirPrint(k .. " Create(" .. AIR_UT .. ") at " .. (plot and (plot:GetX() .. "," .. plot:GetY()) or "no free plot") .. " -> " ..
+			(u and ("unit " .. u:GetID() .. " @" .. u:GetX() .. "," .. u:GetY()) or "nil"))
+		return u
+	end
+	local u1 = Make("AIR-1", Map.GetPlot(cx, cy))
+	local u2 = Make("AIR-2", Map.GetPlot(cx, cy))
+	local u3 = Make("AIR-3", FindPlot(cx, cy, 4, OwnedByAny({ -1, me }), 2))
+	local g = AirProbePlot("your capital", cx, cy)
+	AirProbeUnit("AIR-1", u1); AirProbeUnit("AIR-2", u2); AirProbeUnit("AIR-3", u3)
+	a.a1 = { turn = Turn() }
+	Focus(st, cx, cy, me, u1 and u1:GetID() or -1, p.stamp)
+	local parts = {}
+	for _, k in ipairs({ "AIR-1", "AIR-2", "AIR-3" }) do
+		local _, t = AirFact(AirEntry(a, k))
+		parts[#parts + 1] = k .. " " .. t
+	end
+	AirAnswer(st, p, "AIR_A1", "A1: " .. table.concat(parts, "; ") .. "; capital: " .. g)
+end
+
+CMD.air_host = function(me, p)
+	local st = Session("AIR_A2", me)
+	if st == nil then return end
+	local B = st.ally
+	local capB = Capital(B)
+	if capB == nil then Check("AIR_A2", "CHECK", "B has no capital"); return end
+	local a = AirState(st)
+	local promos = LevelOnePromotions(AIR_UT, 1)
+	local stand = { id = "AIR-B", unitType = AIR_UT, veteranName = "VEF-AIR-B", damage = 20, experience = 0,
+		level = 1 + #promos, promotions = promos, formation = 0 }
+	local store = EFV_Records.Load()
+	local okR, u = pcall(EFV_Units.Recreate, store, B, stand, Map.GetPlot(capB:GetX(), capB:GetY()), Turn())
+	if not okR then AirPrint("AIR-B Recreate ERROR " .. Str(u)); u = nil end
+	EFV_Records.Commit(store)
+	AirSet(a, "AIR-B", u)
+	AirPrint("AIR-B EFV_Units.Recreate(P" .. B .. ", " .. AIR_UT .. ", " .. table.concat(promos, "+") .. ", 20 damage) at " ..
+		capB:GetX() .. "," .. capB:GetY() .. " -> " .. (u and ("unit " .. u:GetID()) or "nil"))
+	local g = AirProbePlot("B's capital", capB:GetX(), capB:GetY())
+	AirProbeUnit("AIR-B", u)
+	Focus(st, capB:GetX(), capB:GetY(), nil, nil, p.stamp)
+	local _, t = AirFact(AirEntry(a, "AIR-B"))
+	AirAnswer(st, p, "AIR_A2", "A2: B's plane " .. t .. ", promotions " .. (u and PromoCount(u, promos) or 0) .. "/" .. #promos ..
+		" (20 dmg wanted); B's capital: " .. g)
+end
+
+CMD.air_fuel = function(me, p)
+	local st = Session("AIR_A3", me)
+	if st == nil then return end
+	local a = AirState(st)
+	local e = AirEntry(a, "AIR-1")
+	local u, fact = AirFact(e)
+	if u == nil then AirAnswer(st, p, "AIR_A3", "A3: VEF-AIR-1 " .. fact .. ": press A1 first"); return end
+	local t = Turn()
+	local f = type(a.a3) == "table" and a.a3 or {}
+	local step = tonumber(f.step) or 0
+	local text
+	if step == 0 or step >= 3 then
+		local al0 = AlAmount(me)
+		if al0 > 0 then AlChange(me, -al0) end
+		pcall(function() u:SetDamage(30) end)
+		f = { step = 1, ready = math.max(t + 1, (tonumber(e.turn) or t) + 2) }
+		text = "A3 step 1: VEF-AIR-1 damage " .. UnitDamage(u) .. ", your Aluminium " .. al0 .. " -> " .. AlAmount(me) ..
+			". End Turn until turn " .. f.ready .. " (a plane can't heal in the turn it was made), then press A3"
+	elseif step == 1 and t < (tonumber(f.ready) or 0) then
+		text = "A3: End Turn until turn " .. Str(f.ready) .. " (now " .. t .. "), then press A3"
+	elseif step == 1 then
+		local d1 = UnitDamage(u)
+		local n = math.max(1, AlUnits(me))
+		local al0 = AlAmount(me)
+		AlChange(me, 2 * n)
+		f = { step = 2, turn = t, d1 = d1 }
+		text = "A3 step 2: VEF-AIR-1 damage " .. d1 .. (d1 >= 30 and " (no heal with 0 Aluminium)" or " (HEALED with 0 Aluminium)") ..
+			"; Aluminium " .. al0 .. " -> " .. AlAmount(me) .. " (+2 for each of your " .. n .. " Aluminium units). End Turn once, then press A3"
+	elseif t <= (tonumber(f.turn) or t) then
+		text = "A3: End Turn first, then press A3"
+	else
+		local d2 = UnitDamage(u)
+		f.step = 3
+		text = "A3 step 3: VEF-AIR-1 damage " .. Str(f.d1) .. " -> " .. d2 ..
+			(d2 < (tonumber(f.d1) or 0) and " (healed with Aluminium)" or " (NO heal with Aluminium)") .. "; Aluminium now " .. AlAmount(me)
+	end
+	a.a3 = f
+	AirPrint("A3 step " .. Str(f.step) .. ": Aluminium " .. AlAmount(me) .. ", your Aluminium units " .. AlUnits(me))
+	AirProbeUnit("AIR-1", u)
+	Focus(st, u:GetX(), u:GetY(), me, u:GetID(), p.stamp)
+	AirAnswer(st, p, "AIR_A3", text)
+end
+
+CMD.air_ally = function(me, p)
+	local st = Session("AIR_A4", me)
+	if st == nil then return end
+	local F = st.friend
+	local capF = (F ~= nil) and Capital(F) or nil
+	if capF == nil then Check("AIR_A4", "CHECK", "F has no capital"); return end
+	local a = AirState(st)
+	if not Diplo(me, "HasAllied", F) then
+		GrantCivic(me, CIVIC_ALLY)
+		GrantCivic(F, CIVIC_ALLY)
+		SetDiploPair("air_ally", me, F, "SetHasAllied", true)
+	end
+	local allied = Diplo(me, "HasAllied", F)
+	local fx, fy = capF:GetX(), capF:GetY()
+	local u = NewUnit("air_ally", me, AIR_UT, Map.GetPlot(fx, fy), "VEF-AIR-V")
+	AirSet(a, "AIR-V", u)
+	AirPrint("AIR-V Create(" .. AIR_UT .. ") for you in F's capital " .. fx .. "," .. fy .. " (allied " .. tostring(allied) .. ") -> " ..
+		(u and ("unit " .. u:GetID() .. " @" .. u:GetX() .. "," .. u:GetY()) or "nil"))
+	local g = AirProbePlot("F's capital", fx, fy)
+	AirProbeUnit("AIR-V", u)
+	Focus(st, fx, fy, me, u and u:GetID() or -1, p.stamp)
+	local _, t = AirFact(AirEntry(a, "AIR-V"))
+	AirAnswer(st, p, "AIR_A4", "A4: allied with F " .. tostring(allied) .. "; your plane for F's capital: " ..
+		(u and t or "REFUSED (Create returned nil)") .. "; F's capital: " .. g)
+end
+
+CMD.air_carrier = function(me, p)
+	local st = Session("AIR_A5", me)
+	if st == nil then return end
+	local a = AirState(st)
+	local f = type(a.a5) == "table" and a.a5 or {}
+	if tonumber(f.step) == 1 then
+		-- second press: after the send
+		local cv, cvFact = AirFact(AirEntry(a, "CV"))
+		local pl, plFact = AirFact(AirEntry(a, "AIR-CV"))
+		local text
+		if cv ~= nil then
+			text = "A5: VEF-CV is still on the map (" .. cvFact .. "): send it first, then press A5 again; plane VEF-AIR-CV " .. plFact
+		else
+			local rec = Newest(EFV_Records.Load(), function(r) return r.senderID == me and r.unitType == CV_UT end)
+			f.step = 2
+			text = "A5 after the send: carrier " .. (rec and ("VEF record " .. rec.id .. " " .. Str(rec.state) .. " to P" .. Str(rec.recipientID))
+				or "gone, no VEF record") .. "; plane VEF-AIR-CV " .. plFact
+		end
+		if pl ~= nil then
+			AirProbePlot("AIR-CV's tile", pl:GetX(), pl:GetY())
+			AirProbeUnit("AIR-CV", pl)
+			Focus(st, pl:GetX(), pl:GetY(), me, pl:GetID(), p.stamp)
+		else
+			Focus(st, tonumber(f.x) or -1, tonumber(f.y) or -1, nil, nil, p.stamp)
+		end
+		a.a5 = f
+		AirAnswer(st, p, "AIR_A5", text)
+		return
+	end
+	local cap = Capital(me)
+	if cap == nil then Check("AIR_A5", "CHECK", "you have no capital"); return end
+	local cx, cy = cap:GetX(), cap:GetY()
+	local water = nil
+	for ring = 1, 3 do
+		for _, q in ipairs(Ring(cx, cy, ring)) do
+			if water == nil and FreeWater(q) and PlotOwner(q) == me then water = q end
+		end
+	end
+	local own = water ~= nil
+	if water == nil then water = FindFreePlot(cx, cy, true) end
+	if water == nil then
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		AirAnswer(st, p, "AIR_A5", "A5: no free water within 6 tiles of your capital: skip A5 (next time found the capital on the coast)")
+		return
+	end
+	local wx, wy = water:GetX(), water:GetY()
+	local cv = NewUnit("air_carrier", me, CV_UT, water, "VEF-CV")
+	if cv ~= nil then FullMoves(cv) end
+	local pl = (cv ~= nil) and NewUnit("air_carrier", me, AIR_UT, water, "VEF-AIR-CV") or nil
+	AirSet(a, "CV", cv)
+	AirSet(a, "AIR-CV", pl)
+	AirPrint("CV Create(" .. CV_UT .. ") at " .. wx .. "," .. wy .. " (your water " .. tostring(own) .. ") -> " .. (cv and ("unit " .. cv:GetID()) or "nil") ..
+		"; AIR-CV Create(" .. AIR_UT .. ") on its tile -> " .. (pl and ("unit " .. pl:GetID() .. " @" .. pl:GetX() .. "," .. pl:GetY()) or "nil"))
+	AirProbePlot("carrier tile", wx, wy)
+	AirProbeUnit("CV", cv)
+	AirProbeUnit("AIR-CV", pl)
+	-- what VEF's own send rule says for the carrier (the picker's rows)
+	local store = EFV_Records.Load()
+	local picks = {}
+	for _, r in ipairs({ { "B", st.ally, FT_EXP }, { "F", st.friend, FT_EXP }, { "CS", st.cs, FT_CS } }) do
+		local city = (r[2] ~= nil) and Capital(r[2]) or nil
+		local res = "no city"
+		if cv ~= nil and city ~= nil then
+			local okC, ok, reasons = pcall(EFV_EvaluateSend, me, cv, r[2], city, r[3], store)
+			res = (not okC) and "error" or (ok and "ok" or table.concat(reasons or {}, "+"))
+		end
+		picks[#picks + 1] = r[1] .. " " .. res
+	end
+	a.a5 = { step = 1, x = wx, y = wy }
+	Focus(st, wx, wy, me, cv and cv:GetID() or -1, p.stamp)
+	local _, cvFact = AirFact(AirEntry(a, "CV"))
+	local _, plFact = AirFact(AirEntry(a, "AIR-CV"))
+	AirAnswer(st, p, "AIR_A5", "A5: carrier VEF-CV " .. cvFact .. (own and "" or " (NOT your water: no send possible)") ..
+		"; plane VEF-AIR-CV " .. plFact .. "; send rule: " .. table.concat(picks, ", ") .. ". Send VEF-CV now, then press A5 again")
+end
+
+-- A9 air_rebase (EFV_Dev 1.0.5.1; FIXPLAN_air_units.md section 11;
+-- EFV/TESTING_1.0.5.md step 10). A script Create never puts a plane aboard
+-- (SPIKES 8.2), a Rebase by hand does. Press 1: Carrier VEF-CV9 on your own
+-- free water within 3 rings of your capital (A5's search), Fighter VEF-AIR-9
+-- on free water 2 or 3 tiles from it (never its tile; else free land),
+-- VEF's send rule for the carrier (expect no CARRIER_LOADED), the plane
+-- selected. You rebase VEF-AIR-9 onto VEF-CV9, then press A9 again: the
+-- carrier's tile and both units probed, the send rule again (expect
+-- CARRIER_LOADED), the carrier selected.
+CMD.air_rebase = function(me, p)
+	local st = Session("AIR_A9", me)
+	if st == nil then return end
+	local a = AirState(st)
+	local f = type(a.a9) == "table" and a.a9 or {}
+	local function Rule(cv)
+		if cv == nil then return "no carrier" end
+		local okC, codes = pcall(EFV_UnitSendReasons, cv, me, EFV_Records.Load())
+		if not okC then return "error " .. Str(codes) end
+		return (#codes == 0) and "ok" or table.concat(codes, "+")
+	end
+	if tonumber(f.step) == 1 then
+		local cv, cvFact = AirFact(AirEntry(a, "CV9"))
+		local pl, plFact = AirFact(AirEntry(a, "AIR-9"))
+		local same = "no"
+		if cv ~= nil then
+			AirProbePlot("CV9's tile", cv:GetX(), cv:GetY())
+			if pl ~= nil and pl:GetX() == cv:GetX() and pl:GetY() == cv:GetY() then same = "yes" end
+		end
+		AirProbeUnit("CV9", cv)
+		AirProbeUnit("AIR-9", pl)
+		if cv ~= nil then Focus(st, cv:GetX(), cv:GetY(), me, cv:GetID(), p.stamp) else Focus(st, -1, -1, nil, nil, p.stamp) end
+		AirAnswer(st, p, "AIR_A9", "A9: carrier VEF-CV9 " .. cvFact .. "; plane VEF-AIR-9 " .. plFact ..
+			"; plane on the carrier's tile " .. same .. "; carrier send rule now: " .. Rule(cv))
+		return
+	end
+	local cap = Capital(me)
+	if cap == nil then Check("AIR_A9", "CHECK", "you have no capital"); return end
+	local cx, cy = cap:GetX(), cap:GetY()
+	local water = nil
+	for ring = 1, 3 do
+		for _, q in ipairs(Ring(cx, cy, ring)) do
+			if water == nil and FreeWater(q) and PlotOwner(q) == me then water = q end
+		end
+	end
+	if water == nil then
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		AirAnswer(st, p, "AIR_A9", "A9: none of your own free water within 3 tiles of your capital: skip A9 (next time found the capital on the coast)")
+		return
+	end
+	local wx, wy = water:GetX(), water:GetY()
+	local cv = NewUnit("air_rebase", me, CV_UT, water, "VEF-CV9")
+	if cv ~= nil then FullMoves(cv) end
+	local spot, onLand = nil, false
+	for ring = 2, 3 do
+		for _, q in ipairs(Ring(wx, wy, ring)) do
+			if spot == nil and FreeWater(q) then spot = q end
+		end
+	end
+	if spot == nil then
+		for ring = 2, 3 do
+			for _, q in ipairs(Ring(wx, wy, ring)) do
+				if spot == nil and FreeLand(q) then spot, onLand = q, true end
+			end
+		end
+	end
+	local pl = (cv ~= nil) and NewUnit("air_rebase", me, AIR_UT, spot, "VEF-AIR-9") or nil
+	AirSet(a, "CV9", cv)
+	AirSet(a, "AIR-9", pl)
+	AirPrint("CV9 Create(" .. CV_UT .. ") at " .. wx .. "," .. wy .. " -> " .. (cv and ("unit " .. cv:GetID()) or "nil") ..
+		"; AIR-9 Create(" .. AIR_UT .. ") -> " .. (pl and ("unit " .. pl:GetID() .. " @" .. pl:GetX() .. "," .. pl:GetY()) or "nil") ..
+		(onLand and " (on land: no free water 2-3 tiles from the carrier)" or ""))
+	AirProbeUnit("CV9", cv)
+	AirProbeUnit("AIR-9", pl)
+	a.a9 = { step = 1, x = wx, y = wy }
+	if pl ~= nil then Focus(st, pl:GetX(), pl:GetY(), me, pl:GetID(), p.stamp) else Focus(st, wx, wy, me, cv and cv:GetID() or -1, p.stamp) end
+	local _, cvFact = AirFact(AirEntry(a, "CV9"))
+	local _, plFact = AirFact(AirEntry(a, "AIR-9"))
+	AirAnswer(st, p, "AIR_A9", "A9: carrier VEF-CV9 " .. cvFact .. "; plane VEF-AIR-9 " .. plFact ..
+		(onLand and " (on land)" or "") .. "; carrier send rule now: " .. Rule(cv) ..
+		". Rebase VEF-AIR-9 onto VEF-CV9, then press A9 again")
+end
+
+CMD.air_status = function(me, p)
+	local st = Session("AIR_STATUS", me)
+	if st == nil then return end
+	local a = AirState(st)
+	for _, e in ipairs(a.units) do
+		local u = AirFact(e)
+		if u ~= nil then AirProbeUnit(e.k, u) end
+	end
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	AirAnswer(st, p, "AIR_STATUS", "Air T" .. Turn() .. ": " .. AirStatusText(a))
+end
+
+-- At your turn start, for AIR_WATCH_TURNS turns after the last A button.
+function EFV_Dev.EvalAir(st, t)
+	local a = st.air
+	if type(a) ~= "table" or type(a.units) ~= "table" or #a.units == 0 then return end
+	if t > (tonumber(a.last) or -99) + AIR_WATCH_TURNS then return end
+	Check("AIR_TURN", "INFO", AirStatusText(a))
+end
+end -- air-unit spike
+
+-- ===========================================================================
+-- Corps spike (EFV_Dev 1.0.4.4; FIXPLAN_corps.md section 5 and its "Designer
+-- rulings" of 2026-10-11; EFV/TESTING_SPIKES.md). A new Ancient-era game
+-- after S0: nobody has Nationalism or Mobilization yet, so you, B and the
+-- city-states are hosts without the civics. GetMilitaryFormation and
+-- SetMilitaryFormation are CONFIRMED in gameplay (SESSION_D 8, SESSION_F
+-- 4.1, WarMachineScenario.lua:187-191); the downgrade (to STANDARD, or ARMY
+-- to CORPS) is not.
+--   C1 corps_probe    press per step. 1: your Swordsman VEF-C1, Galley
+--                     VEF-C1N (free water near your capital, if any) and
+--                     Tank VEF-C1T made and set to ARMY; Builder VEF-C1B and
+--                     Battering Ram VEF-C1R made and read. 2: the three ->
+--                     CORPS. 3: -> STANDARD. Every step reads formation, ID,
+--                     XP, promotions, damage, moves, strength and the upkeep
+--                     (your total gold upkeep and Oil upkeep, and
+--                     UnitManager.GetUnit(Corps|Army)Maintenance by hash).
+--   C2 corps_give     for city-state CS2 (no Nationalism): VEF-C2-A made,
+--                     set to CORPS, then 2 promotions, 40 XP and 30 damage by
+--                     hand (formation BEFORE the rest); VEF-C2-B through
+--                     EFV_Units.Recreate with the same stand-in, then CORPS
+--                     (AFTER). For B: VEF-C2-ARMY like C2-B, ARMY.
+--   C3 corps_merge    1: you get Nationalism. B lends you two Spearmen (EXP
+--                     records): VEF-C3-LENT (0 XP, 20 damage) next to your
+--                     VEF-C3-OWN (30 XP, 1 promotion), and VEF-C3-LENT2 (30
+--                     XP, 1 promotion) next to your VEF-C3-OWN2 (20 damage).
+--                     You merge both pairs. 2 (after End Turn): every C3
+--                     record still open ends its service next turn (its unit
+--                     is put on your land first, so it goes home, no grace).
+--   C4 corps_cs_ai    optional. City-state CS3 gets Nationalism; two of your
+--                     Swordsmen as its City-State units (VEF-C4-1 / -2,
+--                     service ends in 6 turns) next to its own VEF-C4-N.
+--   C5 corps_cs_force three cases at the session's city-state CS, all at
+--                     once, at least 4 tiles apart: 1) your tracked VEF-C5-S
+--                     -> CORPS, the city-state's VEF-C5-N removed, service
+--                     ends next turn; 2) the city-state's VEF-C5-M -> CORPS,
+--                     your tracked VEF-C5-A next to it removed; 3) your
+--                     tracked VEF-C5-X removed, a city-state Builder
+--                     VEF-C5-BLD 2 tiles away, no Corps near.
+--   C6 corps_host     hosts without the civics (read first and reported):
+--                     EFV_Units.Recreate + SetMilitaryFormation make
+--                     VEF-C6-CORPS and VEF-C6-ARMY for you, lent by B (EXP
+--                     records, full moves, C's Warrior VEF-C6-FOE next to the
+--                     Corps to attack), VEF-C6-B (B's Corps, lent by you) and
+--                     VEF-C6-CS (CS2's Army, lent by you).
+--   C7 corps_trip     1: your Swordsman VEF-C7 with 2 promotions, 20 XP, 30
+--                     damage, ARMY; then VEF's own return path:
+--                     EFV_Units.Snapshot, Remove, Recreate (route B for you:
+--                     your UI takes the promotions back) and
+--                     SetMilitaryFormation(snapshot). Upkeep read at each
+--                     stage. 2: read back.
+--   C Status          corps_status: every C unit now.
+-- At each of your turn starts for C_WATCH turns after the last C button:
+-- CORPS_WATCH, the same text as C Status (records included).
+-- Raw facts: "[EFV][Corps] G ..." lines. Unverified readers (HasCivic,
+-- GetTotalMaintenance, GetUnitResourceDemandPerTurn, UnitManager.Get*
+-- Maintenance, CanFormMilitaryFormation, unit GetCombat) are looked up BY
+-- NAME and pcall-guarded (MISSING / ERROR, never thrown), so api_audit does
+-- not see them. The panel's answer: st.corps.ans (stamp, ASCII text). MP
+-- style: the synced handler only, no pairs() over state, no random, no
+-- local-player call. Own do-block (Lua's 200-local limit), like the air
+-- spike; EvalCorps is reached as EFV_Dev.EvalCorps.
+-- ---------------------------------------------------------------------------
+do
+local SW, SP = "UNIT_SWORDSMAN", "UNIT_SPEARMAN"
+local C_WATCH = 6
+
+local function CPrint(msg) print("[EFV][Corps] G " .. Str(msg)) end
+
+-- obj:name(...) (static: obj.name(...)) looked up by name:
+-- "OK", r | "MISSING", why | "ERROR", why. CShort: the value or the status.
+local function CCall(obj, name, static, ...)
+	local f, why = DpMethod(obj, name)
+	if f == nil then return "MISSING", name .. " " .. Str(why) end
+	local args, n = { ... }, select("#", ...)
+	local r
+	if static then r = { pcall(f, unpack(args, 1, n)) } else r = { pcall(f, obj, unpack(args, 1, n)) } end
+	if not r[1] then return "ERROR", Str(r[2]) end
+	return "OK", r[2]
+end
+
+local function CShort(s, v) return (s == "OK") and Str(v) or s end
+
+local function FName(f)
+	local M = MilitaryFormationTypes or {}
+	if f == nil then return "nil" end
+	if f == M.STANDARD_FORMATION then return "STANDARD" end
+	if f == M.CORPS_FORMATION then return "CORPS" end
+	if f == M.ARMY_FORMATION then return "ARMY" end
+	return "value " .. Str(f)
+end
+
+local function CForm(u)
+	local ok, f = pcall(function() return u:GetMilitaryFormation() end)
+	return ok and FName(f) or "ERROR"
+end
+
+-- SetMilitaryFormation(f) (CONFIRMED for CORPS and ARMY; the downgrade is
+-- what C1 asks), logged with the formation before and after.
+local function CSetForm(label, u, f)
+	if u == nil then CPrint(label .. " SetMilitaryFormation(" .. FName(f) .. "): no unit"); return "no unit" end
+	local before = CForm(u)
+	local ok, err = pcall(function() u:SetMilitaryFormation(f) end)
+	local after = CForm(u)
+	CPrint(label .. " SetMilitaryFormation(" .. FName(f) .. ") ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))) ..
+		": " .. before .. " -> " .. after)
+	return after
+end
+
+-- Formation, strength, XP, promotions, damage, moves and tile of u.
+local function CFact(u)
+	local xp = XPInfo(u)
+	local s, str = CCall(u, "GetCombat")
+	local mv, promos = "?", -1
+	pcall(function() mv = Str(u:GetMovesRemaining()) .. "/" .. Str(u:GetMaxMoves()) end)
+	pcall(function() promos = #PromoRows(u) end)
+	return "P" .. u:GetOwner() .. "/" .. u:GetID() .. " " .. CForm(u) .. ", strength " .. CShort(s, str) .. ", xp " .. xp ..
+		", promotions " .. promos .. ", dmg " .. UnitDamage(u) .. ", moves " .. mv .. " @" .. u:GetX() .. "," .. u:GetY()
+end
+
+-- Nationalism and Mobilization of pid (GetCulture():HasCivic by name).
+local function CCivics(pid)
+	local out = {}
+	for _, c in ipairs({ { "CIVIC_NATIONALISM", "Nationalism" }, { "CIVIC_MOBILIZATION", "Mobilization" } }) do
+		local _, row = pcall(function() return GameInfo.Civics[c[1]] end)
+		local okC, cul = pcall(function() return Players[pid]:GetCulture() end)
+		local s, has = CCall(okC and cul or nil, "HasCivic", false, row and row.Index or -1)
+		out[#out + 1] = c[2] .. " " .. ((s == "OK") and (has and "yes" or "no") or s)
+	end
+	return table.concat(out, ", ")
+end
+
+-- pid's total gold upkeep and Oil upkeep per turn (G readers by name).
+local function CUpkeep(pid)
+	local okT, tr = pcall(function() return Players[pid]:GetTreasury() end)
+	local okR, rs = pcall(function() return Players[pid]:GetResources() end)
+	local s1, g = CCall(okT and tr or nil, "GetTotalMaintenance")
+	local s2, o = CCall(okR and rs or nil, "GetUnitResourceDemandPerTurn", false, "RESOURCE_OIL")
+	return "gold upkeep " .. CShort(s1, g) .. ", Oil upkeep " .. CShort(s2, o)
+end
+
+-- The per-type readers ReportScreen.lua:319-334 uses in the UI, tried in G.
+local function CTypeUpkeep(ut)
+	local row = GameInfo.Units[ut]
+	local parts = {}
+	for _, fn in ipairs({ "GetUnitMaintenance", "GetUnitCorpsMaintenance", "GetUnitArmyMaintenance" }) do
+		local s, v = CCall(UnitManager, fn, true, row and row.Hash)
+		parts[#parts + 1] = fn .. "=" .. CShort(s, v) .. ((s ~= "OK") and (" (" .. Str(v) .. ")") or "")
+	end
+	CPrint(ut .. " Maintenance (data) " .. Str(row and row.Maintenance) .. "; " .. table.concat(parts, " "))
+end
+
+-- Full moves now: FullMoves (RestoreMovementToFormation, LIKELY), else
+-- ChangeMovesRemaining (CONFIRMED, the V2 refill).
+local function CFull(u)
+	if FullMoves(u) then return end
+	pcall(function() u:ChangeMovesRemaining(u:GetMaxMoves() - u:GetMovesRemaining()) end)
+end
+
+local function CState(st)
+	local c = Sub(st, "corps")
+	if type(c.units) ~= "table" then c.units = {} end
+	return c
+end
+
+-- Sets (u nil: drops) the C unit with key k; rid = its VEF record.
+local function CSet(c, k, u, rid)
+	local list = {}
+	for _, e in ipairs(c.units) do if e.k ~= k then list[#list + 1] = e end end
+	if u ~= nil then
+		list[#list + 1] = { k = k, o = u:GetOwner(), u = u:GetID(), t = UnitTypeName(u), x = u:GetX(), y = u:GetY(), rid = rid }
+	end
+	c.units = list
+end
+
+-- The live unit of entry e (nil when gone) and its facts, with the record.
+local function CFactOf(e, store)
+	local u = FindUnit(e.o, e.u)
+	local txt
+	if u == nil or UnitTypeName(u) ~= e.t then
+		u, txt = nil, "gone"
+	else
+		local okM, m, why = pcall(EFV_UnitMatches, u, e.o, e.u, e.t)
+		if okM and not m and (why == "GONE_OFFMAP" or why == "GONE_DEAD") then
+			u, txt = nil, "gone (" .. why .. ")"
+		else
+			txt = CFact(u) .. ((tonumber(e.x) ~= u:GetX() or tonumber(e.y) ~= u:GetY()) and " (moved)" or "")
+		end
+	end
+	if e.rid ~= nil and store ~= nil then
+		local rec = EFV_Records.Get(store, e.rid)
+		txt = txt .. ", record " .. Str(e.rid) .. " " .. (rec and Str(rec.state) or "closed")
+	end
+	return u, txt
+end
+
+-- Every C unit whose key starts with prefix (nil: all).
+local function CList(c, store, prefix)
+	local parts = {}
+	for _, e in ipairs(c.units) do
+		if prefix == nil or string.sub(e.k, 1, #prefix) == prefix then
+			local _, t = CFactOf(e, store)
+			parts[#parts + 1] = e.k .. " " .. t
+		end
+	end
+	return (#parts > 0) and table.concat(parts, "; ") or "no C units yet"
+end
+
+local function CAnswer(st, p, id, text, verdict)
+	local c = CState(st)
+	c.ans = { stamp = Num(p.stamp, 0), text = text }
+	c.last = Turn()
+	ScnSave(st)
+	Check(id, verdict or "INFO", text)
+end
+
+-- A stand-in record for EFV_Units.Recreate (n level-1 promotions).
+local function CStand(k, ut, n, xp, dmg)
+	local promos = LevelOnePromotions(ut, n)
+	return { id = k, unitType = ut, veteranName = "VEF-" .. k, damage = dmg, experience = xp, level = 1 + #promos,
+		promotions = promos, formation = 0 }
+end
+
+-- VEF's restore path for owner on plot, then formation f (nil: none).
+local function CRecreate(store, c, k, owner, stand, plot, f)
+	if plot == nil then CPrint(k .. ": no free plot"); CSet(c, k, nil); return nil end
+	local ok, u = pcall(EFV_Units.Recreate, store, owner, stand, plot, Turn())
+	if not ok then CPrint(k .. " Recreate ERROR " .. Str(u)); u = nil end
+	if u ~= nil and f ~= nil then CSetForm(k, u, f) end
+	CSet(c, k, u)
+	CPrint(k .. " EFV_Units.Recreate(P" .. owner .. ", " .. stand.unitType .. ", " .. #stand.promotions .. " promotions, xp " ..
+		stand.experience .. ", dmg " .. stand.damage .. ") then " .. (f and FName(f) or "no formation") .. " -> " .. (u and CFact(u) or "nil"))
+	return u
+end
+
+-- A deployed record "sender lent u to recipient" (MakeRecord), ending its
+-- service in endsIn turns (nil: the full duration). Returns the record ID.
+local function CLend(store, c, k, u, force, sender, recipient, endsIn)
+	local origin, dest = Capital(sender), Capital(recipient)
+	if u == nil or origin == nil or dest == nil then return nil end
+	local dur = (force == FT_CS) and EFV_Config.CS_EXPEDITIONARY_DURATION or EFV_Config.EXPEDITIONARY_DURATION
+	local basis = (force == FT_CS) and "CITY_STATE" or (EFV_PartnerBasis(sender, recipient) or "FRIEND")
+	local rec = MakeRecord(store, u, { force = force, sender = sender, recipient = recipient, basis = basis, origin = origin,
+		dest = dest, duration = dur, deployedTurn = endsIn and (Turn() + endsIn - dur) or nil })
+	if rec == nil then return nil end
+	CSet(c, k, u, rec.id)
+	CPrint(k .. " record " .. rec.id .. " " .. Str(force) .. " " .. PlayerName(sender) .. " -> " .. PlayerName(recipient) ..
+		", service ends in " .. Str(endsIn or dur) .. " turns")
+	return rec.id
+end
+
+-- CS2: a second city-state (C2, C6), kept for the session; met and revealed.
+local function CCs2(st, me, c)
+	if c.cs2 == nil or not Alive(c.cs2) then
+		c.cs2 = PickCityState(st, me, { st.cs }) or st.cs
+	end
+	local city = Capital(c.cs2)
+	MeetPair(me, c.cs2)
+	if city ~= nil then RevealCity(me, city, nil) end
+	return c.cs2, city
+end
+
+-- A free land plot within maxR of (x, y), owned by one of owners (-1:
+-- unowned), at least minD tiles from every plot in far.
+local function CFar(x, y, maxR, owners, far, minD)
+	return FindPlot(x, y, maxR, function(q)
+		if not OwnedByAny(owners)(q) then return false end
+		for _, f in ipairs(far) do
+			if Dist(q:GetX(), q:GetY(), f:GetX(), f:GetY()) < minD then return false end
+		end
+		return true
+	end, 1)
+end
+
+-- C1: one formation step per press for your Swordsman, Galley and Tank.
+CMD.corps_probe = function(me, p)
+	local st = Session("CORPS_C1", me)
+	if st == nil then return end
+	local cap = Capital(me)
+	if cap == nil then Check("CORPS_C1", "CHECK", "you have no capital"); return end
+	local c = CState(st)
+	local f = type(c.c1) == "table" and c.c1 or {}
+	local step = tonumber(f.step) or 0
+	local M = MilitaryFormationTypes
+	local keys = { "C1", "C1N", "C1T" }
+	if step == 0 or step >= 3 then
+		for _, k in ipairs({ "C1", "C1N", "C1T", "C1B", "C1R" }) do
+			local old = nil
+			for _, e in ipairs(c.units) do if e.k == k then old = FindUnit(e.o, e.u) end end
+			if old ~= nil then pcall(function() Players[me]:GetUnits():Destroy(old) end) end
+			CSet(c, k, nil)
+		end
+		local g0 = CUpkeep(me)
+		local cx, cy = cap:GetX(), cap:GetY()
+		local made = {}
+		for _, d in ipairs({ { "C1", SW, false }, { "C1N", "UNIT_GALLEY", true }, { "C1T", "UNIT_TANK", false },
+			{ "C1B", "UNIT_BUILDER", false }, { "C1R", "UNIT_BATTERING_RAM", false } }) do
+			local plot = d[3] and FindFreePlot(cx, cy, true) or FindPlot(cx, cy, 4, OwnedByAny({ -1, me }), 1)
+			local u = NewUnit("corps_probe", me, d[2], plot, "VEF-" .. d[1])
+			CSet(c, d[1], u)
+			CTypeUpkeep(d[2])
+			made[#made + 1] = d[1] .. " " .. (u and CForm(u) or "not made")
+			if u ~= nil then
+				local s, v = CCall(UnitManager, "CanFormMilitaryFormation", true, me, u:GetDomain(), M.CORPS_FORMATION, u)
+				CPrint(d[1] .. " " .. d[2] .. " made: " .. CFact(u) .. "; CanFormMilitaryFormation(CORPS)=" .. CShort(s, v))
+			end
+		end
+		for _, e in ipairs(c.units) do if e.k == "C1" then local u1 = FindUnit(e.o, e.u); if u1 ~= nil then CFull(u1) end end end
+		f = { step = 0, g0 = g0, g1 = CUpkeep(me), made = table.concat(made, ", ") }
+	end
+	step = (tonumber(f.step) or 0) + 1
+	local want = ({ M.ARMY_FORMATION, M.CORPS_FORMATION, M.STANDARD_FORMATION })[step]
+	local parts = {}
+	local focusU = nil
+	for _, k in ipairs(keys) do
+		local u = nil
+		for _, e in ipairs(c.units) do if e.k == k then u = FindUnit(e.o, e.u) end end
+		if u ~= nil then
+			CSetForm(k, u, want)
+			parts[#parts + 1] = k .. " " .. CFact(u)
+			if k == "C1" then focusU = u end
+		else
+			parts[#parts + 1] = k .. " not on the map"
+		end
+	end
+	local up = CUpkeep(me)
+	CPrint("C1 step " .. step .. " (" .. FName(want) .. "): " .. up .. "; before the C1 units " .. Str(f.g0) .. "; plain C1 units " .. Str(f.g1))
+	f.step = step
+	c.c1 = f
+	if focusU ~= nil then Focus(st, focusU:GetX(), focusU:GetY(), me, focusU:GetID(), p.stamp) else Focus(st, -1, -1, nil, nil, p.stamp) end
+	local head = "C1 step " .. step .. " of 3 -> " .. FName(want) .. ": "
+	if step == 1 then head = head .. "Builder/Ram: " .. Str(f.made) .. "; " end
+	CAnswer(st, p, "CORPS_C1", head .. table.concat(parts, "; ") .. ". Upkeep now: " .. up .. " (plain units: " .. Str(f.g1) ..
+		")" .. (step < 3 and ". Press C1 again for the next step" or ". Done (C1 again starts over)"))
+end
+
+-- C2: formations for hosts without the civic, formation before or after the
+-- restore of promotions, XP and damage.
+CMD.corps_give = function(me, p)
+	local st = Session("CORPS_C2", me)
+	if st == nil then return end
+	local c = CState(st)
+	local B = st.ally
+	local cs2, csCity = CCs2(st, me, c)
+	local capB = Capital(B)
+	if csCity == nil or capB == nil then Check("CORPS_C2", "CHECK", "no city-state city or no capital of B"); return end
+	local M = MilitaryFormationTypes
+	local store = EFV_Records.Load()
+	local promos = LevelOnePromotions(SW, 2)
+	-- A: Create, CORPS, then promotions, XP and damage by hand.
+	local a = NewUnit("corps_give", cs2, SW, FindPlot(csCity:GetX(), csCity:GetY(), 3, OwnedByAny({ -1, cs2 }), 1), "VEF-C2-A")
+	if a ~= nil then
+		CSetForm("C2-A", a, M.CORPS_FORMATION)
+		for _, nm in ipairs(promos) do SetPromo(a, GameInfo.UnitPromotions[nm].Index) end
+		TopUp(a, 40)
+		pcall(function() a:SetDamage(30) end)
+	end
+	CSet(c, "C2-A", a)
+	CPrint("C2-A formation BEFORE the restore: " .. (a and CFact(a) or "not made"))
+	local b = CRecreate(store, c, "C2-B", cs2, CStand("C2-B", SW, 2, 40, 30),
+		FindPlot(csCity:GetX(), csCity:GetY(), 3, OwnedByAny({ -1, cs2 }), 1), M.CORPS_FORMATION)
+	local r = CRecreate(store, c, "C2-ARMY", B, CStand("C2-ARMY", SW, 2, 40, 30),
+		FindPlot(capB:GetX(), capB:GetY(), 3, OwnedByAny({ -1, B }), 1), M.ARMY_FORMATION)
+	EFV_Records.Commit(store)
+	Focus(st, csCity:GetX(), csCity:GetY(), nil, nil, p.stamp)
+	local function Line(k, u) return k .. " " .. (u and (CFact(u) .. ", promotions " .. PromoCount(u, promos) .. "/" .. #promos) or "not made") end
+	CAnswer(st, p, "CORPS_C2", "C2 (wanted: 2 promotions, xp 40, dmg 30): " .. Line("C2-A (CORPS before)", a) .. "; " ..
+		Line("C2-B (CORPS after)", b) .. "; " .. Line("C2-ARMY for B", r) .. ". Civics: " .. PlayerName(cs2) .. " " .. CCivics(cs2) ..
+		"; B " .. CCivics(B) .. ". End Turn, then C Status")
+end
+
+-- C3: a real merge by you (the host) of a unit B lent you.
+CMD.corps_merge = function(me, p)
+	local st = Session("CORPS_C3", me)
+	if st == nil then return end
+	local c = CState(st)
+	local B = st.ally
+	local cap = Capital(me)
+	if cap == nil then Check("CORPS_C3", "CHECK", "you have no capital"); return end
+	local store = EFV_Records.Load()
+	local f = type(c.c3) == "table" and c.c3 or {}
+	if tonumber(f.step) == 1 and Turn() > (tonumber(f.turn) or 0) then
+		-- step 2: every open C3 record ends its service next turn, on your land
+		local parts = {}
+		for _, e in ipairs(c.units) do
+			local rec = (e.rid ~= nil) and EFV_Records.Get(store, e.rid) or nil
+			if rec ~= nil and string.sub(e.k, 1, 2) == "C3" then
+				local u = RecUnit(rec)
+				if u ~= nil and PlotOwner(Map.GetPlot(u:GetX(), u:GetY())) ~= me then
+					local q = FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1)
+					if q ~= nil then Place(u, q) end
+				end
+				rec.deployedTurn = Turn() + 1 - (tonumber(rec.durationTurns) or EFV_Config.EXPEDITIONARY_DURATION)
+				EFV_Records.Touch(store)
+				parts[#parts + 1] = e.k .. " record " .. rec.id .. " " .. Str(rec.state) .. (u and (" " .. CForm(u)) or " (no unit)")
+			end
+		end
+		EFV_Records.Commit(store)
+		f.step = 2
+		c.c3 = f
+		Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+		CAnswer(st, p, "CORPS_C3", "C3 step 2: " .. ((#parts > 0) and (table.concat(parts, "; ") .. " end their service next turn")
+			or "no C3 record is open any more (both lent units absorbed?)") .. ". Now: " .. CList(c, store, "C3") .. ". End Turn, then C Status")
+		return
+	end
+	if tonumber(f.step) == 1 then
+		CAnswer(st, p, "CORPS_C3", "C3: merge both pairs now (see the first answer), End Turn, then press C3 again. Now: " .. CList(c, store, "C3"))
+		return
+	end
+	GrantCivic(me, "CIVIC_NATIONALISM")
+	local cx, cy = cap:GetX(), cap:GetY()
+	local placed = {}
+	local function Pair(kLent, kOwn, lentXP, lentPromo, lentDmg, ownXP, ownPromo, ownDmg)
+		local q1 = CFar(cx, cy, 4, { -1, me }, placed, 3)
+		local lent = NewUnit("corps_merge", me, SP, q1, "VEF-" .. kLent)
+		if lent == nil then return nil, nil end
+		placed[#placed + 1] = q1
+		local q2 = FindPlot(lent:GetX(), lent:GetY(), 1, OwnedByAny({ -1, me }), 1)
+		local own = NewUnit("corps_merge", me, SP, q2, "VEF-" .. kOwn)
+		if q2 ~= nil then placed[#placed + 1] = q2 end
+		for _, d in ipairs({ { lent, lentXP, lentPromo, lentDmg }, { own, ownXP, ownPromo, ownDmg } }) do
+			local u = d[1]
+			if u ~= nil then
+				local pr = d[3] and LevelOnePromotions(SP, 1)[1] or nil
+				if pr ~= nil then SetPromo(u, GameInfo.UnitPromotions[pr].Index) end
+				TopUp(u, d[2])
+				pcall(function() u:SetDamage(d[4]) end)
+				CFull(u)
+			end
+		end
+		CLend(store, c, kLent, lent, FT_EXP, B, me, nil)
+		CSet(c, kOwn, own)
+		CPrint(kLent .. " " .. CFact(lent) .. "; " .. kOwn .. " " .. (own and CFact(own) or "not made"))
+		return lent, own
+	end
+	local l1 = Pair("C3-LENT", "C3-OWN", 0, false, 20, 30, true, 0)
+	Pair("C3-LENT2", "C3-OWN2", 30, true, 0, 0, false, 20)
+	EFV_Records.Commit(store)
+	c.c3 = { step = 1, turn = Turn() }
+	c.trace = Turn()        -- merge trace (1.0.4.5) until the next turn
+	if l1 ~= nil then Focus(st, l1:GetX(), l1:GetY(), me, l1:GetID(), p.stamp) else Focus(st, cx, cy, nil, nil, p.stamp) end
+	CAnswer(st, p, "CORPS_C3", "C3: you have Nationalism (" .. CCivics(me) .. "). Pair 1: select VEF-C3-LENT, Form Corps, click VEF-C3-OWN. " ..
+		"Pair 2: select VEF-C3-OWN2, Form Corps, click VEF-C3-LENT2. Then End Turn and press C3 again. Merge trace on until the next turn. Now: " ..
+		CList(c, store, "C3"))
+end
+
+-- C4 (optional): does the city-state AI merge lent units by itself?
+CMD.corps_cs_ai = function(me, p)
+	local st = Session("CORPS_C4", me)
+	if st == nil then return end
+	local c = CState(st)
+	local cs3 = PickCityState(st, me, { st.cs, c.cs2 or -1 }) or c.cs2 or st.cs
+	local city = Capital(cs3)
+	if city == nil then Check("CORPS_C4", "CHECK", "no city-state with a city"); return end
+	MeetPair(me, cs3)
+	RevealCity(me, city, nil)
+	GrantCivic(cs3, "CIVIC_NATIONALISM")
+	local store = EFV_Records.Load()
+	local placed = {}
+	for _, d in ipairs({ { "C4-1", true }, { "C4-2", true }, { "C4-N", false } }) do
+		local q = (#placed == 0) and FindPlot(city:GetX(), city:GetY(), 3, OwnedByAny({ -1, cs3 }), 1)
+			or FindPlot(placed[1]:GetX(), placed[1]:GetY(), 1, OwnedByAny({ -1, cs3 }), 1)
+		local u = NewUnit("corps_cs_ai", cs3, SW, q, "VEF-" .. d[1])
+		if u ~= nil then
+			placed[#placed + 1] = q
+			CFull(u)
+			if d[2] then CLend(store, c, d[1], u, FT_CS, me, cs3, 6) else CSet(c, d[1], u) end
+		end
+	end
+	EFV_Records.Commit(store)
+	Focus(st, city:GetX(), city:GetY(), nil, nil, p.stamp)
+	CAnswer(st, p, "CORPS_C4", "C4: " .. PlayerName(cs3) .. " " .. CCivics(cs3) .. "; " .. CList(c, store, "C4") ..
+		". Watch for a Corps star on its units at your next 6 turn starts (CORPS_WATCH)")
+end
+
+-- C5: the three city-state cases of FIXPLAN_corps.md Part 1 (b, a, e).
+CMD.corps_cs_force = function(me, p)
+	local st = Session("CORPS_C5", me)
+	if st == nil then return end
+	local c = CState(st)
+	local cs = st.cs
+	local city = Capital(cs)
+	if city == nil then Check("CORPS_C5", "CHECK", "the city-state CS has no city"); return end
+	MeetPair(me, cs)
+	RevealCity(me, city, nil)
+	local M = MilitaryFormationTypes
+	local store = EFV_Records.Load()
+	local cx, cy = city:GetX(), city:GetY()
+	local own = { -1, cs }
+	local notes = {}
+	local function Make(k, ut, plot)
+		local u = NewUnit("corps_cs_force", cs, ut, plot, "VEF-" .. k)
+		if u == nil then notes[#notes + 1] = k .. " not made (no free land)" end
+		return u
+	end
+	-- case 1: the lent unit leads the Corps; its service ends next turn
+	local s1 = Make("C5-S", SW, FindPlot(cx, cy, 2, OwnedByAny(own), 1))
+	local far = { s1 and Map.GetPlot(s1:GetX(), s1:GetY()) or city }
+	if s1 ~= nil then
+		local n = Make("C5-N", SW, FindPlot(s1:GetX(), s1:GetY(), 1, OwnedByAny(own), 1))
+		CLend(store, c, "C5-S", s1, FT_CS, me, cs, 1)
+		CSetForm("C5-S", s1, M.CORPS_FORMATION)
+		if n ~= nil then pcall(function() Players[cs]:GetUnits():Destroy(n) end) end
+		Hold(store, s1)
+	end
+	-- case 2: the lent unit is absorbed into the city-state's Corps
+	local m = Make("C5-M", SW, CFar(cx, cy, 10, own, far, 4))
+	if m ~= nil then
+		far[#far + 1] = Map.GetPlot(m:GetX(), m:GetY())
+		local a = Make("C5-A", SW, FindPlot(m:GetX(), m:GetY(), 1, OwnedByAny(own), 1))
+		CSetForm("C5-M", m, M.CORPS_FORMATION)
+		CSet(c, "C5-M", m)
+		Hold(store, m)
+		if a ~= nil then
+			far[#far + 1] = Map.GetPlot(a:GetX(), a:GetY())
+			CLend(store, c, "C5-A", a, FT_CS, me, cs, nil)
+			pcall(function() Players[cs]:GetUnits():Destroy(a) end)
+		end
+	end
+	-- case 3: the lent unit disappears with a Builder near, no Corps near
+	local x = Make("C5-X", SW, CFar(cx, cy, 12, own, far, 4))
+	if x ~= nil then
+		local bld = Make("C5-BLD", "UNIT_BUILDER", FindPlot(x:GetX(), x:GetY(), 2, OwnedByAny(own), 2))
+		CLend(store, c, "C5-X", x, FT_CS, me, cs, nil)
+		if bld ~= nil then
+			CSet(c, "C5-BLD", bld)
+			Hold(store, bld)
+			CPrint("C5-BLD formation " .. CForm(bld) .. " (a civilian: STANDARD or not?)")
+		end
+		pcall(function() Players[cs]:GetUnits():Destroy(x) end)
+	end
+	EFV_Records.Commit(store)
+	Focus(st, cx, cy, nil, nil, p.stamp)
+	CAnswer(st, p, "CORPS_C5", "C5 at " .. PlayerName(cs) .. ": 1) C5-S leads a Corps, its partner removed, service ends next turn; " ..
+		"2) C5-M is a Corps, lent C5-A next to it removed; 3) lent C5-X removed, a Builder 2 tiles away" ..
+		((#notes > 0) and (" (" .. table.concat(notes, ", ") .. ")") or "") .. ". Now: " .. CList(c, store, "C5") ..
+		". End Turn and watch VEF's notifications")
+end
+
+-- C6: hosts without Nationalism or Mobilization receive formations.
+CMD.corps_host = function(me, p)
+	local st = Session("CORPS_C6", me)
+	if st == nil then return end
+	local c = CState(st)
+	local B = st.ally
+	local cs2, csCity = CCs2(st, me, c)
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil or csCity == nil then Check("CORPS_C6", "CHECK", "your capital, B's or CS2's city is missing"); return end
+	local civics = "you " .. CCivics(me) .. "; B " .. CCivics(B) .. "; " .. PlayerName(cs2) .. " " .. CCivics(cs2)
+	CPrint("C6 civics before: " .. civics)
+	local M = MilitaryFormationTypes
+	local store = EFV_Records.Load()
+	local cx, cy = cap:GetX(), cap:GetY()
+	local uc = CRecreate(store, c, "C6-CORPS", me, CStand("C6-CORPS", SW, 0, 0, 0), FindPlot(cx, cy, 3, OwnedByAny({ -1, me }), 1), M.CORPS_FORMATION)
+	local ua = CRecreate(store, c, "C6-ARMY", me, CStand("C6-ARMY", SW, 0, 0, 0), FindPlot(cx, cy, 3, OwnedByAny({ -1, me }), 1), M.ARMY_FORMATION)
+	for _, d in ipairs({ { "C6-CORPS", uc }, { "C6-ARMY", ua } }) do
+		if d[2] ~= nil then
+			CFull(d[2])
+			CLend(store, c, d[1], d[2], FT_EXP, B, me, nil)
+		end
+	end
+	local foe = nil
+	if uc ~= nil and st.enemy ~= nil and Alive(st.enemy) then
+		foe = NewUnit("corps_host", st.enemy, "UNIT_WARRIOR", FindPlot(uc:GetX(), uc:GetY(), 1, OwnedByAny({ -1, me }), 1), "VEF-C6-FOE")
+		if foe ~= nil then Hold(store, foe); CSet(c, "C6-FOE", foe) end
+	end
+	local ub = CRecreate(store, c, "C6-B", B, CStand("C6-B", SW, 1, 0, 20), FindPlot(capB:GetX(), capB:GetY(), 3, OwnedByAny({ -1, B }), 1), M.CORPS_FORMATION)
+	if ub ~= nil then CLend(store, c, "C6-B", ub, FT_EXP, me, B, nil) end
+	local us = CRecreate(store, c, "C6-CS", cs2, CStand("C6-CS", SW, 1, 0, 20), FindPlot(csCity:GetX(), csCity:GetY(), 3, OwnedByAny({ -1, cs2 }), 1), M.ARMY_FORMATION)
+	if us ~= nil then CLend(store, c, "C6-CS", us, FT_CS, me, cs2, nil) end
+	EFV_Records.Commit(store)
+	if uc ~= nil then Focus(st, uc:GetX(), uc:GetY(), me, uc:GetID(), p.stamp) else Focus(st, cx, cy, nil, nil, p.stamp) end
+	local warn = string.find(civics, "you Nationalism yes", 1, true) and " (YOU ALREADY HAVE NATIONALISM: C6 needs a host without it, run it before C3)" or ""
+	CAnswer(st, p, "CORPS_C6", "C6 civics: " .. civics .. warn .. ". " .. CList(c, store, "C6") ..
+		". Attack VEF-C6-FOE with VEF-C6-CORPS, move VEF-C6-ARMY; End Turn, then C Status")
+end
+
+-- C7: your Army through VEF's own return path (snapshot, remove, recreate).
+CMD.corps_trip = function(me, p)
+	local st = Session("CORPS_C7", me)
+	if st == nil then return end
+	local c = CState(st)
+	local cap = Capital(me)
+	if cap == nil then Check("CORPS_C7", "CHECK", "you have no capital"); return end
+	local f = type(c.c7) == "table" and c.c7 or {}
+	local store = EFV_Records.Load()
+	if tonumber(f.step) == 1 then
+		local u = nil
+		for _, e in ipairs(c.units) do if e.k == "C7" then u = FindUnit(e.o, e.u) end end
+		f.step = 2
+		c.c7 = f
+		if u == nil then CAnswer(st, p, "CORPS_C7", "C7 read back: VEF-C7 is gone"); return end
+		local okF = CForm(u) == "ARMY"
+		local pc = PromoCount(u, LevelOnePromotions(SW, 2))
+		local xp = XPInfo(u)
+		Focus(st, u:GetX(), u:GetY(), me, u:GetID(), p.stamp)
+		CAnswer(st, p, "CORPS_C7", "C7 read back: " .. CFact(u) .. "; ARMY " .. (okF and "yes" or "NO") .. ", promotions " .. pc ..
+			"/2, xp " .. xp .. " (wanted 20), dmg " .. UnitDamage(u) .. " (wanted 30). " .. CUpkeep(me) .. ". C7 again starts over")
+		return
+	end
+	for _, e in ipairs(c.units) do
+		if e.k == "C7" then
+			local old = FindUnit(e.o, e.u)
+			if old ~= nil then pcall(function() Players[me]:GetUnits():Destroy(old) end) end
+		end
+	end
+	local plot = FindPlot(cap:GetX(), cap:GetY(), 3, OwnedByAny({ -1, me }), 1)
+	local u = NewUnit("corps_trip", me, SW, plot, "VEF-C7")
+	if u == nil then Check("CORPS_C7", "CHECK", "no free land near your capital"); return end
+	local up = { CUpkeep(me) }
+	for _, nm in ipairs(LevelOnePromotions(SW, 2)) do SetPromo(u, GameInfo.UnitPromotions[nm].Index) end
+	TopUp(u, 20)
+	pcall(function() u:SetDamage(30) end)
+	CSetForm("C7", u, MilitaryFormationTypes.ARMY_FORMATION)
+	up[2] = CUpkeep(me)
+	local before = CFact(u)
+	local snap = EFV_Units.Snapshot(u)
+	local okRm = EFV_Units.Remove(u)
+	up[3] = CUpkeep(me)
+	local u2 = nil
+	if snap ~= nil then
+		local stand = { id = "C7", unitType = snap.unitType, veteranName = snap.veteranName, damage = snap.damage,
+			experience = snap.experience, xpNext = snap.xpNext, level = snap.level, promotions = snap.promotions, formation = snap.formation }
+		local okR, r = pcall(EFV_Units.Recreate, store, me, stand, plot, Turn())
+		if okR then u2 = r else CPrint("C7 Recreate ERROR " .. Str(r)) end
+		if u2 ~= nil then CSetForm("C7 restored", u2, snap.formation) end
+	end
+	EFV_Records.Commit(store)
+	up[4] = CUpkeep(me)
+	CSet(c, "C7", u2)
+	CPrint("C7 before: " .. before .. "; snapshot formation " .. FName(snap and snap.formation) .. ", removed " .. tostring(okRm) ..
+		"; after: " .. (u2 and CFact(u2) or "not recreated") .. "; upkeep plain / ARMY / removed / restored: " .. table.concat(up, " / "))
+	c.c7 = { step = 1, turn = Turn() }
+	if u2 ~= nil then Focus(st, u2:GetX(), u2:GetY(), me, u2:GetID(), p.stamp) else Focus(st, -1, -1, nil, nil, p.stamp) end
+	CAnswer(st, p, "CORPS_C7", "C7: VEF-C7 " .. before .. " -> snapshot " .. FName(snap and snap.formation) .. ", removed, restored: " ..
+		(u2 and CFact(u2) or "NOT recreated") .. ". Upkeep plain: " .. up[1] .. "; as ARMY: " .. up[2] .. "; restored: " .. up[4] ..
+		". Your UI now takes the promotions back: wait a second, then press C7 again")
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.4.5 additions (FIXPLAN_corps.md "Rulings 2", R2.7):
+--   C8 corps_split   press 1: B's VEF-C8-B (Recreate stand-in, 1 promotion,
+--                    15 XP) set to ARMY, then 30 damage; CS2's VEF-C8-CS (no
+--                    promotion) set to CORPS, 30 damage. The lent parts are
+--                    stand-ins in st.corps.c8.parts: B's Army = host + YOU
+--                    (2 promotions, 40 XP) + F (10 XP); CS2's Corps = YOU2
+--                    (1 promotion, 20 XP) + F2 (none). Press 2: what the
+--                    split will do: B's Army -> STANDARD in place (read back
+--                    ID, formation, XP, promotions, damage, moves, strength);
+--                    CS2's Corps EFV_Units.Remove; each part through
+--                    EFV_Units.Recreate for its sender near its capital, 30
+--                    damage. A third press starts over.
+--   C9 corps_vol     press 1: Nationalism for you if missing; three pairs on
+--                    your land (Volunteer records you -> B, deployed 10 turns
+--                    ago): V1 + V2, REG + V3, V4 + REG2. You merge them. Press
+--                    2 after End Turn: per pair the survivor, its formation,
+--                    XP and promotions, each Volunteer record, FindID /
+--                    EFV_UnitGoneReason of the absorbed unit.
+--   Merge trace      armed by C3 and C9 press 1 for the rest of that turn
+--                    (st.corps.trace = turn): GameEvents.OnUnitMoved about a
+--                    C3 / C9 unit logs "[EFV][Corps] G trace ..." with every
+--                    C3 / C9 unit's state. Read only. The panel logs the
+--                    UI events (UnitFormCorps / UnitFormArmy /
+--                    UnitRemovedFromMap) the same way; C10 is UI only.
+-- Own do-block (the main chunk's 200-local limit).
+-- ---------------------------------------------------------------------------
+do
+local X = {}                -- the helpers below (one local: the limit)
+-- The entry and live unit of C key k (nil, nil when not listed).
+function X.CUnitOf(c, k)
+	for _, e in ipairs(c.units) do
+		if e.k == k then return e, FindUnit(tonumber(e.o) or -1, tonumber(e.u) or -1) end
+	end
+	return nil, nil
+end
+
+-- nil, u when the entry's unit is alive; else "nil" (FindID) or the
+-- EFV_UnitGoneReason (GONE_*) and nil.
+function X.CGone(e)
+	local u = FindUnit(tonumber(e.o) or -1, tonumber(e.u) or -1)
+	if u == nil then return "nil", nil end
+	local ok, why = pcall(EFV_UnitGoneReason, u, tonumber(e.o), tonumber(e.u))
+	if not ok then CPrint("EFV_UnitGoneReason ERROR " .. Str(why)); return nil, u end
+	if why ~= nil then return Str(why), nil end
+	return nil, u
+end
+
+function X.CPromos(u)
+	local n = -1
+	pcall(function() n = #PromoRows(u) end)
+	return n
+end
+
+function X.CDestroy(c, k)
+	local _, old = X.CUnitOf(c, k)
+	if old ~= nil then pcall(function() Players[old:GetOwner()]:GetUnits():Destroy(old) end) end
+	CSet(c, k, nil)
+end
+
+-- C8: the split of a mixed formation, on stand-ins.
+CMD.corps_split = function(me, p)
+	local st = Session("CORPS_C8", me)
+	if st == nil then return end
+	local c = CState(st)
+	local B, F = st.ally, st.friend
+	local cs2, csCity = CCs2(st, me, c)
+	local capB = Capital(B)
+	if csCity == nil or capB == nil then Check("CORPS_C8", "CHECK", "no city-state city or no capital of B"); return end
+	local M = MilitaryFormationTypes
+	local store = EFV_Records.Load()
+	local f = type(c.c8) == "table" and c.c8 or {}
+	if tonumber(f.step) == 1 then
+		-- press 2: B's Army, H = 1: lower in place
+		local eB, ub = X.CUnitOf(c, "C8-B")
+		local txtB
+		if ub == nil then
+			txtB = "VEF-C8-B gone"
+		else
+			local id0, f0 = ub:GetID(), CForm(ub)
+			local after = CSetForm("C8-B split", ub, M.STANDARD_FORMATION)
+			local u2 = FindUnit(tonumber(eB.o), tonumber(eB.u))
+			local live = u2 or ub
+			local s, str = CCall(live, "GetCombat")
+			local mv = "?"
+			pcall(function() mv = Str(live:GetMovesRemaining()) .. "/" .. Str(live:GetMaxMoves()) end)
+			txtB = "VEF-C8-B " .. f0 .. " -> " .. after .. ", same ID " .. ((u2 ~= nil and u2:GetID() == id0) and "yes" or "NO") ..
+				", xp " .. XPInfo(live) .. ", promotions " .. PromoCount(live, LevelOnePromotions(SW, 1)) .. "/1, dmg " ..
+				UnitDamage(live) .. ", moves " .. mv .. ", strength " .. CShort(s, str)
+			CPrint("C8 " .. txtB .. "; " .. CFact(live))
+		end
+		-- CS2's Corps, H = 0: removed
+		local eC, uc = X.CUnitOf(c, "C8-CS")
+		local txtC
+		if uc == nil then
+			txtC = "VEF-C8-CS already gone"
+		else
+			local okRm, rm = pcall(EFV_Units.Remove, uc)
+			local gone = X.CGone(eC)
+			txtC = "VEF-C8-CS " .. ((gone ~= nil) and "removed" or "NOT removed") .. " (Remove " .. (okRm and Str(rm) or ("ERROR " .. Str(rm))) ..
+				", FindID " .. Str(gone or "alive") .. ")"
+			CPrint("C8 " .. txtC)
+		end
+		-- every part home: EFV_Units.Recreate for its sender, 30 damage
+		local made, focusU = {}, nil
+		for _, pt in ipairs(type(f.parts) == "table" and f.parts or {}) do
+			local o = tonumber(pt.o)
+			local cap = (o ~= nil) and Capital(o) or nil
+			local u = nil
+			if cap ~= nil then
+				u = CRecreate(store, c, pt.k, o, CStand(pt.k, SW, tonumber(pt.n) or 0, tonumber(pt.xp) or 0, 30),
+					FindPlot(cap:GetX(), cap:GetY(), 3, OwnedByAny({ -1, o }), 1), nil)
+				if u ~= nil and o ~= me then Hold(store, u) end
+			else
+				CPrint(Str(pt.k) .. ": no capital of P" .. Str(pt.o))
+			end
+			if pt.k == "C8-YOU" then focusU = u end
+			made[#made + 1] = Str(pt.k) .. " " .. (u and (CFact(u) .. " (of " .. Str(pt.of) .. ", wanted promotions " .. Str(pt.n) ..
+				", xp " .. Str(pt.xp) .. ")") or "not made")
+		end
+		EFV_Records.Commit(store)
+		f.step = 2
+		c.c8 = f
+		if focusU ~= nil then Focus(st, focusU:GetX(), focusU:GetY(), me, focusU:GetID(), p.stamp) else Focus(st, -1, -1, nil, nil, p.stamp) end
+		CAnswer(st, p, "CORPS_C8", "C8 split: " .. txtB .. "; " .. txtC .. "; made " .. table.concat(made, "; ") ..
+			". Your UI takes your promotions back within a second. End Turn, then C Status (C8 again starts over)")
+		return
+	end
+	-- press 1 (or a new round): the two formations and the stand-in parts
+	for _, k in ipairs({ "C8-B", "C8-CS", "C8-YOU", "C8-F", "C8-YOU2", "C8-F2" }) do X.CDestroy(c, k) end
+	local ub = CRecreate(store, c, "C8-B", B, CStand("C8-B", SW, 1, 15, 0),
+		FindPlot(capB:GetX(), capB:GetY(), 3, OwnedByAny({ -1, B }), 1), M.ARMY_FORMATION)
+	if ub ~= nil then pcall(function() ub:SetDamage(30) end); Hold(store, ub) end
+	local us = CRecreate(store, c, "C8-CS", cs2, CStand("C8-CS", SW, 0, 0, 0),
+		FindPlot(csCity:GetX(), csCity:GetY(), 3, OwnedByAny({ -1, cs2 }), 1), M.CORPS_FORMATION)
+	if us ~= nil then pcall(function() us:SetDamage(30) end); Hold(store, us) end
+	EFV_Records.Commit(store)
+	local fid = (F ~= nil and Alive(F)) and F or B
+	local parts = {
+		{ k = "C8-YOU", o = me, n = 2, xp = 40, of = "C8-B" }, { k = "C8-F", o = fid, n = 0, xp = 10, of = "C8-B" },
+		{ k = "C8-YOU2", o = me, n = 1, xp = 20, of = "C8-CS" }, { k = "C8-F2", o = fid, n = 0, xp = 0, of = "C8-CS" },
+	}
+	for _, pt in ipairs(parts) do
+		CPrint("C8 part " .. pt.k .. " of " .. pt.of .. ": sender P" .. Str(pt.o) .. ", promotions " .. pt.n .. ", xp " .. pt.xp)
+	end
+	c.c8 = { step = 1, turn = Turn(), parts = parts }
+	Focus(st, capB:GetX(), capB:GetY(), nil, nil, p.stamp)
+	CAnswer(st, p, "CORPS_C8", "C8 set up: B's VEF-C8-B " .. (ub and CForm(ub) or "NOT made") .. " (host + you + F), " ..
+		PlayerName(cs2) .. "'s VEF-C8-CS " .. (us and CForm(us) or "NOT made") .. " (you + F, no host unit)" ..
+		((fid ~= F) and " (F missing: B stands in)" or "") .. ". Press C8 again to split. Now: " .. CList(c, store, "C8"))
+end
+
+-- C9: your Volunteers merged with each other and with your regular units.
+X.C9_PAIRS = {
+	-- { key, Volunteer, promotions, xp, damage }; the first one is selected
+	{ { "C9-V1", true, 1, 20, 0 }, { "C9-V2", true, 0, 0, 20 } },
+	{ { "C9-REG", false, 0, 30, 0 }, { "C9-V3", true, 0, 0, 0 } },
+	{ { "C9-V4", true, 0, 30, 0 }, { "C9-REG2", false, 0, 0, 0 } },
+}
+
+function X.C9PairText(c, store, i, pair)
+	local bits, alive = {}, {}
+	for _, d in ipairs(pair) do
+		local e = X.CUnitOf(c, d[1])
+		local t
+		if e == nil then
+			t = d[1] .. " not made"
+		else
+			local gone, u = X.CGone(e)
+			if gone == nil then
+				alive[#alive + 1] = d[1]
+				t = d[1] .. " P" .. Str(e.o) .. "/" .. Str(e.u) .. " " .. CForm(u) .. ", xp " .. XPInfo(u) .. ", promotions " .. X.CPromos(u)
+			else
+				t = d[1] .. " P" .. Str(e.o) .. "/" .. Str(e.u) .. " FindID " .. gone
+			end
+			if e.rid ~= nil then
+				local rec = EFV_Records.Get(store, e.rid)
+				t = t .. ", Volunteer record " .. Str(e.rid) .. " " .. (rec and ("open " .. Str(rec.state)) or "closed")
+			end
+		end
+		bits[#bits + 1] = t
+	end
+	return "pair " .. i .. " survived: " .. ((#alive > 0) and table.concat(alive, "|") or "none") .. " (" .. table.concat(bits, "; ") .. ")"
+end
+
+CMD.corps_vol = function(me, p)
+	local st = Session("CORPS_C9", me)
+	if st == nil then return end
+	local c = CState(st)
+	local B = st.ally
+	local cap, capB = Capital(me), Capital(B)
+	if cap == nil or capB == nil then Check("CORPS_C9", "CHECK", "your capital or B's capital is missing"); return end
+	local store = EFV_Records.Load()
+	local f = type(c.c9) == "table" and c.c9 or {}
+	if tonumber(f.step) == 1 then
+		if Turn() <= (tonumber(f.turn) or 0) then
+			CAnswer(st, p, "CORPS_C9", "C9: merge the three pairs now (see the first answer), End Turn, then press C9 again. Now: " .. CList(c, store, "C9"))
+			return
+		end
+		local parts = {}
+		for i, pair in ipairs(X.C9_PAIRS) do
+			local t = X.C9PairText(c, store, i, pair)
+			CPrint("C9 " .. t)
+			parts[#parts + 1] = t
+		end
+		f.step = 2
+		c.c9 = f
+		Focus(st, cap:GetX(), cap:GetY(), nil, nil, p.stamp)
+		CAnswer(st, p, "CORPS_C9", "C9: " .. table.concat(parts, "; ") .. ". C9 again starts over")
+		return
+	end
+	-- press 1 (or a new round)
+	for _, pair in ipairs(X.C9_PAIRS) do for _, d in ipairs(pair) do X.CDestroy(c, d[1]) end end
+	local civ = CCivics(me)
+	if not string.find(civ, "Nationalism yes", 1, true) then GrantCivic(me, "CIVIC_NATIONALISM") end
+	local cx, cy = cap:GetX(), cap:GetY()
+	local placed, notes = {}, {}
+	local function Make(d, plot)
+		local u = NewUnit("corps_vol", me, SW, plot, "VEF-" .. d[1])
+		if u == nil then notes[#notes + 1] = d[1] .. " not made"; return nil end
+		placed[#placed + 1] = plot
+		for _, nm in ipairs(LevelOnePromotions(SW, d[3])) do SetPromo(u, GameInfo.UnitPromotions[nm].Index) end
+		TopUp(u, d[4])
+		if d[5] > 0 then pcall(function() u:SetDamage(d[5]) end) end
+		CFull(u)
+		local rid = nil
+		if d[2] then
+			local rec = MakeRecord(store, u, { force = FT_VOL, sender = me, recipient = B, basis = st.basis or "FRIEND_OB",
+				origin = cap, dest = capB, deployedTurn = Turn() - 10 })
+			rid = rec and rec.id or nil
+		end
+		CSet(c, d[1], u, rid)
+		CPrint("C9 " .. d[1] .. (d[2] and (" Volunteer record " .. Str(rid)) or " regular") .. ": " .. CFact(u))
+		return u
+	end
+	local first = nil
+	for _, pair in ipairs(X.C9_PAIRS) do
+		local q1 = CFar(cx, cy, 5, { me }, placed, 3) or CFar(cx, cy, 6, { -1, me }, placed, 3)
+		local a = Make(pair[1], q1)
+		if a ~= nil then
+			if first == nil then first = a end
+			local q2 = FindPlot(a:GetX(), a:GetY(), 1, OwnedByAny({ me }), 1) or FindPlot(a:GetX(), a:GetY(), 1, OwnedByAny({ -1, me }), 1)
+			Make(pair[2], q2)
+		end
+	end
+	EFV_Records.Commit(store)
+	c.c9 = { step = 1, turn = Turn() }
+	c.trace = Turn()
+	if first ~= nil then Focus(st, first:GetX(), first:GetY(), me, first:GetID(), p.stamp) else Focus(st, cx, cy, nil, nil, p.stamp) end
+	CAnswer(st, p, "CORPS_C9", "C9 (" .. CCivics(me) .. "): pair 1 select VEF-C9-V1, Form Corps, click VEF-C9-V2; pair 2 select VEF-C9-REG, " ..
+		"click VEF-C9-V3; pair 3 select VEF-C9-V4, click VEF-C9-REG2. End Turn, then C9 again" ..
+		((#notes > 0) and (" (" .. table.concat(notes, ", ") .. ")") or "") .. ". Merge trace on until the next turn. Now: " .. CList(c, store, "C9"))
+end
+
+-- Merge trace: GameEvents.OnUnitMoved (CONFIRMED gameplay,
+-- PiratesScenario_StartScript.lua:1615) while armed, about a C3 / C9 unit.
+function X.CTraced(e) local pre = string.sub(Str(e.k), 1, 2); return pre == "C3" or pre == "C9" end
+
+function EFV_Dev.TraceMoved(pid, uid)
+	local st = ScnLoad()
+	local c = st.corps
+	if type(c) ~= "table" or type(c.units) ~= "table" or tonumber(c.trace) ~= Turn() then return end
+	local hit = nil
+	for _, e in ipairs(c.units) do
+		if X.CTraced(e) and tonumber(e.o) == pid and tonumber(e.u) == uid then hit = e.k end
+	end
+	if hit == nil then return end
+	local parts = {}
+	for _, e in ipairs(c.units) do
+		if X.CTraced(e) then
+			local gone, u = X.CGone(e)
+			parts[#parts + 1] = e.k .. " P" .. Str(e.o) .. "/" .. Str(e.u) .. " " ..
+				((gone ~= nil) and ("gone (FindID " .. gone .. ")") or ("alive " .. CForm(u) .. " xp " .. XPInfo(u)))
+		end
+	end
+	CPrint("trace OnUnitMoved P" .. Str(pid) .. "/" .. Str(uid) .. " (" .. hit .. "): " .. table.concat(parts, "; "))
+end
+
+function X.OnUnitMovedTrace(pid, uid)
+	local ok, err = pcall(EFV_Dev.TraceMoved, pid, uid)
+	if not ok then CPrint("trace ERROR " .. Str(err)) end
+end
+
+if GameEvents.OnUnitMoved ~= nil then
+	GameEvents.OnUnitMoved.Add(X.OnUnitMovedTrace)
+else
+	CPrint("trace MISSING GameEvents.OnUnitMoved")
+end
+end -- 1.0.4.5 additions
+
+CMD.corps_status = function(me, p)
+	local st = Session("CORPS_STATUS", me)
+	if st == nil then return end
+	local c = CState(st)
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	CAnswer(st, p, "CORPS_STATUS", "Corps T" .. Turn() .. ": " .. CList(c, EFV_Records.Load(), nil))
+end
+
+-- At your turn start, for C_WATCH turns after the last C button.
+function EFV_Dev.EvalCorps(st, store, t)
+	local c = st.corps
+	if type(c) ~= "table" or type(c.units) ~= "table" or #c.units == 0 then return end
+	if t > (tonumber(c.last) or -99) + C_WATCH then return end
+	Check("CORPS_WATCH", "INFO", CList(c, store, nil))
+end
+end -- corps spike
+
+-- ===========================================================================
+-- VEF 1.0.5 test (EFV_Dev 1.0.5.1; FIXPLAN_proxy_war.md "1.0.5 build plan"
+-- B5.2; EFV/TESTING_1.0.5.md). From a NEW game, P1 instead of S0.
+--   P1 scn_proxy     B = a major with a city whose capital is a 2-turn trip
+--                    from yours (else 3, 4, 1), your declared friend with
+--                    open borders from B; E and X = the two lowest-ID other
+--                    majors with a city, both at war with B; you at war with
+--                    nobody. Three Swordsmen VEF-PROXY-1..3, 2000 gold.
+--   P Status         proxy_status: the pair states (G reader A64), the
+--                    wars, VEF's send rule to B, B's gold, your records.
+--   P2 (panel only)  UI DiplomacyManager.RequestSession(X, you, "DENOUNCE"),
+--                    then P Status.
+--   P3 proxy_lower   X's (else E's) opinion of you to -30 with the tuner's
+--                    AdjustBaseDiplomacy (Debug\Diplomacy.ltp:19-33, 260):
+--                    inside the UNFRIENDLY -> DENOUNCED window
+--                    (DiplomaticActions.xml:239-242), so its AI denounces you.
+--   P4 proxy_hold    your newest outbound record arrives 8 turns from now.
+--   P5 proxy_poor    press 1: Modern Anti-Tank VEF-UPKEEP (8 gold upkeep, no
+--                    strategic resource); press 2 after its send: it arrives
+--                    next turn and B's gold goes to 0.
+--   EvalProxy        PROXY_WATCH at your turn start for 12 turns after P1.
+-- The answer (st.proxy.ans = { stamp, text }) holds player IDs ("P3"), never
+-- translated names: the property is synced; the panel names the civs. MP
+-- style: the synced handler only, players by ascending ID, no pairs() over
+-- state, no random, no local-player call. Only CMD.* and EFV_Dev.EvalProxy
+-- leave the block (Havok register limit: no new main-chunk local).
+-- ---------------------------------------------------------------------------
+do
+local PX = {}                -- the helpers below (one local: the limit)
+PX.WATCH = 12
+PX.UNIT = "UNIT_SWORDSMAN"
+PX.POOR = "UNIT_MODERN_AT"
+
+function PX.Answer(st, p, id, text, verdict)
+	if type(st.proxy) ~= "table" then st.proxy = {} end
+	st.proxy.ans = { stamp = Num(p.stamp, 0), text = text }
+	ScnSave(st)
+	Check(id, verdict or "INFO", text)
+end
+
+-- "ok" or the codes joined with "+".
+function PX.Codes(codes)
+	if type(codes) ~= "table" or #codes == 0 then return "ok" end
+	return table.concat(codes, "+")
+end
+
+-- The pair state by the gameplay reader (A64), without the DIPLO_STATE_ prefix.
+function PX.State(a, b)
+	local ok, s = pcall(function() return Players[a]:GetAi_Diplomacy():GetDiplomaticState(b) end)
+	if not ok or type(s) ~= "string" then return "?" end
+	return (string.gsub(s, "^DIPLO_STATE_", ""))
+end
+
+function PX.YesNo(b) return b and "yes" or "no" end
+
+function PX.Gold(pid)
+	local ok, g = pcall(function() return Players[pid]:GetTreasury():GetGoldBalance() end)
+	return (ok and type(g) == "number") and math.floor(g) or -1
+end
+
+-- The P Status text (also PROXY_WATCH).
+function PX.Status(st, me, store)
+	local P = st.proxy
+	local b, e, x = P.b, P.e, P.x
+	local exp = EFV_SendRecipientReasons(me, b, FT_EXP)
+	local vol = EFV_SendRecipientReasons(me, b, FT_VOL)
+	local expText = PX.Codes(exp)
+	if #exp == 0 then
+		local en = {}
+		for _, pid in ipairs(EFV_ProxyWarEnemies(me, b)) do en[#en + 1] = "P" .. pid end
+		expText = (#en > 0) and ("ok (proxy war against " .. table.concat(en, " ") .. ")") or "ok (shared war)"
+	end
+	local recs = {}
+	for _, id in ipairs(EFV_Records.IDs(store)) do
+		local rec = EFV_Records.Get(store, id)
+		if rec ~= nil and rec.senderID == me then
+			recs[#recs + 1] = id .. " " .. Str(rec.state) .. ((rec.state == ST.OUT) and (" arrives T" .. Str(rec.arrivalTurn)) or "")
+		end
+	end
+	return "P T" .. Turn() .. ": you-E " .. PX.State(me, e) .. ", you-X " .. PX.State(me, x) ..
+		"; B at war with E " .. PX.YesNo(AtWar(b, e)) .. ", X " .. PX.YesNo(AtWar(b, x)) ..
+		"; you at war with E " .. PX.YesNo(AtWar(me, e)) .. ", X " .. PX.YesNo(AtWar(me, x)) ..
+		"; Expeditionary to B " .. expText .. ", Volunteers to B " .. PX.Codes(vol) ..
+		"; B gold " .. PX.Gold(b) .. "; your records: " .. ((#recs > 0) and table.concat(recs, ", ") or "none")
+end
+
+-- The session of P1 (st, or nil after a CHECK).
+function PX.Session(id, me, p)
+	local st = ScnLoad()
+	if type(st.proxy) ~= "table" or st.proxy.b == nil or st.me ~= me then
+		PX.Answer(st, p, id, id .. ": press P1 Proxy war setup first (in a new game)", "CHECK")
+		return nil
+	end
+	return st
+end
+
+CMD.scn_proxy = function(me, p)
+	local st = ScnLoad()
+	local cap = Capital(me)
+	local refuse = nil
+	if st.enemy ~= nil then
+		refuse = "S0 ran in this game (you are at war with its enemy C): start a new game and press P1 instead of S0"
+	elseif type(st.proxy) == "table" and st.proxy.b ~= nil then
+		refuse = "P1 already ran in this game (B=P" .. Str(st.proxy.b) .. ")"
+	elseif cap == nil then
+		refuse = "you have no city yet: found your capital, End Turn once, then press P1 again"
+	end
+	local wars = SortedIDs(function(i) return i ~= me and (IsMajorID(i) or IsCityStateID(i)) and AtWar(me, i) end)
+	if refuse == nil and #wars > 0 then
+		refuse = "you are at war with P" .. table.concat(wars, ", P") .. ": this test needs you at peace with everyone: start a new game"
+	end
+	local majors = SortedIDs(function(i) return i ~= me and IsMajorID(i) and HasCity(i) end)
+	if refuse == nil and #majors < 3 then
+		refuse = "needs 3 other civs with a city, found " .. #majors .. ": End Turn once more, then press P1 again"
+	end
+	if refuse ~= nil then
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		PX.Answer(st, p, "PROXY_P1", "P1: " .. refuse, "CHECK")
+		return
+	end
+	local cx, cy = cap:GetX(), cap:GetY()
+	-- B: a 2-turn trip first (a paid send whose refund shows, short enough
+	-- for the second Swordsman to arrive before the denouncement runs out)
+	local B, band = nil, nil
+	for _, want in ipairs({ 2, 3, 4, 1 }) do
+		for _, pid in ipairs(majors) do
+			local c = Capital(pid)
+			local bb = (B == nil and c ~= nil) and EFV_Band(cx, cy, c:GetX(), c:GetY()) or nil
+			if bb == want then B, band = pid, bb end
+		end
+		if B ~= nil then break end
+	end
+	if B == nil then B, band = majors[1], 1 end
+	local others = {}
+	for _, pid in ipairs(majors) do if pid ~= B then others[#others + 1] = pid end end
+	local E, X = others[1], others[2]
+	-- meet, partner, wars, reveal
+	local group = { me, B, E, X }
+	for i = 1, #group do
+		for j = i + 1, #group do MeetPair(group[i], group[j]) end
+	end
+	local partner, vol = EnsurePartner("scn_proxy", me, B)
+	DeclareWar(B, E); DeclareWar(B, X)
+	for _, city in ipairs(Cities(B)) do RevealCity(me, city, { -1, me, B }) end
+	for _, pid in ipairs({ E, X }) do
+		local c = Capital(pid)
+		if c ~= nil then RevealCity(me, c, { -1, me, B }) end
+	end
+	-- gold, three Swordsmen with full moves next to your capital
+	pcall(function() Players[me]:GetTreasury():ChangeGoldBalance(2000) end)
+	local first, made, full = nil, 0, 0
+	for i = 1, 3 do
+		local plot = FindPlot(cx, cy, 4, OwnedBy(me), 1) or FindPlot(cx, cy, 4, OwnedByAny({ -1, me }), 1)
+		local u = NewUnit("scn_proxy", me, PX.UNIT, plot, "VEF-PROXY-" .. i)
+		if u ~= nil then
+			made = made + 1
+			if FullMoves(u) then full = full + 1 end
+			if first == nil then first = u end
+		end
+	end
+	st.me, st.ally = me, B
+	st.friend, st.enemy, st.cs = nil, nil, nil
+	st.proxy = { b = B, e = E, x = X, turn = Turn(), band = band, fee = EFV_Fee(PX.UNIT, FT_EXP, band) or -1 }
+	Focus(st, cx, cy, me, first and first:GetID() or -1, p.stamp)
+	local expC = PX.Codes(EFV_SendRecipientReasons(me, B, FT_EXP))
+	local volC = PX.Codes(EFV_SendRecipientReasons(me, B, FT_VOL))
+	local peace = #SortedIDs(function(i) return i ~= me and (IsMajorID(i) or IsCityStateID(i)) and AtWar(me, i) end) == 0
+	local lim = "?"
+	pcall(function() lim = Str(GameInfo.GlobalParameters["DIPLOMACY_DENOUNCE_TIME_LIMIT"].Value) end)
+	local ok = partner ~= nil and vol ~= nil and AtWar(B, E) and AtWar(B, X) and peace and made == 3 and full == 3 and
+		expC == "NO_COMMON_WAR" and volC == "NO_COMMON_WAR"
+	PX.Answer(st, p, "PROXY_P1", "P1: B=P" .. B .. " (friend" .. ((vol ~= nil) and ", open borders" or ", NO open borders") ..
+		", trip " .. band .. " turns, fee " .. Str(st.proxy.fee) .. "), E=P" .. E .. " and X=P" .. X .. " at war with B" ..
+		((AtWar(B, E) and AtWar(B, X)) and "" or " (NOT ALL WARS TOOK)") .. "; you at war with nobody: " .. PX.YesNo(peace) ..
+		"; Expeditionary to B " .. expC .. ", Volunteers to B " .. volC .. "; Swordsmen " .. made .. " (full moves " .. full .. ")" ..
+		"; denounce limit in the game data " .. lim, ok and "PASS" or "CHECK")
+end
+
+CMD.proxy_status = function(me, p)
+	local st = PX.Session("P", me, p)
+	if st == nil then return end
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	PX.Answer(st, p, "PROXY_STATUS", PX.Status(st, me, EFV_Records.Load()))
+end
+
+CMD.proxy_lower = function(me, p)
+	local st = PX.Session("P3", me, p)
+	if st == nil then return end
+	local t = nil
+	for _, pid in ipairs({ st.proxy.x, st.proxy.e }) do
+		if t == nil and pid ~= nil and PX.State(me, pid) ~= "DENOUNCED" then t = pid end
+	end
+	if t == nil then
+		PX.Answer(st, p, "PROXY_P3", "P3: X and E are both in a denouncement with you already: nothing to do", "CHECK")
+		return
+	end
+	local function Score()
+		local ok, s = pcall(function() return Players[t]:GetAi_Diplomacy():GetDiplomaticScore(me) end)
+		return (ok and type(s) == "number") and s or nil
+	end
+	local before = Score()
+	local err = nil
+	if before ~= nil and before > -30 then
+		local ok, e = pcall(function() Players[t]:GetAi_Diplomacy():AdjustBaseDiplomacy(me, -30 - before) end)
+		if not ok then err = Str(e) end
+	end
+	local after = Score()
+	Log("proxy_lower", "P" .. t .. "'s opinion of P" .. me .. ": " .. Str(before) .. " -> " .. Str(after) .. (err and (" ERROR " .. err) or ""))
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	PX.Answer(st, p, "PROXY_P3", "P3: P" .. t .. "'s opinion of you " .. Str(before) .. " -> " .. Str(after) ..
+		(err and (" (AdjustBaseDiplomacy failed: " .. err .. ")") or "") .. "; End Turn until P" .. t .. " denounces you (2 to 4 turns)",
+		(after ~= nil and after <= -30) and "INFO" or "CHECK")
+end
+
+CMD.proxy_hold = function(me, p)
+	local st = PX.Session("P4", me, p)
+	if st == nil then return end
+	local store = EFV_Records.Load()
+	local rec = Newest(store, function(r) return r.senderID == me and r.state == ST.OUT end)
+	if rec == nil then
+		PX.Answer(st, p, "PROXY_P4", "P4: no unit of yours on its way: send VEF-PROXY-1 first", "CHECK")
+		return
+	end
+	rec.arrivalTurn = Turn() + 8
+	EFV_Records.Touch(store)
+	EFV_Records.Commit(store)
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	PX.Answer(st, p, "PROXY_P4", "P4: " .. Str(rec.veteranName or rec.unitType) .. " (record " .. rec.id .. ") now arrives on turn " .. rec.arrivalTurn)
+end
+
+CMD.proxy_poor = function(me, p)
+	local st = PX.Session("P5", me, p)
+	if st == nil then return end
+	local P = st.proxy
+	local store = EFV_Records.Load()
+	if tonumber(P.p5) == 1 then
+		local rec = Newest(store, function(r) return r.senderID == me and r.state == ST.OUT and r.unitType == PX.POOR end)
+		if rec == nil then
+			PX.Answer(st, p, "PROXY_P5", "P5: send VEF-UPKEEP first (Send as Expeditionary to B), then press P5 again", "CHECK")
+			return
+		end
+		rec.arrivalTurn = Turn() + 1
+		EFV_Records.Touch(store)
+		EFV_Records.Commit(store)
+		local g = PX.Gold(P.b)
+		pcall(function() local tr = Players[P.b]:GetTreasury(); tr:ChangeGoldBalance(-tr:GetGoldBalance()) end)
+		P.poor = { id = rec.id, from = Turn() + 1 }
+		P.p5 = 2
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		PX.Answer(st, p, "PROXY_P5", "P5: VEF-UPKEEP (record " .. rec.id .. ") arrives for B next turn; B's gold now " .. PX.Gold(P.b) .. " (was " .. g .. ")")
+		return
+	end
+	local cap = Capital(me)
+	local plot = cap and (FindPlot(cap:GetX(), cap:GetY(), 4, OwnedBy(me), 1) or FindPlot(cap:GetX(), cap:GetY(), 4, OwnedByAny({ -1, me }), 1)) or nil
+	local u = NewUnit("proxy_poor", me, PX.POOR, plot, "VEF-UPKEEP")
+	if u == nil then
+		PX.Answer(st, p, "PROXY_P5", "P5: no Modern Anti-Tank made (no free land of yours next to your capital)", "CHECK")
+		return
+	end
+	FullMoves(u)
+	P.p5 = 1
+	Focus(st, u:GetX(), u:GetY(), me, u:GetID(), p.stamp)
+	PX.Answer(st, p, "PROXY_P5", "P5: VEF-UPKEEP next to your capital: send it to B as Expeditionary, then press P5 again")
+end
+
+-- At your turn start, for PX.WATCH turns after P1.
+function EFV_Dev.EvalProxy(st, store, t)
+	local P = st.proxy
+	if type(P) ~= "table" or P.b == nil or t > (tonumber(P.turn) or -99) + PX.WATCH then return end
+	local text = PX.Status(st, st.me, store)
+	local poor = P.poor
+	if type(poor) == "table" and poor.id ~= nil then
+		local rec = EFV_Records.Get(store, poor.id)
+		local live = "record closed"
+		if rec ~= nil then
+			local u = RecUnit(rec)
+			local okM, m, why = pcall(EFV_UnitMatches, u, rec.onMapPlayerID, rec.onMapUnitID, rec.unitType)
+			live = Str(rec.state) .. ", unit " .. ((u == nil) and "none" or ((okM and m) and "on the map" or ("gone " .. Str(why))))
+		end
+		text = text .. "; VEF-UPKEEP (record " .. poor.id .. "): " .. live .. ", B gold " .. PX.Gold(P.b)
+	end
+	Check("PROXY_WATCH", "INFO", text)
+end
+end -- VEF 1.0.5 test
+
+-- ===========================================================================
+-- Upgrade spike U1 (EFV_Dev 1.0.5.2; FIXPLAN_upgrade_relink.md U6 and U13;
+-- EFV/TESTING_1.0.5.md). Works after P1 (B = st.proxy.b) or after S0
+-- (B = st.ally); one button, three presses:
+--   press 1  grants what the S5 upgrade pair needs (its tech and civic, its
+--            strategic resource for two upgrades, 3000 gold) and makes in
+--            your land: VEF-U1-M (1 promotion, XP, 30 damage, 2 extra moves
+--            so a move onto rough ground still leaves one) and VEF-U1-S
+--            (fresh), both lent to you by B as Expeditionary records (the
+--            multiplayer report's case: a human host upgrades a lent unit),
+--            a Battering Ram VEF-U1-R exactly 2 tiles from VEF-U1-M and a
+--            Builder VEF-U1-B (their formations: Q-F), and logs the highest
+--            serial of your units (Q-G). It arms the trace for this turn.
+--   press 2  (same turn) both records, both old unit objects (FindID: tile,
+--            damage, EFV_UnitGoneReason) and both new units, moves left
+--            included (Q-D), XP, promotions and damage against the old ones
+--            (Q-E), and the serial check (Q-G).
+--   press 3  (a later turn; also once by itself at your next turn start)
+--            the records again and "UPG_SPIKE INFO" with Q-A to Q-G.
+-- The trace (the press-1 turn only, your units only, information only):
+-- GameEvents.OnUnitMoved (the U1 units), GameEvents.UnitCreated,
+-- GameEvents.UnitInitialized and Events.UnitUpgraded (gameplay) write one
+-- "[EFV][Upg] G <event> ..." line each with both old units' state and both
+-- records; st.upg.tr keeps the event order and each old unit's state at the
+-- first event about its new unit. It never touches VEF's records. MP style
+-- as the P block: synced handler, IDs in the property, no random, keys in
+-- a fixed order. Only CMD.upg_spike and EFV_Dev.EvalUpg leave the block
+-- (register limit).
+-- ===========================================================================
+do
+local UP = { KEYS = { "M", "S" }, NAMES = { M = "VEF-U1-M", S = "VEF-U1-S" }, busy = 0 }
+UP.SLOT = 65536
+UP.EXTRA_MOVES = 2
+UP.GOLD = 3000
+
+function UP.Print(msg) print("[EFV][Upg] G " .. Str(msg)) end
+
+function UP.Gold(pid)
+	local ok, g = pcall(function() return Players[pid]:GetTreasury():GetGoldBalance() end)
+	return (ok and type(g) == "number") and math.floor(g) or -1
+end
+
+function UP.Promos(u)
+	local n = 0
+	pcall(function()
+		local exp = u:GetExperience()
+		for row in GameInfo.UnitPromotions() do
+			if exp:HasPromotion(row.Index) then n = n + 1 end
+		end
+	end)
+	return n
+end
+
+function UP.Desc(u)
+	if u == nil then return "nil" end
+	local s = "?"
+	pcall(function()
+		local id = u:GetID()
+		s = "P" .. Str(u:GetOwner()) .. "/" .. Str(id) .. " serial=" .. math.floor(id / UP.SLOT) .. " slot=" .. (id % UP.SLOT) ..
+			" type=" .. UnitTypeName(u) .. " at=" .. Str(u:GetX()) .. "," .. Str(u:GetY()) ..
+			" moves=" .. Str(u:GetMovesRemaining()) .. "/" .. Str(u:GetMaxMoves())
+	end)
+	local xp = XPInfo(u)
+	return s .. " xp=" .. Str(xp) .. " dmg=" .. Str(UnitDamage(u)) .. " promos=" .. UP.Promos(u)
+end
+
+function UP.Form(u)
+	if u == nil then return "none" end
+	local ok, f = pcall(function() return u:GetMilitaryFormation() end)
+	return ok and Str(f) or "unreadable"
+end
+
+-- The old unit object of e = { o, u } read raw: "live" (a live unit),
+-- "dead" (damage at the maximum), "ghost" (any other stale object) or
+-- "none" (FindID nil or another unit in the slot); plus a text.
+function UP.Old(e)
+	local u = FindUnit(tonumber(e.o) or -1, tonumber(e.u) or -1)
+	if u == nil then return "none", "none" end
+	local x, y = -1, -1
+	pcall(function() x, y = u:GetX(), u:GetY() end)
+	local why = EFV_UnitGoneReason(u, e.o, e.u)
+	if why == nil then return "live", "live at " .. Str(x) .. "," .. Str(y) end
+	local s = (why == "GONE_DEAD") and "dead" or "ghost"
+	return s, s .. " (" .. Str(why) .. ") at " .. Str(x) .. "," .. Str(y) .. " dmg " .. Str(UnitDamage(u))
+end
+
+-- The property round trip drops empty tables: restore the sub-tables.
+function UP.Norm(up)
+	for _, key in ipairs({ "k", "nu", "rec", "tr", "p2" }) do
+		if type(up[key]) ~= "table" then up[key] = {} end
+	end
+	local tr = up.tr
+	tr.seq = tonumber(tr.seq) or 0
+	for _, key in ipairs({ "mv", "mvn", "at" }) do
+		if type(tr[key]) ~= "table" then tr[key] = {} end
+	end
+	return up
+end
+
+function UP.RecText(store, up, k)
+	local rec = EFV_Records.Get(store, tonumber(up.rec[k]) or -1)
+	if rec == nil then return "record " .. Str(up.rec[k]) .. " closed", nil end
+	return "record " .. rec.id .. " " .. Str(rec.state) .. " unit=" .. Str(rec.onMapUnitID) .. " type=" .. Str(rec.unitType) ..
+		" last=" .. Str(rec.lastX) .. "," .. Str(rec.lastY), rec
+end
+
+-- Both old units and both records, for every trace line.
+function UP.Both(up)
+	local store = EFV_Records.Load()
+	local parts = {}
+	for _, k in ipairs(UP.KEYS) do
+		local e = up.k[k]
+		if type(e) == "table" then
+			local _, text = UP.Old(e)
+			parts[#parts + 1] = UP.NAMES[k] .. " P" .. Str(e.o) .. "/" .. Str(e.u) .. ": " .. text .. ", " .. (UP.RecText(store, up, k))
+		end
+	end
+	return table.concat(parts, "; ")
+end
+
+-- The U1 key whose old unit stood on u's tile (a live old unit's own tile,
+-- else its last traced tile), for a new unit not matched yet.
+function UP.MatchNew(up, u)
+	local okP, x, y = pcall(function() return u:GetX(), u:GetY() end)
+	if not okP then return nil end
+	for _, k in ipairs(UP.KEYS) do
+		local e = up.k[k]
+		if type(e) == "table" and up.nu[k] == nil then
+			local ox, oy = e.x, e.y
+			local old = FindUnit(tonumber(e.o) or -1, tonumber(e.u) or -1)
+			if old ~= nil then
+				local okO, px, py = pcall(function() return old:GetX(), old:GetY() end)
+				if okO and type(px) == "number" and px >= 0 and py >= 0 then ox, oy = px, py end
+			end
+			if ox == x and oy == y then return k end
+		end
+	end
+	return nil
+end
+
+-- The trace (information only; see the header).
+function UP.Trace(ev, pid, uid, extra)
+	if UP.busy > 0 then return end
+	local st = ScnLoad()
+	local up = st.upg
+	if type(up) ~= "table" or up.me ~= pid or tonumber(up.turn) ~= Turn() or (tonumber(up.step) or 0) >= 3 then return end
+	UP.Norm(up)
+	local u = FindUnit(pid, uid)
+	local k, old = nil, false
+	for _, kk in ipairs(UP.KEYS) do
+		local e = up.k[kk]
+		if type(e) == "table" and tonumber(e.u) == uid then k, old = kk, true end
+		if tonumber(up.nu[kk]) == uid then k = kk end
+	end
+	local tr = up.tr
+	if ev == "OnUnitMoved" then
+		if k == nil then return end
+		local key = old and "mv" or "mvn"
+		tr[key][k] = (tonumber(tr[key][k]) or 0) + 1
+		if old and u ~= nil then
+			local okP, x, y = pcall(function() return u:GetX(), u:GetY() end)
+			if okP and type(x) == "number" and x >= 0 and y >= 0 then up.k[k].x, up.k[k].y = x, y end
+		end
+	elseif k == nil and u ~= nil and EFV_UpgradeTargets(up.from, pid)[UnitTypeName(u)] then
+		k = UP.MatchNew(up, u)
+		if k ~= nil then up.nu[k] = uid end
+	end
+	tr.seq = tr.seq + 1
+	if k ~= nil and not old and ev ~= "OnUnitMoved" then
+		if type(tr.at[k]) ~= "table" then
+			local _, text = UP.Old(up.k[k])
+			tr.at[k] = { old = text }
+		end
+		local short = (ev == "UnitCreated" and "c") or (ev == "UnitInitialized" and "i") or "g"
+		if tr.at[k][short] == nil then tr.at[k][short] = tr.seq end
+	end
+	local who = (k == nil) and "another unit" or (UP.NAMES[k] .. (old and " (old unit)" or " (new unit)"))
+	UP.Print(ev .. " #" .. tr.seq .. " " .. UP.Desc(u) .. Str(extra) .. " = " .. who .. "; " .. UP.Both(up))
+	ScnSave(st)
+end
+
+function UP.OnMoved(pid, uid)
+	local ok, err = pcall(UP.Trace, "OnUnitMoved", pid, uid, "")
+	if not ok then UP.Print("trace ERROR " .. Str(err)) end
+end
+function UP.OnCreated(pid, uid)
+	local ok, err = pcall(UP.Trace, "UnitCreated", pid, uid, "")
+	if not ok then UP.Print("trace ERROR " .. Str(err)) end
+end
+function UP.OnInitialized(pid, uid)
+	local ok, err = pcall(UP.Trace, "UnitInitialized", pid, uid, "")
+	if not ok then UP.Print("trace ERROR " .. Str(err)) end
+end
+function UP.OnUpgraded(pid, uid, upType)
+	local ok, err = pcall(UP.Trace, "Events.UnitUpgraded", pid, uid, " upgradeType=" .. Str(upType))
+	if not ok then UP.Print("trace ERROR " .. Str(err)) end
+end
+
+function UP.Answer(st, p, id, text, verdict)
+	if type(st.upg) ~= "table" then st.upg = {} end
+	st.upg.ans = { stamp = Num(p.stamp, 0), text = text }
+	ScnSave(st)
+	Check(id, verdict or "INFO", text)
+end
+
+-- Your units' highest serial (the upper 16 bits of the ID).
+function UP.MaxSerial(me)
+	local m = -1
+	pcall(function()
+		for _, u in Players[me]:GetUnits():Members() do
+			local s = math.floor(u:GetID() / UP.SLOT)
+			if s > m then m = s end
+		end
+	end)
+	return m
+end
+
+-- Your free land tiles within 3 of (cx, cy), ring by ring.
+function UP.OwnTiles(me, cx, cy)
+	local out = {}
+	for ring = 1, 3 do
+		for _, q in ipairs(Ring(cx, cy, ring)) do
+			if FreeLand(q) and NotWonder(q) and PlotOwner(q) == me then out[#out + 1] = q end
+		end
+	end
+	return out
+end
+
+-- At turn 2 a capital owns only its ring-1 tiles, and P1's VEF-PROXY
+-- Swordsmen (or S0's three Swordsmen) stand there. With fewer than 4 free
+-- tiles of yours left, those idle test units are placed on neutral land 3 to
+-- 6 tiles from your capital (UnitManager.PlaceUnit, as S9), so both U1
+-- units fit inside your borders. Returns how many were moved.
+function UP.ClearLand(st, me, cx, cy)
+	if #UP.OwnTiles(me, cx, cy) >= 4 then return 0 end
+	local setup = {}
+	for _, e in ipairs(type(st.setupUnits) == "table" and st.setupUnits or {}) do setup[tonumber(e.u) or -1] = true end
+	local idle = {}
+	pcall(function()
+		for _, u in Players[me]:GetUnits():Members() do
+			local okN, n = pcall(function() return u:GetExperience():GetVeteranName() end)
+			local proxy = okN and type(n) == "string" and string.sub(n, 1, 10) == "VEF-PROXY-"
+			if (proxy or setup[u:GetID()]) and EFV_UnitGoneReason(u, me, u:GetID()) == nil
+					and PlotOwner(Map.GetPlot(u:GetX(), u:GetY())) == me then
+				idle[#idle + 1] = u
+			end
+		end
+	end)
+	table.sort(idle, function(a, b) return a:GetID() < b:GetID() end)
+	local n = 0
+	for _, u in ipairs(idle) do
+		local q = FindPlot(cx, cy, 6, Neutral, 3)
+		if q ~= nil and Place(u, q) then n = n + 1 end
+	end
+	return n
+end
+
+-- The target's tech and civic, its strategic resource for n upgrades
+-- (GS Units_XP2 ResourceCost; +10 spare, at least 20) and the gold.
+function UP.Grant(me, to, n)
+	local row = GameInfo.Units[to]
+	local notes = {}
+	if row.PrereqTech ~= nil then
+		local ok = pcall(function() Players[me]:GetTechs():SetTech(GameInfo.Technologies[row.PrereqTech].Index, true) end)
+		notes[#notes + 1] = row.PrereqTech .. " granted=" .. tostring(ok)
+	end
+	if row.PrereqCivic ~= nil then notes[#notes + 1] = row.PrereqCivic .. " granted=" .. tostring(GrantCivic(me, row.PrereqCivic)) end
+	if row.StrategicResource ~= nil and GameInfo.Resources[row.StrategicResource] ~= nil then
+		local cost = 0
+		pcall(function() cost = tonumber(GameInfo.Units_XP2[to].ResourceCost) or 0 end)
+		local add = math.max(20, n * cost + 10)
+		local idx = GameInfo.Resources[row.StrategicResource].Index
+		local have = "?"
+		pcall(function()
+			Players[me]:GetResources():ChangeResourceAmount(idx, add)
+			have = Str(Players[me]:GetResources():GetResourceAmount(idx))
+		end)
+		notes[#notes + 1] = row.StrategicResource .. " +" .. add .. " (now " .. have .. ", one upgrade needs " .. cost .. ")"
+	end
+	pcall(function() Players[me]:GetTreasury():ChangeGoldBalance(UP.GOLD) end)
+	notes[#notes + 1] = "gold +" .. UP.GOLD .. " (now " .. UP.Gold(me) .. ")"
+	return notes
+end
+
+function UP.Press1(me, p, st, B)
+	local cap, capB = Capital(me), Capital(B)
+	local from, to, unique = EV.UpgradePair(me)
+	if cap == nil or capB == nil or GameInfo.Units[to] == nil then
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		UP.Answer(st, p, "UPG_U1", "U1: " .. ((GameInfo.Units[to] == nil) and "no upgrade target found" or "your capital or B's capital is missing"), "CHECK")
+		return
+	end
+	local notes = UP.Grant(me, to, 2)
+	local cx, cy = cap:GetX(), cap:GetY()
+	local moved = UP.ClearLand(st, me, cx, cy)
+	if moved > 0 then notes[#notes + 1] = moved .. " idle test Swordsmen moved out of your land" end
+	-- VEF-U1-M on your land with a free tile of yours next to it (the move),
+	-- VEF-U1-S as far from it as your land allows (at least 2).
+	local qm = nil
+	for _, q in ipairs(UP.OwnTiles(me, cx, cy)) do
+		if qm == nil then
+			for _, nb in ipairs(Ring(q:GetX(), q:GetY(), 1)) do
+				if FreeLand(nb) and PlotOwner(nb) == me then qm = q end
+			end
+		end
+	end
+	local inLand = qm ~= nil
+	qm = qm or FindPlot(cx, cy, 4, OwnedByAny({ -1, me }), 1)
+	local m = NewUnit("upg_spike", me, from, qm, UP.NAMES.M)
+	local qs, best = nil, -1
+	if m ~= nil then
+		for _, q in ipairs(UP.OwnTiles(me, cx, cy)) do
+			local d = Dist(q:GetX(), q:GetY(), m:GetX(), m:GetY())
+			if d >= 2 and d > best then qs, best = q, d end
+		end
+		if qs == nil then
+			inLand = false
+			qs = FindPlot(cx, cy, 4, function(q) return Has({ -1, me }, PlotOwner(q)) and Dist(q:GetX(), q:GetY(), m:GetX(), m:GetY()) >= 2 end, 1)
+		end
+	end
+	local s = NewUnit("upg_spike", me, from, qs, UP.NAMES.S)
+	if m == nil or s == nil then
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		UP.Answer(st, p, "UPG_U1", "U1: could not create two " .. from .. " next to your capital (no free land)", "CHECK")
+		return
+	end
+	-- VEF-U1-M: one level-1 promotion, XP, 30 damage, extra moves.
+	for _, pt in ipairs(LevelOnePromotions(from, 1)) do SetPromo(m, GameInfo.UnitPromotions[pt].Index) end
+	TopUp(m, 20)
+	pcall(function() m:SetDamage(30) end)
+	FullMoves(m)
+	FullMoves(s)
+	pcall(function() m:ChangeMovesRemaining(UP.EXTRA_MOVES) end)
+	-- the Ram exactly 2 tiles from VEF-U1-M, the Builder 2 or more from it
+	local mx, my = m:GetX(), m:GetY()
+	local r = NewUnit("upg_spike", me, "UNIT_BATTERING_RAM", FindPlot(mx, my, 2, OwnedByAny({ -1, me }), 2), "VEF-U1-R")
+	local b = NewUnit("upg_spike", me, "UNIT_BUILDER",
+		FindPlot(cx, cy, 4, function(q) return Has({ -1, me }, PlotOwner(q)) and Dist(q:GetX(), q:GetY(), mx, my) >= 2 end, 1), "VEF-U1-B")
+	local units = { M = m, S = s }
+	local store = EFV_Records.Load()
+	local recs = {}
+	for _, k in ipairs(UP.KEYS) do
+		recs[k] = MakeRecord(store, units[k], { force = FT_EXP, sender = B, recipient = me, basis = EFV_PartnerBasis(B, me) or "FRIEND",
+			origin = capB, dest = cap, duration = EFV_Config.EXPEDITIONARY_DURATION })
+	end
+	EFV_Records.Commit(store)
+	local smax = UP.MaxSerial(me)
+	local up = UP.Norm({ me = me, b = B, turn = Turn(), step = 1, from = from, to = to, unique = unique and 1 or 0, smax = smax })
+	for _, k in ipairs(UP.KEYS) do
+		local u = units[k]
+		local xp = XPInfo(u)
+		up.k[k] = { o = me, u = u:GetID(), x = u:GetX(), y = u:GetY(), xp = xp, pr = UP.Promos(u), dmg = UnitDamage(u) }
+		up.rec[k] = recs[k] and recs[k].id or -1
+	end
+	up.ram = { u = r and r:GetID() or -1, f = UP.Form(r) }
+	up.bld = { u = b and b:GetID() or -1, f = UP.Form(b) }
+	st.upg = up
+	Focus(st, mx, my, me, m:GetID(), p.stamp)
+	local ok = recs.M ~= nil and recs.S ~= nil and r ~= nil and b ~= nil and inLand
+	UP.Print("U1 press 1: VEF-U1-M " .. UP.Desc(m) .. "; VEF-U1-S " .. UP.Desc(s) .. "; VEF-U1-R " .. UP.Desc(r) .. " formation=" .. up.ram.f ..
+		"; VEF-U1-B " .. UP.Desc(b) .. " formation=" .. up.bld.f .. "; your highest serial " .. smax)
+	UP.Answer(st, p, "UPG_U1", "U1: B=P" .. B .. "; " .. UP.NAMES.M .. " (record " .. Str(up.rec.M) .. ", " .. from .. ", xp " .. Str(up.k.M.xp) ..
+		", " .. up.k.M.pr .. " promotion(s), " .. Str(up.k.M.dmg) .. " damage, moves " .. Str(m:GetMovesRemaining()) .. ") at " .. mx .. "," .. my ..
+		" and " .. UP.NAMES.S .. " (record " .. Str(up.rec.S) .. ") at " .. s:GetX() .. "," .. s:GetY() .. ", both lent to you by B" ..
+		(inLand and "" or " (NOT BOTH IN YOUR LAND: Upgrade needs friendly territory)") ..
+		"; Ram formation " .. up.ram.f .. ", Builder formation " .. up.bld.f .. "; upgrade -> " .. to ..
+		(unique and " (your unique unit)" or "") .. "; " .. table.concat(notes, ", ") .. "; highest serial " .. smax ..
+		". Now: move VEF-U1-M one tile inside your borders, then Upgrade it; Upgrade VEF-U1-S without moving it; then press U1 again",
+		ok and "PASS" or "CHECK")
+end
+
+-- The new unit of key k: matched by the trace, else the record's unit when
+-- it changed, else your newest other unit with the old unit's name.
+function UP.NewOf(up, k, rec)
+	local e = up.k[k]
+	local id = tonumber(up.nu[k])
+	if id ~= nil then
+		local u = FindUnit(up.me, id)
+		if u ~= nil then return u, "trace" end
+	end
+	if rec ~= nil and rec.onMapUnitID ~= nil and rec.onMapUnitID ~= e.u then
+		local u = FindUnit(rec.onMapPlayerID or up.me, rec.onMapUnitID)
+		if u ~= nil then return u, "record" end
+	end
+	local best = nil
+	pcall(function()
+		for _, u in Players[up.me]:GetUnits():Members() do
+			local okN, n = pcall(function() return u:GetExperience():GetVeteranName() end)
+			if okN and n == UP.NAMES[k] and u:GetID() ~= e.u and EFV_UnitGoneReason(u, up.me, u:GetID()) == nil
+					and (best == nil or u:GetID() > best:GetID()) then
+				best = u
+			end
+		end
+	end)
+	return best, best and "name" or "none"
+end
+
+function UP.Press2(me, p, st, up)
+	local store = EFV_Records.Load()
+	local parts = {}
+	for _, k in ipairs(UP.KEYS) do
+		local e = up.k[k]
+		local recText, rec = UP.RecText(store, up, k)
+		local _, oldText = UP.Old(e)
+		local nu, how = UP.NewOf(up, k, rec)
+		local line = UP.NAMES[k] .. ": " .. recText
+		if nu ~= nil then
+			local id = nu:GetID()
+			local xp = XPInfo(nu)
+			local mv, mx = -1, -1
+			pcall(function() mv, mx = nu:GetMovesRemaining(), nu:GetMaxMoves() end)
+			up.p2[k] = { u = id, mv = mv, mx = mx, xp = xp, pr = UP.Promos(nu), dmg = UnitDamage(nu), ser = math.floor(id / UP.SLOT),
+				t = UnitTypeName(nu) }
+			line = line .. ((rec ~= nil and rec.onMapUnitID == id) and " (follows the new unit)" or " (NOT on the new unit)") ..
+				"; old P" .. Str(e.o) .. "/" .. Str(e.u) .. " " .. oldText .. "; new (" .. how .. ") " .. UP.Desc(nu) ..
+				"; moves left " .. Str(mv) .. "/" .. Str(mx) .. "; serial above " .. Str(up.smax) .. ": " ..
+				((up.p2[k].ser > (tonumber(up.smax) or -1)) and "yes" or "no")
+		else
+			line = line .. "; old P" .. Str(e.o) .. "/" .. Str(e.u) .. " " .. oldText .. "; new unit: none found (not upgraded yet?)"
+		end
+		parts[#parts + 1] = line
+	end
+	up.step = 2
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	UP.Answer(st, p, "UPG_U1", "U1 press 2 (T" .. Turn() .. "): " .. table.concat(parts, " | ") ..
+		". Now End Turn, then press U1 a third time")
+end
+
+-- Q-A to Q-G and VEF's verdict (press 3 and the turn-start line).
+function UP.Verdict(st, store)
+	local up = UP.Norm(st.upg)
+	local tr = up.tr
+	local function Each(fn)
+		local out = {}
+		for _, k in ipairs(UP.KEYS) do out[#out + 1] = k .. " " .. fn(k) end
+		return table.concat(out, ", ")
+	end
+	local std = "?"
+	pcall(function() std = Str(MilitaryFormationTypes.STANDARD_FORMATION) end)
+	local q = {}
+	q[#q + 1] = "Q-A OnUnitMoved for the old units: " .. Each(function(k) return Str(tonumber(tr.mv[k]) or 0) end) ..
+		" (VEF-U1-M moved one tile, VEF-U1-S did not move)"
+	q[#q + 1] = "Q-B events about the new units: " .. Each(function(k)
+		local a = tr.at[k]
+		if type(a) ~= "table" then return "none" end
+		return "UnitCreated " .. (a.c and ("#" .. a.c) or "no") .. " UnitInitialized " .. (a.i and ("#" .. a.i) or "no") ..
+			" Events.UnitUpgraded " .. (a.g and ("#" .. a.g) or "no")
+	end)
+	q[#q + 1] = "Q-C old unit at the first of them: " .. Each(function(k)
+		local a = tr.at[k]
+		return (type(a) == "table") and Str(a.old) or "no event"
+	end)
+	q[#q + 1] = "Q-D moves left on the new units (press 2): " .. Each(function(k)
+		local p2 = up.p2[k]
+		return (type(p2) == "table") and (Str(p2.mv) .. "/" .. Str(p2.mx)) or "not read"
+	end) .. "; OnUnitMoved for the new units: " .. Each(function(k) return Str(tonumber(tr.mvn[k]) or 0) end)
+	q[#q + 1] = "Q-E xp/promotions/damage old -> new: " .. Each(function(k)
+		local p2, e = up.p2[k], up.k[k]
+		if type(p2) ~= "table" then return "not read" end
+		return Str(e.xp) .. "/" .. Str(e.pr) .. "/" .. Str(e.dmg) .. " -> " .. Str(p2.xp) .. "/" .. Str(p2.pr) .. "/" .. Str(p2.dmg)
+	end)
+	q[#q + 1] = "Q-F formations: Ram " .. Str(up.ram and up.ram.f) .. ", Builder " .. Str(up.bld and up.bld.f) .. " (STANDARD " .. std .. ")"
+	q[#q + 1] = "Q-G new serials above " .. Str(up.smax) .. ": " .. Each(function(k)
+		local p2 = up.p2[k]
+		if type(p2) ~= "table" then return "not read" end
+		return Str(p2.ser) .. ((p2.ser > (tonumber(up.smax) or -1)) and " yes" or " no")
+	end)
+	local v = {}
+	for _, k in ipairs(UP.KEYS) do
+		local text, rec = UP.RecText(store, up, k)
+		local p2 = up.p2[k]
+		local follows = rec ~= nil and type(p2) == "table" and rec.onMapUnitID == p2.u
+		v[#v + 1] = UP.NAMES[k] .. " " .. text .. (follows and " = the upgraded unit" or "")
+	end
+	return "U1 T" .. Turn() .. " VEF: " .. table.concat(v, "; ") .. " || " .. table.concat(q, " | ")
+end
+
+function UP.Press3(me, p, st, up)
+	local text = UP.Verdict(st, EFV_Records.Load())
+	up.step = 3
+	Focus(st, -1, -1, nil, nil, p.stamp)
+	UP.Answer(st, p, "UPG_SPIKE", text)
+end
+
+function UP.Press(me, p)
+	local st = ScnLoad()
+	local B = (type(st.proxy) == "table" and st.proxy.b) or st.ally
+	if st.me ~= me or B == nil then
+		Focus(st, -1, -1, nil, nil, p.stamp)
+		UP.Answer(st, p, "UPG_U1", "U1: press P1 (or S0) first, in a new game", "CHECK")
+		return
+	end
+	if type(st.proxy) ~= "table" then
+		st = Session("UPG_U1", me)   -- after S0: renews the common war
+		if st == nil then return end
+	end
+	local up = st.upg
+	if type(up) ~= "table" or up.me ~= me or up.k == nil or (tonumber(up.step) or 0) >= 3 then
+		UP.Press1(me, p, st, B)
+	elseif Turn() == tonumber(up.turn) then
+		UP.Press2(me, p, st, UP.Norm(up))
+	else
+		UP.Press3(me, p, st, UP.Norm(up))
+	end
+end
+
+CMD.upg_spike = function(me, p)
+	UP.busy = UP.busy + 1
+	local ok, err = pcall(UP.Press, me, p)
+	UP.busy = UP.busy - 1
+	if not ok then error(err, 0) end
+end
+
+-- At your turn start after press 1, once, while press 3 has not run.
+function EFV_Dev.EvalUpg(st, store, t)
+	local up = st.upg
+	if type(up) ~= "table" or type(up.k) ~= "table" or (tonumber(up.step) or 0) >= 3 or t <= (tonumber(up.turn) or t)
+			or up.auto ~= nil then
+		return
+	end
+	up.auto = t
+	Check("UPG_SPIKE", "INFO", UP.Verdict(st, store) .. " (at your turn start; press U1 for the same line)")
+end
+
+if GameEvents.OnUnitMoved ~= nil then GameEvents.OnUnitMoved.Add(UP.OnMoved) else UP.Print("trace MISSING GameEvents.OnUnitMoved") end
+if GameEvents.UnitCreated ~= nil then GameEvents.UnitCreated.Add(UP.OnCreated) else UP.Print("trace MISSING GameEvents.UnitCreated") end
+if GameEvents.UnitInitialized ~= nil then GameEvents.UnitInitialized.Add(UP.OnInitialized) else UP.Print("trace MISSING GameEvents.UnitInitialized") end
+if Events.UnitUpgraded ~= nil then Events.UnitUpgraded.Add(UP.OnUpgraded) else UP.Print("trace MISSING Events.UnitUpgraded") end
+end -- upgrade spike U1
 
 -- ---------------------------------------------------------------------------
 -- Evaluation: at your turn start and on "Check now".
@@ -4041,27 +6597,31 @@ local function Evaluate(me, manual)
 	end
 	local t = Turn()
 	local store = EFV_Records.Load()
-	Observe(st, store, me)
+	EV.Observe(st, store, me)
 	if not manual then
-		CheckArrivals(st, store, t)
-		CheckHome(st, store, t)
-		EvalS2(st, store, t)
-		EvalS3(st, store, t)
-		EvalS4(st, store, t)
-		EvalS5(st, store, t)
-		EvalS8(st, store, t)
-		EvalS9(st, store, t)
-		EvalS10(st, store, t)
-		EvalVS(st, t)
+		EV.CheckArrivals(st, store, t)
+		EV.CheckHome(st, store, t)
+		EV.EvalS2(st, store, t)
+		EV.EvalS3(st, store, t)
+		EV.EvalS4(st, store, t)
+		EV.EvalS5(st, store, t)
+		EV.EvalS8(st, store, t)
+		EV.EvalS9(st, store, t)
+		EV.EvalS10(st, store, t)
+		EV.EvalVS(st, t)
+		EFV_Dev.EvalAir(st, t)
+		EFV_Dev.EvalCorps(st, store, t)
+		EFV_Dev.EvalProxy(st, store, t)
+		EFV_Dev.EvalUpg(st, store, t)
 	end
-	EvalS7(st, store, t, manual)
-	EvalS11(st, store, t, manual)
-	EvalS12(st, store, t, manual)
-	EvalS13(st, store, t, manual)
-	if not manual then EvalS14(st, store, t, manual) end
-	EvalS16(st, store, t, manual)
-	EvalS18(st, store, t, manual)
-	EvalS19(st, store, t, manual)
+	EV.EvalS7(st, store, t, manual)
+	EV.EvalS11(st, store, t, manual)
+	EV.EvalS12(st, store, t, manual)
+	EV.EvalS13(st, store, t, manual)
+	if not manual then EV.EvalS14(st, store, t, manual) end
+	EV.EvalS16(st, store, t, manual)
+	EV.EvalS18(st, store, t, manual)
+	EV.EvalS19(st, store, t, manual)
 	EFV_Records.Commit(store)
 	ScnSave(st)
 	if manual then Check("CHECK_NOW", "INFO", "evaluated") end
@@ -4079,17 +6639,17 @@ local function OnTurnStartComplete(pid)
 end
 
 local function OnCombat(aP, aU, dP, dU)
-	local ok, err = pcall(OnCombatT31, aP, aU, dP, dU)
+	local ok, err = pcall(EV.OnCombatT31, aP, aU, dP, dU)
 	if not ok then Log("scn", "ERROR combat check: " .. Str(err)) end
 end
 
 local function OnTurnEnded(turn)
-	local ok, err = pcall(DevCleanup, turn)
+	local ok, err = pcall(EV.DevCleanup, turn)
 	if not ok then Log("scn", "ERROR end-of-turn cleanup: " .. Str(err)) end
 end
 
 local function OnTurnStarted(pid)
-	local ok, err = pcall(OnTurnStartedT31, pid)
+	local ok, err = pcall(EV.OnTurnStartedT31, pid)
 	if not ok then Log("scn", "ERROR S10 Barbarian removal: " .. Str(err)) end
 end
 

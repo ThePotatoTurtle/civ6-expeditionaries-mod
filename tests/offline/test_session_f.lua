@@ -351,7 +351,7 @@ test("upgrade relink: two untracked upgrade-type units on the snapshot plot -> n
 	H.clean()
 end)
 
-test("upgrade relink: an upgrade-type unit one tile away is not taken (same plot only, T30)", function()
+test("upgrade relink: an upgrade-type unit one tile away without the record's promotions is not taken (the tile rule, T30; 1.0.5 F1 moves the tile only with a move)", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local id, u = Deploy(S)
@@ -359,8 +359,12 @@ test("upgrade relink: an upgrade-type unit one tile away is not taken (same plot
 	FAKE.RemoveUnit(u, "DISBAND")
 	local other = H.unit(1, "UNIT_MAN_AT_ARMS", p.x, p.y)
 	H.endTurn()
-	H.len(H.records(), 0)
+	-- 1.0.5: no promotions, so not a possible successor either: the AI
+	-- host's disband brings the record's unit home.
+	local rr = H.records()
+	H.len(rr, 1); H.eq(rr[1].state, "RETURNING"); H.eq(rr[1].returnReason, "DISBANDED")
 	H.isnil(EFV_Records.FindByUnit(EFV_Records.Load(), 1, other.id))
+	H.ok(H.unitAlive(other)); H.eq(other:GetOwner(), 1)
 	H.clean()
 end)
 
@@ -372,9 +376,12 @@ test("upgrade relink: an upgrade-type unit on the snapshot plot without the reco
 	FAKE.RemoveUnit(u, "DISBAND")
 	local other = H.unit(1, "UNIT_MAN_AT_ARMS", x, y) -- the host's own unit moves onto the tile
 	H.endTurn()
-	H.len(H.records(), 0)
+	-- 1.0.5: not taken, and not a possible successor (no BATTLECRY): the AI
+	-- host's disband brings the record's unit home.
+	local rr = H.records()
+	H.len(rr, 1); H.eq(rr[1].state, "RETURNING"); H.eq(rr[1].returnReason, "DISBANDED")
 	H.isnil(EFV_Records.FindByUnit(EFV_Records.Load(), 1, other.id))
-	H.ok(IsDisbanded(Sent(0, "UNIT_LOST")[1]))
+	H.len(Sent(0, "UNIT_LOST"), 0)
 	H.clean()
 end)
 
@@ -449,7 +456,7 @@ end)
 
 test("UU: a Hypaspist appearing for a non-Macedonian owner is not an upgrade target -> no relink", function()
 	local S = H.baseScenario()
-	H.loadEFV()
+	H.loadEFV({ flags = { FLAG_DISBAND_RETURN = false } })   -- identity (1.0.5: an AI disband comes home)
 	local id, u = Deploy(S, { unitType = "UNIT_WARRIOR", promotions = {}, xp = 5 })
 	H.endTurn({ act = function(p)
 		if p == 1 then H.upgrade(u, "UNIT_MACEDONIAN_HYPASPIST") end

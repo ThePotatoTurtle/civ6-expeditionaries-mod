@@ -68,6 +68,12 @@ end
 -- game state, so it cannot desync anything).
 local m_MismatchLogged = {}
 
+-- 1.0.5 (FIXPLAN_upgrade_relink.md "Re-entrancy guard"): > 0 while Recreate
+-- is inside its engine create call, so EFV's GameEvents.UnitCreated /
+-- UnitInitialized handlers skip EFV's own units (EFV_Units.IsCreating). Every
+-- client runs the same call stack, so the skip is deterministic.
+local m_Creating = 0
+
 -- ---------------------------------------------------------------------------
 -- EFV_Units.Get(pid, uid, expectedType) -> pUnit
 -- Players[pid]:GetUnits():FindID(uid), nil-safe (missing player -> nil),
@@ -134,6 +140,34 @@ end
 -- every write of rec.lastX / lastY (a levied unit's old object reports
 -- -9999,-9999, T28).
 -- ---------------------------------------------------------------------------
+function EFV_Units.IsCreating()
+	return m_Creating > 0
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Units.FindRaw(pid, uid) -> pUnit or nil   (added 1.0.5)
+-- FindID with only the ID check (GetID() == uid; a reused slot is nil): a
+-- stale object (dead, off the map, removed) is returned too, so the caller
+-- can tell a live unit from a removed ghost or a corpse (F2, F5). No log.
+-- APIs: A17, A04.
+-- ---------------------------------------------------------------------------
+function EFV_Units.FindRaw(pid, uid)
+	if type(pid) ~= "number" or type(uid) ~= "number" or pid < 0 or uid < 0 or Players[pid] == nil then
+		return nil
+	end
+	local ok, pUnit = pcall(function()
+		local u = Players[pid]:GetUnits():FindID(uid)
+		if u ~= nil and u:GetID() ~= uid then
+			return nil
+		end
+		return u
+	end)
+	if ok then
+		return pUnit
+	end
+	return nil
+end
+
 function EFV_Units.ValidPosition(x, y)
 	if type(x) ~= "number" or type(y) ~= "number" or x < 0 or y < 0 then
 		return false
@@ -453,12 +487,14 @@ function EFV_Units.Recreate(store, ownerID, rec, plot, turn)
 
 	-- 1. Create.
 	local api = EFV_Config.FLAG_CREATE_API
+	m_Creating = m_Creating + 1
 	local okC, pUnit = pcall(function()
 		if api == "INITUNIT" then
 			return UnitManager.InitUnit(ownerID, unitType, x, y)
 		end
 		return pPlayer:GetUnits():Create(typeRow.Index, x, y)
 	end)
+	m_Creating = m_Creating - 1
 	if not okC then
 		EFV_Log(1, "Restore", "id=%s create failed owner=%s type=%s x=%s y=%s api=%s err=%s",
 			rid, tostring(ownerID), unitType, tostring(x), tostring(y), tostring(api), ErrText(pUnit))

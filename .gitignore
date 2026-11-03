@@ -26,3 +26,6 @@ FIXPLAN_*.md
 
 # Release packages (built locally, attached to GitHub releases)
 dist/
+
+# Session handoff notes (local only)
+HANDOFF.md

@@ -17,6 +17,13 @@
 -- AddUserInterfaces contexts load HIDDEN (INTERFACES note 19): Initialize
 -- calls ContextPtr:SetHide(false); only Controls.Main is toggled and the open
 -- state lives in m_Open.
+--
+-- Register limit: Civ VI's Havok Script rejects a function that needs too
+-- many registers ("too complex"; 172 loads, 206 fails), and every main-chunk
+-- local holds one register until the end of its block. So each section keeps
+-- its private helpers inside its own do ... end block; only the names other
+-- sections use are declared just before the block. tools/check_lua.py
+-- (check_all) fails above 180.
 -- ===========================================================================
 include("InstanceManager")
 -- EFV's UI API (EFV_UI_ReadStore, EFV_UI_RecordForUnit, ...). Guarded: the panel
@@ -25,15 +32,16 @@ local m_UIShared = pcall(include, "EFV_UIShared")
 include("EFV_Config")
 -- EFV:GLOBALS EFV_Config EFV_UI_ReadStore EFV_UI_RecordForUnit EFV_UI_StateText EFV_UI_TrackerState EFV_SortedKeys EFV_UI_RecordsFor EFV_UI_TrackedUnit
 -- EFV:GLOBALS EFV_DestinationRows EFV_PartnerBasis EFV_VolunteerBasis EFV_UI_TrackerRows EFV_UI_EntrustState
+-- EFV:GLOBALS EFV_UI_DenounceTurnsLeft EFV_UnitSendReasons
 
 local PREFIX = "[EFV][Dev][UI]"
--- Dev-tools version and the VEF build they are made for (EFV_Dev 1.0.4.1;
+-- Dev-tools version and the VEF build they are made for (EFV_Dev 1.0.5.2;
 -- keep equal to EFV_Dev.VERSION / EFV_Dev.FOR_EFV in EFV_Dev_Gameplay.lua,
 -- test_dev_mod checks it). The panel title shows both and the VEF version
 -- that is really loaded (EFV_Config.VERSION from VEF's own files), so a
 -- tester sees at a glance whether the local copy or the Workshop copy runs.
-local DEV_VERSION = "1.0.4.1"
-local DEV_FOR_EFV = "1.0.4"
+local DEV_VERSION = "1.0.5.2"
+local DEV_FOR_EFV = "1.0.5"
 local m_ButtonIM = InstanceManager:new("DevButtonInstance", "Button", Controls.ButtonStack)
 local m_HeaderIM = InstanceManager:new("DevHeaderInstance", "Header", Controls.ButtonStack)
 local m_Targets = {}
@@ -127,6 +135,10 @@ local function SessionText()
 	local ok, st = pcall(function() return Game:GetProperty("EFV_DEV_SCN") end)
 	local elig = ok and type(st) == "table" and EligText(st.elig) or nil
 	if elig ~= nil then return elig end
+	-- VEF 1.0.5 test (P1 leaves F, C and CS empty)
+	if ok and type(st) == "table" and type(st.proxy) == "table" and st.proxy.b ~= nil then
+		return "Proxy test: B=" .. CivName(st.proxy.b) .. " E=" .. CivName(st.proxy.e) .. " X=" .. CivName(st.proxy.x)
+	end
 	if not ok or type(st) ~= "table" or st.ally == nil then
 		return "Final session: start a NEW game, then press S0"
 	end
@@ -170,9 +182,9 @@ local function RecordText(unit)
 	return s
 end
 
-local m_EligStatus = nil     -- short T1 / T2 result shown in the panel
+local m_EligStatus = nil     -- short T1 / T2 / denounce / air spike result shown in the panel
 
--- Title line: "VEF Dev 1.0.4.1 | VEF 1.0.4  (Ctrl+Shift+D)", or a warning
+-- Title line: "VEF Dev 1.0.4.3 | VEF 1.0.4  (Ctrl+Shift+D)", or a warning
 -- when the loaded VEF is not the build these tools are made for.
 local function TitleText()
 	local v = (EFV_Config ~= nil) and EFV_Config.VERSION or nil
@@ -200,6 +212,8 @@ local function RefreshInfo()
 	Controls.InfoLabel:SetText(s)
 	Controls.RecordLabel:SetText((m_EligStatus and (m_EligStatus .. " | ") or "") .. RecordText(unit))
 	Controls.TargetLabel:SetText(PlayerName(CurrentTarget()))
+	-- the status may take several lines (denounce probe): move the rows below it
+	pcall(function() Controls.MainStack:CalculateSize() end)
 end
 
 -- Target cycle -> player pid (after S0: B, so the diplomacy buttons act on B).
@@ -340,11 +354,14 @@ end
 -- command is UI only: UnitPromotionPopup.lua:70-72). Gameplay writes its
 -- scenario state to the Game property EFV_DEV_SCN; the UI only reads it.
 -- ---------------------------------------------------------------------------
+local m_Clock, m_FocusWait, m_Vet, VET_TIMEOUT, ScnState, UICheck, OwnUnit, LookAt, GoTo, Level
+local HasPromo, VetStart, VetStep
+do
 local SCN_PROP = "EFV_DEV_SCN"
-local m_Clock = 0
-local m_FocusWait = nil     -- { stamp, nextAt, untilClock } after a scenario button
-local m_Vet = nil           -- S6 route B state
-local VET_TIMEOUT = 10      -- seconds without a gameplay answer
+m_Clock = 0
+m_FocusWait = nil           -- { stamp, nextAt, untilClock } after a scenario button
+m_Vet = nil                 -- S6 route B state
+VET_TIMEOUT = 10            -- seconds without a gameplay answer
 local VET_PROMO_WAIT = 5    -- seconds for a PROMOTE command to land
 local ROUTE = {
 	A = "route A (XP to the threshold, then SetPromotion)",
@@ -352,19 +369,19 @@ local ROUTE = {
 	C = "route C (SetPromotion only: the current restore)",
 }
 
-local function ScnState()
+function ScnState()
 	local ok, st = pcall(function() return Game:GetProperty(SCN_PROP) end)
 	if ok and type(st) == "table" then return st end
 	return nil
 end
 
-local function UICheck(id, verdict, msg)
+function UICheck(id, verdict, msg)
 	local t = -1
 	pcall(function() t = Game.GetCurrentGameTurn() end)
 	print("[EFV][CHECK] " .. Str(id) .. " " .. Str(verdict) .. " T" .. Str(t) .. " " .. Str(msg))
 end
 
-local function OwnUnit(o, id)
+function OwnUnit(o, id)
 	o, id = tonumber(o), tonumber(id)
 	if o == nil or id == nil or Players[o] == nil then return nil end
 	local u = nil
@@ -373,7 +390,7 @@ local function OwnUnit(o, id)
 	return u
 end
 
-local function LookAt(f)
+function LookAt(f)
 	if type(f) ~= "table" or f.x == nil or f.y == nil or f.x < 0 then return false end
 	pcall(function() UI.LookAtPlot(f.x, f.y) end)
 	if f.o == LocalID() then
@@ -383,19 +400,19 @@ local function LookAt(f)
 	return true
 end
 
-local function GoTo()
+function GoTo()
 	local st = ScnState()
 	if not LookAt(st and st.focus) then Log("go to scenario: no scenario position yet") end
 end
 
-local function Level(u)
+function Level(u)
 	if u == nil then return nil end
 	local ok, l = pcall(function() return u:GetExperience():GetLevel() end)
 	if ok then return tonumber(l) end
 	return nil
 end
 
-local function HasPromo(u, row)
+function HasPromo(u, row)
 	local ok, has = pcall(function()
 		for _, idx in ipairs(u:GetExperience():GetPromotions()) do
 			if idx == row.Index then return true end
@@ -405,7 +422,7 @@ local function HasPromo(u, row)
 	return ok and has == true
 end
 
-local function VetStart()
+function VetStart()
 	local unit = UI.GetHeadSelectedUnit()
 	local p = BaseParams("scn_vet")
 	m_Vet = { stamp = p.stamp, phase = "wait", t0 = m_Clock, nextAt = m_Clock + 0.5, i = 1, origLevel = Level(unit) }
@@ -418,7 +435,7 @@ local function VetFinish(v)
 	v.nextAt = m_Clock + 1.0
 end
 
-local function VetStep()
+function VetStep()
 	local v = m_Vet
 	if m_Clock < v.nextAt then return end
 	v.nextAt = m_Clock + 0.4
@@ -488,6 +505,7 @@ local function VetStep()
 	end
 	m_Vet = nil
 end
+end -- Final session
 
 -- ---------------------------------------------------------------------------
 -- Workshop Shot buttons, UI side (workshop/SCREENSHOTS.md B3 / B4). Gameplay
@@ -504,17 +522,19 @@ end
 -- Every shot also looks at the plot again after 1 s (flag badges of units
 -- created and recorded in the same gameplay call, not proven yet).
 -- ---------------------------------------------------------------------------
-local SHOT_WAIT = 8
-local m_Shot = nil          -- { cmd, id, f, phase, nextAt, relookAt, untilClock }
-local SetOpen               -- forward (defined with the show / hide code below)
+local SHOT_WAIT, m_Shot, SetOpen, HideLaunch, DismissVefNotifications, ShotID, StartShot, ShotStep
+do
+SHOT_WAIT = 8
+m_Shot = nil                -- { cmd, id, f, phase, nextAt, relookAt, untilClock }
+-- SetOpen: forward, defined with the show / hide code below
 
-local function HideLaunch(hide)
+function HideLaunch(hide)
 	pcall(function() m_LaunchInst.LaunchItemButton:SetHide(hide) end)
 end
 
 -- Dismisses the local player's VEF notifications (every EFV_Config.NOTIF
 -- type; the EFV_Tracker SweepStale pattern). Returns the number dismissed.
-local function DismissVefNotifications()
+function DismissVefNotifications()
 	local localID = LocalID()
 	local hashes = {}
 	local notif = EFV_Config.NOTIF or {}
@@ -547,13 +567,13 @@ local function IsShotCmd(cmd)
 end
 
 -- S17 (scn_labels, EFV_Dev 1.0.3.2) runs the same way: it opens the tracker.
-local function ShotID(cmd)
+function ShotID(cmd)
 	if cmd == "scn_labels" then return "TRACKER_LABELS" end
 	if not IsShotCmd(cmd) then return "RECEIVE" end
 	return "SHOT" .. string.sub(Str(cmd), 5)
 end
 
-local function StartShot(cmd, f)
+function StartShot(cmd, f)
 	if type(f.zoom) == "number" then
 		local okG, before = pcall(function() return UI.GetMapZoom() end)
 		local ok, err = pcall(function() UI.SetMapZoom(f.zoom, 0.0, 0.0) end)
@@ -593,7 +613,7 @@ local function RazeCityShown()
 	return ok and shown == true
 end
 
-local function ShotStep()
+function ShotStep()
 	local s = m_Shot
 	if m_Clock < s.nextAt then return end
 	s.nextAt = m_Clock + 0.3
@@ -629,6 +649,7 @@ local function ShotStep()
 	end
 	if s.phase == "DONE" and s.relookAt == nil then m_Shot = nil end
 end
+end -- Workshop Shot buttons, UI side
 
 -- ---------------------------------------------------------------------------
 -- 0.7 re-test UI checks (EFV/TESTING_RETEST_0.7.md), polled every 0.5 s:
@@ -639,11 +660,13 @@ end
 --   LAPSE_TEXT         the first paused lapse of a local Volunteer record in
 --                      GRACE: the tracker state reads "Lapse: Grace N (paused)"
 -- ---------------------------------------------------------------------------
-local m_CheckAt = 0
+local m_CheckAt, VetLevelCheck, LapseTextCheck
+do
+m_CheckAt = 0
 local m_VetLevelDone = {}
 local m_LapseSeen = {}
 
-local function VetLevelCheck()
+function VetLevelCheck()
 	local st = ScnState()
 	local s = st and st.s12
 	if type(s) ~= "table" or s.uid == nil or st.me ~= LocalID() or m_VetLevelDone[s.uid] then return end
@@ -679,7 +702,7 @@ local function VetLevelCheck()
 	Send(BaseParams("scn_check"))
 end
 
-local function LapseTextCheck()
+function LapseTextCheck()
 	local ok, store = pcall(EFV_UI_ReadStore)
 	if not ok or type(store) ~= "table" then return end
 	local me = LocalID()
@@ -696,6 +719,7 @@ local function LapseTextCheck()
 		end
 	end
 end
+end -- 0.7 re-test UI checks
 
 -- ---------------------------------------------------------------------------
 -- VEF 1.0.3 session UI checks (EFV_Dev 1.0.3.2; EFV/TESTING_1.0.3.md),
@@ -713,6 +737,8 @@ end
 --                     S18 must offer B (the old owner is a city-state),
 --                     S19 must be greyed with ENTRUST_NO_PARTNER.
 -- ---------------------------------------------------------------------------
+local CurrentTurn, LabelsCheck, Listed, EntrustUICheck
+do
 local m_LabelsDone = {}
 local m_LabelsSince = {}
 local m_EntrustDone = {}
@@ -723,13 +749,13 @@ local function Plain(s)
 	return s
 end
 
-local function CurrentTurn()
+function CurrentTurn()
 	local t = -1
 	pcall(function() t = Game.GetCurrentGameTurn() end)
 	return tonumber(t) or -1
 end
 
-local function LabelsCheck()
+function LabelsCheck()
 	local st = ScnState()
 	local s = st and st.s17
 	if type(s) ~= "table" or s.stamp == nil or m_LabelsDone[s.stamp] or st.me ~= LocalID() then return end
@@ -780,7 +806,7 @@ local function LabelsCheck()
 		" rows as expected (received: Inbound, Departed; sent: Outbound, Returning)")
 end
 
-local function Listed(list, v)
+function Listed(list, v)
 	for _, x in ipairs(list or {}) do
 		if x == v then return true end
 	end
@@ -793,7 +819,7 @@ local function Names(ids)
 	return #out > 0 and table.concat(out, ", ") or "none"
 end
 
-local function EntrustUICheck()
+function EntrustUICheck()
 	local st = ScnState()
 	if st == nil or st.me ~= LocalID() or type(EFV_UI_EntrustState) ~= "function" then return end
 	for _, spec in ipairs({ { key = "s18", id = "ENTRUST_CS_UI" }, { key = "s19", id = "ENTRUST_MAJOR_UI" } }) do
@@ -828,6 +854,7 @@ local function EntrustUICheck()
 		end
 	end
 end
+end -- VEF 1.0.3 session UI checks
 
 -- ---------------------------------------------------------------------------
 -- V Veteran spike, UI side (EFV_Dev 1.0.3.2; gameplay: "V Veteran spike" in
@@ -856,6 +883,8 @@ end
 -- exp:GetPromotions() (UI only; Session A T09), u:GetMovesRemaining() /
 -- GetMaxMoves() / GetMaxDamage() / GetDamage() (PLAN A23, A25).
 -- ---------------------------------------------------------------------------
+local m_VS, VsStart, VsStep
+do
 local VS_WAIT_S = 3.0       -- first turn: no wanted promotion offered this long = the limit
 local VS_RESEND_S = 3.0
 local VS_TURNS = 3
@@ -865,7 +894,7 @@ local VS_METHOD = {
 	V2 = "V2 moves restored after each promotion",
 	V3 = "V3 level-adjust ability + SetPromotion + XP",
 }
-local m_VS = nil
+m_VS = nil
 
 local function VsNames(u)
 	local out = {}
@@ -931,7 +960,7 @@ local function VsPromote(u, row, k, attempt)
 		(ok and "" or (" err=" .. Str(err))) .. ")", u)
 end
 
-local function VsStart()
+function VsStart()
 	local civ = nil
 	pcall(function() civ = PlayerConfigurations[LocalID()]:GetCivilizationTypeName() end)
 	if civ == "CIVILIZATION_GRAN_COLOMBIA" then
@@ -1093,7 +1122,7 @@ local function VsCopy(v, vs, c, turn, newTurn)
 	end
 end
 
-local function VsStep()
+function VsStep()
 	local v = m_VS
 	if m_Clock < v.nextAt then return end
 	v.nextAt = m_Clock + 0.3
@@ -1129,6 +1158,7 @@ local function VsStep()
 		if not ok then Log("V spike " .. Str(c.k) .. " error: " .. Str(err)) end
 	end
 end
+end -- V Veteran spike, UI side
 
 -- ---------------------------------------------------------------------------
 -- Badge audit (EFV_Dev 0.7.2-dev.1, always on; 0.7.1 report "the Volunteer
@@ -1141,7 +1171,9 @@ end
 -- "[EFV][CHECK] BADGE_AUDIT PASS|FAIL": always at a turn start, after unit
 -- events only when the result changed or failed.
 -- ---------------------------------------------------------------------------
-local m_AuditDue = nil
+local m_AuditDue, OnAuditReport, ScheduleAudit, RunAudit
+do
+m_AuditDue = nil
 local m_AuditWhy = ""
 local m_AuditForce = false
 local m_AuditLast = nil
@@ -1152,7 +1184,7 @@ local function RowTag(r)
 		" " .. Str(r.ut)) or "none") .. (r.rid ~= nil and (", record " .. Str(r.rid) .. " " .. Str(r.rs) .. " " .. Str(r.rt)) or "") .. ")"
 end
 
-local function OnAuditReport(rows)
+function OnAuditReport(rows)
 	m_AuditReplied = true
 	local bad, ok = {}, 0
 	for _, r in ipairs(rows or {}) do
@@ -1179,7 +1211,7 @@ local function OnAuditReport(rows)
 	m_AuditForce = false
 end
 
-local function ScheduleAudit(why, force)
+function ScheduleAudit(why, force)
 	if m_AuditDue == nil then
 		m_AuditDue = m_Clock + 0.3
 		m_AuditWhy = why
@@ -1190,7 +1222,7 @@ local function ScheduleAudit(why, force)
 	end
 end
 
-local function RunAudit()
+function RunAudit()
 	m_AuditDue = nil
 	m_AuditReplied = false
 	LuaEvents.EFV_BadgeAuditRequest()
@@ -1199,6 +1231,7 @@ local function RunAudit()
 		m_AuditForce = false
 	end
 end
+end -- Badge audit
 
 -- ---------------------------------------------------------------------------
 -- Eligibility tests T1 / T2, UI side (EFV_Dev 1.0.1.3; T2 City-State lines
@@ -1210,8 +1243,10 @@ end
 -- HasOpenBordersFrom) and logs ELIG_Tn_UI lines in the same format, then
 -- shows a short status on the panel.
 -- ---------------------------------------------------------------------------
-local ELIG_UI_DELAY = 1.0
-local m_Elig = nil          -- { cmd, stamp, at }
+local ELIG_UI_DELAY, m_Elig, EligUI
+do
+ELIG_UI_DELAY = 1.0
+m_Elig = nil                -- { cmd, stamp, at }
 local ELIG_CODES = { NOT_PARTNER = true, VOL_NEEDS_ACCESS = true, CS_NOT_MET = true,
 	AT_WAR_WITH_RECIPIENT = true, NO_COMMON_WAR = true }
 
@@ -1241,7 +1276,7 @@ local function EligCompare(want, got)
 	return "FAIL"
 end
 
-local function EligUI(test, stamp)
+function EligUI(test, stamp)
 	local id = "ELIG_" .. test .. "_UI"
 	local st = ScnState()
 	local e = st and st.elig
@@ -1312,9 +1347,968 @@ local function EligUI(test, stamp)
 		(#bad > 0 and (" (UI: " .. table.concat(bad, ", ") .. ")") or "") ..
 		(e.skipped and ("; skipped " .. Str(e.skipped)) or "") .. "; details: Lua.log [EFV][CHECK] ELIG_" .. test
 end
+end -- Eligibility tests T1 / T2, UI side
+
+-- ---------------------------------------------------------------------------
+-- Denouncement reader spike, UI side (EFV_Dev 1.0.4.2; gameplay: the
+-- "Denouncement reader spike" block in EFV_Dev_Gameplay.lua, whose header
+-- has the sources; EFV/TESTING_SPIKES.md). READ ONLY.
+--   D Setup           stamped denounce_setup request; once gameplay answered
+--                     (st.dsetup, same stamp) the camera goes to the civ to
+--                     denounce, the Target is set to it and the status line
+--                     says which civ to denounce.
+--   D Denounce probe  stamped denounce_probe request; once gameplay answered
+--                     (st.dprobe, same stamp, or after SHOT_WAIT s without
+--                     an answer) the panel runs the SAME readers here, on the
+--                     same pairs, and logs "[EFV][Probe] UI ..." lines, one
+--                     "compare" line per reader (G and UI hits) and shows a
+--                     three-line summary in the status line.
+-- Keep DP_READERS equal to the gameplay table.
+-- ---------------------------------------------------------------------------
+local m_DP, DpMethod, DenounceProbe, DenounceSetup, DpStep
+do
+local DP_READERS = {
+	{ id = "GetDenounceTurn", short = "Turn", acc = "GetDiplomacy", fn = "GetDenounceTurn", kind = "turn" },
+	{ id = "IsDenouncing", short = "IsDen", acc = "GetDiplomacy", fn = "IsDenouncing", kind = "bool" },
+	{ id = "HasDenounced", short = "HasDen", acc = "GetDiplomacy", fn = "HasDenounced", kind = "bool" },
+	{ id = "AiDiplo:GetDiplomaticState", short = "AiState", acc = "GetAi_Diplomacy", fn = "GetDiplomaticState", kind = "state" },
+	{ id = "DiploAI:GetDiplomaticStateIndex", short = "StateIdx", acc = "GetDiplomaticAI", fn = "GetDiplomaticStateIndex", kind = "state" },
+	{ id = "AiDiplo:GetDiplomaticModifiers", short = "AiMods", acc = "GetAi_Diplomacy", fn = "GetDiplomaticModifiers", kind = "mods" },
+	{ id = "DiploAI:GetDiplomaticModifiers", short = "AIMods", acc = "GetDiplomaticAI", fn = "GetDiplomaticModifiers", kind = "mods" },
+}
+m_DP = nil                  -- { kind = "probe" | "setup", stamp, untilClock }
+
+local function DpPrint(msg)
+	print("[EFV][Probe] UI " .. Str(msg))
+end
+
+function DpMethod(obj, name)
+	if obj == nil then return nil, "object is nil" end
+	local ok, f = pcall(function() return obj[name] end)
+	if not ok then return nil, "lookup error " .. Str(f) end
+	if f == nil then return nil, "is nil" end
+	if type(f) ~= "function" then return nil, "is a " .. type(f) end
+	return f, nil
+end
+
+local function DpRead(r, a, b)
+	local pl = Players[a]
+	local get, why = DpMethod(pl, r.acc)
+	if get == nil then return "MISSING", "Player." .. r.acc .. " " .. why end
+	local ok, obj = pcall(get, pl)
+	if not ok then return "ERROR", r.acc .. "(): " .. Str(obj) end
+	if obj == nil then return "MISSING", r.acc .. "() returned nil" end
+	local f, why2 = DpMethod(obj, r.fn)
+	if f == nil then return "MISSING", r.acc .. "()." .. r.fn .. " " .. why2 end
+	if b == nil then return "OK", "function" end
+	local ok2, v = pcall(f, obj, b)
+	if not ok2 then return "ERROR", Str(v) end
+	return "OK", v
+end
+
+local function DpStates()
+	local s = { idx = {}, hash = {} }
+	pcall(function()
+		for row in GameInfo.DiplomaticStates() do
+			s.idx[row.Index] = row.StateType
+			s.hash[row.Hash] = row.StateType
+		end
+	end)
+	return s
+end
+
+local function DpFormat(r, v, states)
+	local t = type(v)
+	if r.kind == "turn" then
+		return Str(v) .. (t ~= "number" and (" (" .. t .. ")") or ""), t == "number" and v >= 0
+	elseif r.kind == "bool" then
+		return Str(v) .. (t ~= "boolean" and (" (" .. t .. ")") or ""), v == true
+	elseif r.kind == "state" then
+		local names, hit = {}, false
+		if t == "number" then
+			if states.idx[v] ~= nil then names[#names + 1] = "index " .. states.idx[v] end
+			if states.hash[v] ~= nil then names[#names + 1] = "hash " .. states.hash[v] end
+		end
+		for _, n in ipairs(names) do
+			if string.find(n, "DIPLO_STATE_DENOUNCED", 1, true) then hit = true end
+		end
+		if t == "string" and string.find(string.upper(v), "DENOUNC", 1, true) then hit = true end
+		return Str(v) .. " (" .. t .. (#names > 0 and ("; " .. table.concat(names, ", ")) or "") .. ")", hit
+	end
+	if t ~= "table" then return Str(v) .. " (" .. t .. ")", false end
+	local n, found = 0, {}
+	for _, m in ipairs(v) do
+		n = n + 1
+		local text, score = Str(m), nil
+		if type(m) == "table" then text, score = Str(m.Text), m.Score end
+		-- the raw text (a LOC key) only: a translated text would differ between
+		-- clients, and gameplay stores the hits in a synced property
+		if string.find(string.lower(text), "denounc", 1, true) then
+			found[#found + 1] = Str(score) .. " " .. text
+		end
+	end
+	return n .. " modifier(s)" .. (#found > 0 and ("; denounce: " .. table.concat(found, " / ")) or "; none about a denouncement"), #found > 0
+end
+
+local function DpLimit()
+	local get, why = DpMethod(Game, "GetGameDiplomacy")
+	if get == nil then return "MISSING (Game.GetGameDiplomacy " .. why .. ")" end
+	local ok, gd = pcall(get)
+	if not ok or gd == nil then return (ok and "MISSING" or "ERROR") .. " (GetGameDiplomacy(): " .. Str(gd) .. ")" end
+	local f, why2 = DpMethod(gd, "GetDenounceTimeLimit")
+	if f == nil then return "MISSING (GetDenounceTimeLimit " .. why2 .. ")" end
+	local ok2, v = pcall(f, gd)
+	if not ok2 then return "ERROR " .. Str(v) end
+	return Str(v)
+end
+
+-- Same as gameplay's DpRun: every reader for (me, b) and (b, me).
+local function DpRun(me, pids)
+	local states = DpStates()
+	local names = {}
+	for _, b in ipairs(pids) do names[#names + 1] = PlayerName(b) end
+	DpPrint("T" .. Str(CurrentTurn()) .. " begin: you " .. PlayerName(me) .. "; majors (" .. #pids .. "): " ..
+		(#names > 0 and table.concat(names, ", ") or "none"))
+	local limit = DpLimit()
+	DpPrint("GetDenounceTimeLimit()=" .. limit)
+	local res = {}
+	for i, r in ipairs(DP_READERS) do
+		local hs, hv = DpRead(r, me, nil)
+		DpPrint("has " .. r.acc .. "():" .. r.fn .. " = " .. (hs == "OK" and "yes" or (hs .. " (" .. Str(hv) .. ")")))
+		local n, okN, missN, errN, hits = 0, 0, 0, 0, {}
+		for _, b in ipairs(pids) do
+			for _, d in ipairs({ { me, b }, { b, me } }) do
+				local a, o = d[1], d[2]
+				local s, v = DpRead(r, a, o)
+				n = n + 1
+				local text
+				if s == "OK" then
+					okN = okN + 1
+					local okF, t, hit = pcall(DpFormat, r, v, states)
+					if not okF then t, hit = Str(v) .. " (format error " .. Str(t) .. ")", false end
+					text = t
+					if hit then hits[#hits + 1] = a .. ">" .. o .. (r.kind == "turn" and ("=" .. Str(v)) or "") end
+				else
+					if s == "MISSING" then missN = missN + 1 else errN = errN + 1 end
+					text = s .. " (" .. Str(v) .. ")"
+				end
+				DpPrint(r.id .. "(" .. a .. "->" .. o .. ")=" .. text)
+			end
+		end
+		local st = "mixed"
+		if n == 0 then st = "none" elseif okN == n then st = "ok" elseif missN == n then st = "nil" elseif errN == n then st = "err" end
+		res[i] = { s = st, hits = (#hits > 0) and table.concat(hits, " ") or "-" }
+	end
+	return res, limit
+end
+
+local function DpRow(label, res)
+	local parts = {}
+	for i, r in ipairs(DP_READERS) do
+		local x = res and res[i]
+		parts[#parts + 1] = r.short .. " " .. (x and (Str(x.s) .. " " .. Str(x.hits)) or "?")
+	end
+	return label .. ": " .. table.concat(parts, " | ")
+end
+
+-- The UI half of the probe, after gameplay's answer g (nil: none came).
+local function DpUI(g)
+	local me = (g and tonumber(g.me)) or LocalID()
+	local pids = {}
+	if g ~= nil then
+		for _, pid in ipairs(g.pids or {}) do pids[#pids + 1] = pid end
+	else
+		-- No gameplay answer: every other living major (HasMet is not probed here).
+		for i = 0, 63 do
+			local okM, major = pcall(function() return Players[i] ~= nil and Players[i]:IsAlive() and Players[i]:IsMajor() end)
+			if i ~= me and okM and major then pids[#pids + 1] = i end
+		end
+	end
+	local res, limit = DpRun(me, pids)
+	local diff = 0
+	for i, r in ipairs(DP_READERS) do
+		local gr = g and g.r and g.r[i]
+		local same = gr ~= nil and gr.s == res[i].s and gr.hits == res[i].hits
+		if gr ~= nil and not same then diff = diff + 1 end
+		DpPrint("compare " .. r.id .. ": G " .. (gr and (Str(gr.s) .. " [" .. Str(gr.hits) .. "]") or "no answer") .. " | UI " ..
+			res[i].s .. " [" .. res[i].hits .. "]" .. (gr == nil and "" or (same and " -> same" or " -> DIFFERENT")))
+	end
+	local head = "Denounce probe T" .. CurrentTurn() .. ", you vs " .. #pids .. " major(s); limit G " .. Str(g and g.limit or "no answer") ..
+		" / UI " .. limit .. "; " .. (g and (diff == 0 and "G = UI" or (diff .. " reader(s) differ")) or "no gameplay answer")
+	DpPrint("summary: " .. head)
+	DpPrint(DpRow("G", g and g.r))
+	DpPrint(DpRow("UI", res))
+	m_EligStatus = head .. "[NEWLINE]" .. (g and DpRow("G", g.r) or "G: no answer from gameplay (see Lua.log)") .. "[NEWLINE]" .. DpRow("UI", res)
+end
+
+local function DpStart(cmd, kind)
+	local p = BaseParams(cmd)
+	m_DP = { kind = kind, stamp = p.stamp, untilClock = m_Clock + SHOT_WAIT }
+	m_EligStatus = (kind == "probe" and "Denounce probe" or "D Setup") .. ": waiting for gameplay..."
+	Send(p)
+	RefreshInfo()
+end
+
+function DenounceProbe() DpStart("denounce_probe", "probe") end
+function DenounceSetup() DpStart("denounce_setup", "setup") end
+
+function DpStep()
+	local d = m_DP
+	local st = ScnState()
+	local a = st and st[d.kind == "probe" and "dprobe" or "dsetup"]
+	local answered = type(a) == "table" and a.stamp == d.stamp
+	if not answered and m_Clock <= d.untilClock then return end
+	m_DP = nil
+	if d.kind == "setup" then
+		if answered then
+			local x = tonumber(a.x) or -1
+			if x < 0 then
+				m_EligStatus = "D Setup: no major civ you could denounce (all at war with you, allied, friends or without a city): start a new game"
+			else
+				m_EligStatus = "D Setup: denounce " .. PlayerName(x) .. " (Target set to it): Diplomacy screen, its leader, Denounce. Met " ..
+					((tonumber(a.met) == 1) and "yes" or "NO") .. ", capital revealed " .. Str(a.revealed)
+			end
+			local f = st.focus
+			if type(f) == "table" and f.stamp == d.stamp then LookAt(f) end
+			if (tonumber(a.x) or -1) >= 0 then TargetTo(tonumber(a.x)) end
+		else
+			m_EligStatus = "D Setup: no answer from gameplay (see Lua.log)"
+		end
+	else
+		DpUI(answered and a or nil)
+	end
+	RefreshInfo()
+end
+end -- Denouncement reader spike, UI side
+
+-- ---------------------------------------------------------------------------
+-- Air-unit spike, UI side (EFV_Dev 1.0.4.3; gameplay: the "Air-unit spike"
+-- block in EFV_Dev_Gameplay.lua; EFV/TESTING_SPIKES.md). Each A button
+-- sends a stamped request. Once gameplay answered (st.air.ans, same stamp,
+-- or after SHOT_WAIT s) the camera goes to the scene and selects your plane,
+-- and the status line shows gameplay's summary plus what the UI sees:
+--   based    the plane is in plot:GetAirUnits() or in its district's
+--            GetAirUnits() list (UnitFlagManager.lua:1420-1446,
+--            CityBannerManager.lua:367-368, CityManager.GetDistrictAt(plot))
+--   ops      UnitManager.CanStartOperation(u, hash, nil, false, false) for
+--            DEPLOY / REBASE as the unit panel asks (UnitPanel.lua:546-615)
+--            and the REBASE targets (WorldInput.lua:2499)
+--   carrier  unit:GetAirSlots() / GetAirUnits() (UnitFlagManager.lua:399-414)
+-- All looked up by name and pcall-guarded. "[EFV][Air] UI ..." lines.
+-- ---------------------------------------------------------------------------
+local m_Air, AirStep, AirCity, AirHost, AirFuel, AirAlly, AirCarrier, AirStatus, AirRebase
+do
+m_Air = nil                  -- { cmd, label, stamp, untilClock }
+
+local function AirPrint(msg)
+	print("[EFV][Air] UI " .. Str(msg))
+end
+
+local function AirCall(obj, name, static, ...)
+	local f, why = DpMethod(obj, name)
+	if f == nil then return "MISSING", name .. " " .. Str(why) end
+	local args, n = { ... }, select("#", ...)
+	local r
+	if static then r = { pcall(f, unpack(args, 1, n)) } else r = { pcall(f, obj, unpack(args, 1, n)) } end
+	if not r[1] then return "ERROR", Str(r[2]) end
+	return "OK", r[2], r[3]
+end
+
+local function AirOp(t)
+	local ok, h = pcall(function() return GameInfo.UnitOperations[t].Hash end)
+	return ok and h or nil
+end
+
+local function AirCount(list) return (type(list) == "table") and #list or 0 end
+
+local function AirHas(list, u)
+	if type(list) ~= "table" or u == nil then return false end
+	for _, x in ipairs(list) do
+		local ok, same = pcall(function() return x:GetOwner() == u:GetOwner() and x:GetID() == u:GetID() end)
+		if ok and same then return true end
+	end
+	return false
+end
+
+-- Your spike unit with key k (from gameplay's list), type-checked.
+local function AirUnit(st, k)
+	local a = st and st.air
+	local list = (type(a) == "table" and type(a.units) == "table") and a.units or {}
+	for _, e in ipairs(list) do
+		if e.k == k then
+			local u = OwnUnit(e.o, e.u)
+			local ok, t = pcall(function() return GameInfo.Units[u:GetType()].UnitType end)
+			if ok and t == e.t then return u end
+			return nil
+		end
+	end
+	return nil
+end
+
+-- Is u based (listed by its plot or its district)? Logs the readers.
+local function AirUIBase(label, u)
+	if u == nil then return label .. " not on the map" end
+	local x, y = u:GetX(), u:GetY()
+	local plot = Map.GetPlot(x, y)
+	local s1, plist = AirCall(plot, "GetAirUnits")
+	local sD, d = AirCall(CityManager, "GetDistrictAt", true, plot)
+	if sD ~= "OK" then d = nil end
+	local s2, slots = AirCall(d, "GetAirSlots")
+	local s3, _, dlist = AirCall(d, "GetAirUnits")
+	local based = AirHas(plist, u) or AirHas(dlist, u)
+	local slotText = (s2 == "OK") and Str(slots) or s2
+	AirPrint(label .. " @" .. x .. "," .. y .. ": plot:GetAirUnits=" .. ((s1 == "OK") and AirCount(plist) or s1) ..
+		", district:GetAirSlots=" .. slotText .. ", district:GetAirUnits=" .. ((s3 == "OK") and AirCount(dlist) or s3) ..
+		", based=" .. tostring(based))
+	return label .. " based " .. (based and "yes" or "no") .. " (slots " .. slotText .. ", listed " ..
+		math.max(AirCount(plist), AirCount(dlist)) .. ")"
+end
+
+local function AirRebasePlots(u)
+	local s, r = AirCall(UnitManager, "GetOperationTargets", true, u, AirOp("UNITOPERATION_REBASE"))
+	if s ~= "OK" or type(r) ~= "table" then return nil end
+	local ok, plots = pcall(function() return r[UnitOperationResults.PLOTS] end)
+	if ok and type(plots) == "table" then return plots end
+	return nil
+end
+
+-- Deploy / Rebase as the unit panel offers them, and the rebase targets.
+local function AirUIOps(label, u)
+	if u == nil then return label .. " not on the map" end
+	local out = {}
+	for _, op in ipairs({ { "Deploy", "UNITOPERATION_DEPLOY" }, { "Rebase", "UNITOPERATION_REBASE" } }) do
+		local s, v = AirCall(UnitManager, "CanStartOperation", true, u, AirOp(op[2]), nil, false, false)
+		AirPrint(label .. " CanStartOperation(" .. op[2] .. ")=" .. ((s == "OK") and Str(v) or (s .. " " .. Str(v))) ..
+			" moves=" .. Str(u:GetMovesRemaining()))
+		out[#out + 1] = op[1] .. " " .. ((s == "OK") and (v and "yes" or "no") or s)
+	end
+	local plots = AirRebasePlots(u)
+	out[#out + 1] = "rebase targets " .. (plots and #plots or "?")
+	return label .. " " .. table.concat(out, ", "), plots
+end
+
+local function AirUI(cmd, st, me)
+	if cmd == "air_city" then
+		local u1 = AirUnit(st, "AIR-1")
+		local ops = AirUIOps("AIR-1", u1)
+		return AirUIBase("AIR-1", u1) .. "; " .. ops .. "; " .. AirUIBase("AIR-2", AirUnit(st, "AIR-2"))
+	elseif cmd == "air_host" then
+		-- B's plane is not yours: look it up by owner and ID as well
+		local a = st and st.air
+		local e = nil
+		for _, x in ipairs((type(a) == "table" and type(a.units) == "table") and a.units or {}) do if x.k == "AIR-B" then e = x end end
+		return AirUIBase("AIR-B", e and OwnUnit(e.o, e.u) or nil)
+	elseif cmd == "air_fuel" then
+		local u = AirUnit(st, "AIR-1")
+		if u == nil then return "AIR-1 not on the map" end
+		local _, c = AirCall(u, "GetCombat")
+		local _, r = AirCall(u, "GetRangedCombat")
+		local al = "?"
+		pcall(function() al = Players[me]:GetResources():GetResourceAmount(GameInfo.Resources["RESOURCE_ALUMINUM"].Index) end)
+		AirPrint("AIR-1 damage " .. Str(u:GetDamage()) .. " GetCombat=" .. Str(c) .. " GetRangedCombat=" .. Str(r) .. " Aluminium=" .. Str(al))
+		return "AIR-1 damage " .. Str(u:GetDamage()) .. ", strength " .. Str(c) .. "/" .. Str(r) .. ", Aluminium " .. Str(al)
+	elseif cmd == "air_ally" then
+		local uV = AirUnit(st, "AIR-V")
+		local opsV = AirUIOps("AIR-V", uV)
+		local reach = "?"
+		local _, plots = AirUIOps("AIR-1", AirUnit(st, "AIR-1"))
+		local capF = nil
+		pcall(function() capF = Players[st.friend]:GetCities():GetCapitalCity() end)
+		if plots ~= nil and capF ~= nil then
+			local idx = Map.GetPlot(capF:GetX(), capF:GetY()):GetIndex()
+			reach = "no"
+			for _, i in ipairs(plots) do if i == idx then reach = "yes" end end
+		end
+		return AirUIBase("AIR-V", uV) .. "; " .. opsV .. "; AIR-1 may rebase to F's capital: " .. reach
+	elseif cmd == "air_carrier" then
+		local cv = AirUnit(st, "CV")
+		local text = "carrier not on the map"
+		if cv ~= nil then
+			local s1, slots = AirCall(cv, "GetAirSlots")
+			local s2, has, list = AirCall(cv, "GetAirUnits")
+			AirPrint("CV GetAirSlots=" .. ((s1 == "OK") and Str(slots) or s1) .. " GetAirUnits=" .. ((s2 == "OK") and (Str(has) .. " #" .. AirCount(list)) or s2))
+			text = "carrier aboard " .. ((s2 == "OK") and AirCount(list) or s2) .. " of " .. ((s1 == "OK") and Str(slots) or s1) .. " slots"
+		end
+		return text .. "; " .. AirUIBase("AIR-CV", AirUnit(st, "AIR-CV"))
+	elseif cmd == "air_rebase" then
+		-- A9 (EFV_Dev 1.0.5.1): a plane rebased by hand onto the carrier
+		local cv = AirUnit(st, "CV9")
+		local text = "carrier not on the map"
+		local rule = "no carrier"
+		if cv ~= nil then
+			local s1, slots = AirCall(cv, "GetAirSlots")
+			local s2, has, list = AirCall(cv, "GetAirUnits")
+			AirPrint("CV9 GetAirSlots=" .. ((s1 == "OK") and Str(slots) or s1) .. " GetAirUnits=" .. ((s2 == "OK") and (Str(has) .. " #" .. AirCount(list)) or s2))
+			text = "carrier aboard " .. ((s2 == "OK") and AirCount(list) or s2) .. " of " .. ((s1 == "OK") and Str(slots) or s1) .. " slots"
+			local okR, codes = pcall(EFV_UnitSendReasons, cv, me, EFV_UI_ReadStore())
+			rule = (not okR) and ("error " .. Str(codes)) or ((#codes == 0) and "ok" or table.concat(codes, "+"))
+		end
+		return text .. "; " .. AirUIBase("AIR-9", AirUnit(st, "AIR-9")) .. "; UI send rule " .. rule
+	end
+	local parts = {}
+	for _, k in ipairs({ "AIR-1", "AIR-2", "AIR-3", "AIR-V", "AIR-CV" }) do
+		local u = AirUnit(st, k)
+		if u ~= nil then parts[#parts + 1] = AirUIBase(k, u) end
+	end
+	return (#parts > 0) and table.concat(parts, "; ") or "none of your spike planes on the map"
+end
+
+local function AirStart(cmd, label)
+	local p = BaseParams(cmd)
+	m_Air = { cmd = cmd, label = label, stamp = p.stamp, untilClock = m_Clock + SHOT_WAIT }
+	m_EligStatus = label .. ": waiting for gameplay..."
+	Send(p)
+	RefreshInfo()
+end
+
+function AirStep()
+	local m = m_Air
+	local st = ScnState()
+	local ans = (st ~= nil and type(st.air) == "table") and st.air.ans or nil
+	local answered = type(ans) == "table" and ans.stamp == m.stamp
+	if not answered and m_Clock <= m.untilClock then return end
+	m_Air = nil
+	if not answered then
+		m_EligStatus = m.label .. ": no answer from gameplay (press S0 first; see Lua.log)"
+		RefreshInfo()
+		return
+	end
+	local f = st.focus
+	if type(f) == "table" and f.stamp == m.stamp then LookAt(f) end
+	local ok, ui = pcall(AirUI, m.cmd, st, LocalID())
+	if not ok then ui = "error " .. Str(ui) end
+	AirPrint("summary " .. m.cmd .. ": " .. Str(ui))
+	m_EligStatus = Str(ans.text) .. "[NEWLINE]UI: " .. Str(ui)
+	RefreshInfo()
+end
+
+function AirCity() AirStart("air_city", "A1") end
+function AirHost() AirStart("air_host", "A2") end
+function AirFuel() AirStart("air_fuel", "A3") end
+function AirAlly() AirStart("air_ally", "A4") end
+function AirCarrier() AirStart("air_carrier", "A5") end
+function AirStatus() AirStart("air_status", "A Status") end
+function AirRebase() AirStart("air_rebase", "A9") end
+end -- Air-unit spike, UI side
+
+-- ---------------------------------------------------------------------------
+-- Corps spike, UI side (EFV_Dev 1.0.4.4, C8-C10 and the merge trace 1.0.4.5; gameplay: the "Corps spike" block
+-- in EFV_Dev_Gameplay.lua; EFV/TESTING_SPIKES.md). Each C button sends a
+-- stamped request. Once gameplay answered (st.corps.ans, same stamp) the
+-- panel moves the camera there and shows the answer, then "UI:" with the
+-- formation and strength of that button's units as the screen side reads
+-- them (GetMilitaryFormation, GetCombat: UnitPanel.lua).
+-- Merge-confirmation research (FIXPLAN_corps.md "Designer rulings"): the
+-- base game has no confirm prompt for Form Corps / Form Army (the world
+-- click calls RequestCommand at once, WorldInput.lua:2870-2888 and
+-- 2940-2955). The hook a VEF warning could use is the mode change itself:
+-- when you enter Form Corps or Form Army mode (Events.InterfaceModeChanged,
+-- WorldInput.lua:3819-3820), the panel logs the selected unit, which gives
+-- the command, and the units it can merge with
+-- (UnitManager.GetCommandTargets, WorldInput.lua:2900), each with its VEF
+-- record, and shows it on the status line. Read only, pcall-guarded.
+-- "[EFV][Corps] UI ..." lines.
+-- ---------------------------------------------------------------------------
+local CorpsUI = {}
+do
+local C_PREFIX = { corps_probe = "C1", corps_give = "C2", corps_merge = "C3", corps_cs_ai = "C4", corps_cs_force = "C5",
+	corps_host = "C6", corps_trip = "C7", corps_split = "C8", corps_vol = "C9" }
+local m_C = nil              -- { cmd, label, stamp, untilClock }
+local m_Guard = "off"        -- C10 merge guard: off / ask / block (UI only)
+local GUARD_NEXT = { off = "ask", ask = "block", block = "off" }
+
+local function CPrint(msg) print("[EFV][Corps] UI " .. Str(msg)) end
+
+local function FName(f)
+	local M = MilitaryFormationTypes or {}
+	if f == M.STANDARD_FORMATION then return "STANDARD" end
+	if f == M.CORPS_FORMATION then return "CORPS" end
+	if f == M.ARMY_FORMATION then return "ARMY" end
+	return "value " .. Str(f)
+end
+
+-- obj:name() looked up by name (not confirmed in the UI): the value as
+-- text, or MISSING / ERROR.
+local function UGet(obj, name)
+	local ok, f = pcall(function() return obj[name] end)
+	if not ok or type(f) ~= "function" then return "MISSING" end
+	local ok2, v = pcall(f, obj)
+	return ok2 and Str(v) or "ERROR"
+end
+
+-- "<key> <formation> strength <n>" for the C units with that key prefix.
+local function UIFacts(st, prefix)
+	local c = st and st.corps
+	local parts = {}
+	for _, e in ipairs((type(c) == "table" and type(c.units) == "table") and c.units or {}) do
+		if prefix == nil or string.sub(e.k, 1, #prefix) == prefix then
+			local u = OwnUnit(e.o, e.u)
+			if u ~= nil then
+				local f, s = "?", UGet(u, "GetCombat")
+				pcall(function() f = FName(u:GetMilitaryFormation()) end)
+				parts[#parts + 1] = e.k .. " " .. f .. " strength " .. s
+			else
+				parts[#parts + 1] = e.k .. " gone"
+			end
+		end
+	end
+	return (#parts > 0) and table.concat(parts, ", ") or "no C units"
+end
+
+local function UName(u)
+	local n = nil
+	pcall(function() n = UGet(u:GetExperience(), "GetVeteranName") end)
+	if n == nil or n == "" or n == "MISSING" or n == "ERROR" then pcall(function() n = GameInfo.Units[u:GetType()].UnitType end) end
+	return Str(n) .. " P" .. Str(u:GetOwner()) .. "/" .. Str(u:GetID())
+end
+
+local function LentText(u)
+	local ok, rec = pcall(function() return EFV_UI_RecordForUnit(u:GetOwner(), u:GetID()) end)
+	if not ok or type(rec) ~= "table" then return "not lent" end
+	return "lent: record " .. Str(rec.id) .. " " .. Str(rec.forceType) .. " from P" .. Str(rec.senderID)
+end
+
+-- Events.InterfaceModeChanged(old, new): Form Corps / Form Army entered.
+function CorpsUI.Mode(_, new)
+	local IM = InterfaceModeTypes or {}
+	if new == nil or (new ~= IM.FORM_CORPS and new ~= IM.FORM_ARMY) then return end
+	local kind = (new == IM.FORM_CORPS) and "FORM_CORPS" or "FORM_ARMY"
+	local sel = nil
+	pcall(function() sel = UI.GetHeadSelectedUnit() end)
+	if sel == nil then CPrint(kind .. " mode: no selected unit"); return end
+	local targets, guarded = {}, { sel }
+	local ok, err = pcall(function()
+		local cmd = (kind == "FORM_CORPS") and UnitCommandTypes.FORM_CORPS or UnitCommandTypes.FORM_ARMY
+		local res = UnitManager.GetCommandTargets(sel, cmd)
+		for _, t in ipairs((res and res[UnitCommandResults.UNITS]) or {}) do
+			local u = OwnUnit(sel:GetOwner(), t.id)
+			if u ~= nil then
+				targets[#targets + 1] = UName(u) .. " (" .. LentText(u) .. ")"
+				guarded[#guarded + 1] = u
+			end
+		end
+	end)
+	local text = kind .. " mode: selected " .. UName(sel) .. " (" .. LentText(sel) .. "; it gives the command), can merge with: " ..
+		((#targets > 0) and table.concat(targets, "; ") or (ok and "none" or ("ERROR " .. Str(err))))
+	CPrint(text)
+	m_EligStatus = text
+	if m_Guard ~= "off" then
+		local okG, g = pcall(CorpsUI.GuardAsk, kind, sel, guarded)
+		if not okG then CPrint("guard ERROR " .. Str(g)) elseif g ~= nil then m_EligStatus = text .. "[NEWLINE]" .. g end
+	end
+	RefreshInfo()
+end
+
+-- C10 merge guard (EFV_Dev 1.0.4.5; FIXPLAN_corps.md R2.1 "UI guard", R2.7).
+-- UI only, sends nothing. ask: on entering Form Corps / Form Army (Mode
+-- above), when the selected unit or a merge target has a VEF record, a
+-- PopupDialogInGame "EFV_DevMergeGuard" lists them with Continue / Cancel;
+-- Cancel = UI.SetInterfaceMode(SELECTION) (UnitPanel.lua:2498-2509), then
+-- the mode is read back. block: ask, plus the panel's input handler
+-- swallows LButtonUp in Form Corps / Form Army mode when the plot under
+-- the cursor (UI.GetCursorPlotID, WorldInput.lua:798) holds a unit with a
+-- VEF record. Whether WorldInput gets the click first is what C10 asks.
+
+-- "name (lent by P<n>)" / "name (Volunteer)" for a unit with a VEF record.
+local function GuardLabel(u)
+	local ok, rec = pcall(function() return EFV_UI_RecordForUnit(u:GetOwner(), u:GetID()) end)
+	if not ok or type(rec) ~= "table" then return nil end
+	if rec.forceType == EFV_Config.FT_VOL then return UName(u) .. " (Volunteer, record " .. Str(rec.id) .. ")" end
+	return UName(u) .. " (lent by P" .. Str(rec.senderID) .. ", record " .. Str(rec.id) .. ")"
+end
+
+local function ModeName(m)
+	local IM = InterfaceModeTypes or {}
+	if m == IM.SELECTION then return "SELECTION" end
+	if m == IM.FORM_CORPS then return "FORM_CORPS" end
+	if m == IM.FORM_ARMY then return "FORM_ARMY" end
+	return "value " .. Str(m)
+end
+
+function CorpsUI.Guard()
+	m_Guard = GUARD_NEXT[m_Guard] or "off"
+	CPrint("guard mode " .. m_Guard)
+	local what = { off = "no popup, no block", ask = "a popup when you enter Form Corps / Form Army with a VEF unit involved",
+		block = "the popup, and a click on a VEF unit in Form Corps / Form Army is swallowed" }
+	m_EligStatus = "C10 merge guard: " .. m_Guard .. " (" .. what[m_Guard] .. ")"
+	RefreshInfo()
+end
+
+-- Opens the guard popup for the VEF units among units (sel first). Returns
+-- the status text.
+function CorpsUI.GuardAsk(kind, sel, units)
+	local list = {}
+	for _, u in ipairs(units) do
+		local l = GuardLabel(u)
+		if l ~= nil then list[#list + 1] = l end
+	end
+	if #list == 0 then
+		CPrint("guard " .. m_Guard .. " " .. kind .. ": no VEF unit involved, no popup")
+		return "C10 guard " .. m_Guard .. ": no VEF unit involved, no popup"
+	end
+	if PopupDialogInGame == nil then pcall(include, "PopupDialog") end
+	local ok, err = pcall(function()
+		local d = PopupDialogInGame:new("EFV_DevMergeGuard")
+		d:AddTitle("VEF Dev C10: merge guard")
+		d:AddText(kind .. " with VEF units:[NEWLINE]" .. table.concat(list, "[NEWLINE]") ..
+			"[NEWLINE]You selected " .. UName(sel) .. ". Continue or Cancel?")
+		d:AddConfirmButton("Continue", function()
+			CPrint("guard " .. kind .. " Continue")
+			m_EligStatus = "C10 Continue: click the unit to merge with" .. ((m_Guard == "block") and " (block mode: a VEF unit's click is swallowed)" or "")
+			RefreshInfo()
+		end)
+		d:AddCancelButton("Cancel", function()
+			local okS, errS = pcall(function() UI.SetInterfaceMode(InterfaceModeTypes.SELECTION) end)
+			local back = "ERROR"
+			pcall(function() back = ModeName(UI.GetInterfaceMode()) end)
+			CPrint("guard " .. kind .. " Cancel: SetInterfaceMode(SELECTION) ok=" .. tostring(okS) .. (okS and "" or (" err=" .. Str(errS))) ..
+				", mode now " .. back)
+			m_EligStatus = "C10 Cancel: mode now " .. back
+			RefreshInfo()
+		end)
+		d:Open()
+	end)
+	if not ok then
+		CPrint("guard popup ERROR " .. Str(err))
+		return "C10 guard: popup ERROR " .. Str(err)
+	end
+	CPrint("guard " .. m_Guard .. " " .. kind .. ": popup for " .. table.concat(list, "; "))
+	return "C10 guard " .. m_Guard .. ": popup for " .. table.concat(list, "; ")
+end
+
+-- Block mode: true swallows the click (the panel's input handler).
+function CorpsUI.Input(pInput)
+	if m_Guard ~= "block" or MouseEvents == nil then return false end
+	if pInput:GetMessageType() ~= MouseEvents.LButtonUp then return false end
+	local IM = InterfaceModeTypes or {}
+	local mode = UI.GetInterfaceMode()
+	if mode == nil or (mode ~= IM.FORM_CORPS and mode ~= IM.FORM_ARMY) then return false end
+	local plot = Map.GetPlotByIndex(UI.GetCursorPlotID())
+	if plot == nil then return false end
+	local where = Str(plot:GetX()) .. "," .. Str(plot:GetY())
+	local hit = nil
+	for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+		if hit == nil then hit = GuardLabel(u) end
+	end
+	if hit == nil then
+		CPrint("guard block " .. ModeName(mode) .. ": click at " .. where .. " passes (no VEF unit)")
+		return false
+	end
+	CPrint("guard click blocked at " .. where .. " in " .. ModeName(mode) .. " (" .. hit .. ")")
+	m_EligStatus = "C10: click blocked at " .. where .. " (" .. hit .. "). Esc leaves the mode"
+	RefreshInfo()
+	return true
+end
+
+-- Merge trace, UI side (armed by C3 / C9 press 1 for that turn,
+-- st.corps.trace): Events.UnitFormCorps / UnitFormArmy (playerID, unitID;
+-- UnitFlagManager.lua:1825) and UnitRemovedFromMap (playerID, unitID;
+-- UnitFlagManager.lua:1100) about a C3 / C9 unit log every C3 / C9 unit as
+-- the screen side reads it (FindID, formation, XP). Read only.
+function CorpsUI.Trace(evName, pid, uid)
+	local st = ScnState()
+	local c = st and st.corps
+	if type(c) ~= "table" or type(c.units) ~= "table" then return end
+	local turn = -1
+	pcall(function() turn = Game.GetCurrentGameTurn() end)
+	if tonumber(c.trace) ~= turn then return end
+	local hit, parts = nil, {}
+	for _, e in ipairs(c.units) do
+		local pre = string.sub(Str(e.k), 1, 2)
+		if pre == "C3" or pre == "C9" then
+			if tonumber(e.o) == pid and tonumber(e.u) == uid then hit = e.k end
+			local u = OwnUnit(e.o, e.u)
+			local t = "FindID nil"
+			if u ~= nil then
+				local f, xp = "?", "?"
+				pcall(function() f = FName(u:GetMilitaryFormation()) end)
+				pcall(function() xp = Str(u:GetExperience():GetExperiencePoints()) end)
+				t = "alive " .. f .. " xp " .. xp
+			end
+			parts[#parts + 1] = Str(e.k) .. " P" .. Str(e.o) .. "/" .. Str(e.u) .. " " .. t
+		end
+	end
+	if hit == nil then return end
+	CPrint("trace " .. evName .. " P" .. Str(pid) .. "/" .. Str(uid) .. " (" .. hit .. "): " .. table.concat(parts, "; "))
+end
+
+function CorpsUI.Start(cmd, label)
+	local p = BaseParams(cmd)
+	m_C = { cmd = cmd, label = label, stamp = p.stamp, untilClock = m_Clock + SHOT_WAIT }
+	m_EligStatus = label .. ": waiting for gameplay..."
+	Send(p)
+	RefreshInfo()
+end
+
+function CorpsUI.Step()
+	local m = m_C
+	if m == nil then return end
+	local st = ScnState()
+	local ans = (st ~= nil and type(st.corps) == "table") and st.corps.ans or nil
+	local answered = type(ans) == "table" and ans.stamp == m.stamp
+	if not answered and m_Clock <= m.untilClock then return end
+	m_C = nil
+	if not answered then
+		m_EligStatus = m.label .. ": no answer from gameplay (press S0 first; see Lua.log)"
+		RefreshInfo()
+		return
+	end
+	local f = st.focus
+	if type(f) == "table" and f.stamp == m.stamp then LookAt(f) end
+	local ok, ui = pcall(UIFacts, st, C_PREFIX[m.cmd])
+	if not ok then ui = "error " .. Str(ui) end
+	CPrint("summary " .. m.cmd .. ": " .. Str(ui))
+	m_EligStatus = Str(ans.text) .. "[NEWLINE]UI: " .. Str(ui)
+	RefreshInfo()
+end
+end -- corps spike (UI)
+
+local ProxyUI = {}
+
+-- ---------------------------------------------------------------------------
+-- VEF 1.0.5 test, UI side (EFV_Dev 1.0.5.1; gameplay: the "VEF 1.0.5 test"
+-- block in EFV_Dev_Gameplay.lua; EFV/TESTING_1.0.5.md). Each P button sends
+-- a stamped request. Once gameplay answered (st.proxy.ans, same stamp, or
+-- after SHOT_WAIT s) the camera goes to the scene and the status line shows
+-- gameplay's text, then "UI:" with B, E and X by name, the U20 pair state,
+-- who denounced on which turn (UI GetDenounceTurn, both ways), the turns
+-- left (EFV_UI_DenounceTurnsLeft, the base game's count) and the engine's
+-- denounce limit (UI GetDenounceTimeLimit).
+-- P2 asks the engine for an AI-started denouncement:
+-- DiplomacyManager.RequestSession(X, you, "DENOUNCE") (the base game passes
+-- the local player as the first argument, DiplomacyActionView.lua:469; an AI
+-- there is the test), then P Status after 1 s, with the verdict in front.
+-- "[EFV][Proxy] UI ..." lines.
+-- ---------------------------------------------------------------------------
+do
+local m_P = nil              -- { cmd, label, stamp, untilClock, p2 } or { delayUntil } (P2)
+
+local function PPrint(msg) print("[EFV][Proxy] UI " .. Str(msg)) end
+
+local function State(a, b)
+	local ok, s = pcall(function() return GameInfo.DiplomaticStates[Players[a]:GetDiplomaticAI():GetDiplomaticStateIndex(b)].StateType end)
+	if not ok or type(s) ~= "string" then return "?" end
+	return (string.gsub(s, "^DIPLO_STATE_", ""))
+end
+
+local function DenTurn(a, b)
+	local ok, t = pcall(function() return Players[a]:GetDiplomacy():GetDenounceTurn(b) end)
+	return (ok and type(t) == "number") and t or nil
+end
+
+local function Limit()
+	local ok, n = pcall(function() return Game.GetGameDiplomacy():GetDenounceTimeLimit() end)
+	return (ok and n ~= nil) and Str(n) or "?"
+end
+
+local function EnemyText(label, me, e)
+	if e == nil then return label .. ": none" end
+	local ours, theirs = DenTurn(me, e), DenTurn(e, me)
+	local who
+	if ours == nil or theirs == nil then
+		who = "denounce turns unreadable"
+	elseif ours < 0 and theirs < 0 then
+		who = "never denounced"
+	elseif ours >= theirs then
+		who = "you denounced on T" .. ours
+	else
+		who = "denounced you on T" .. theirs
+	end
+	local left = nil
+	pcall(function() left = EFV_UI_DenounceTurnsLeft(me, e) end)
+	return label .. ": " .. who .. (left and (", " .. left .. " turns left") or "") .. ", state " .. State(me, e)
+end
+
+local function UIHalf(st, me)
+	local P = st and st.proxy
+	if type(P) ~= "table" or P.b == nil then return "no P1 scene" end
+	return "B=" .. CivName(P.b) .. " E=" .. CivName(P.e) .. " X=" .. CivName(P.x) .. "; " .. EnemyText("E", me, P.e) .. "; " ..
+		EnemyText("X", me, P.x) .. "; denounce limit " .. Limit()
+end
+
+-- P2's verdict from the UI denounce turns (X -> you, you -> X).
+local function P2Verdict(st, me)
+	local x = st and st.proxy and st.proxy.x
+	if x == nil then return "P2: press P1 first" end
+	local theirs, ours = DenTurn(x, me), DenTurn(me, x)
+	if theirs ~= nil and theirs >= 0 then return "P2: X denounced you on turn " .. theirs end
+	if ours ~= nil and ours >= 0 then return "P2: WRONG WAY: the game made you denounce X" end
+	return "P2: nothing happened: press P3"
+end
+
+function ProxyUI.Start(cmd, label, p2)
+	local p = BaseParams(cmd)
+	m_P = { cmd = cmd, label = label, stamp = p.stamp, untilClock = m_Clock + SHOT_WAIT, p2 = p2 }
+	m_EligStatus = label .. ": waiting for gameplay..."
+	Send(p)
+	RefreshInfo()
+end
+
+function ProxyUI.AiDenounce()
+	local st = ScnState()
+	local x = st and st.proxy and st.proxy.x
+	if x == nil then
+		m_EligStatus = "P2: press P1 first"
+		RefreshInfo()
+		return
+	end
+	local me = LocalID()
+	local ok, err = pcall(DiplomacyManager.RequestSession, x, me, "DENOUNCE")
+	PPrint("P2 DiplomacyManager.RequestSession(" .. Str(x) .. ", " .. Str(me) .. ", DENOUNCE) ok=" .. tostring(ok) .. (ok and "" or (" err=" .. Str(err))))
+	m_P = { delayUntil = m_Clock + 1 }
+	m_EligStatus = "P2: asked the game for X's denouncement..."
+	RefreshInfo()
+end
+
+function ProxyUI.Step()
+	local m = m_P
+	if m == nil then return end
+	if m.delayUntil ~= nil then
+		if m_Clock < m.delayUntil then return end
+		ProxyUI.Start("proxy_status", "P2", true)
+		return
+	end
+	local st = ScnState()
+	local ans = (st ~= nil and type(st.proxy) == "table") and st.proxy.ans or nil
+	local answered = type(ans) == "table" and ans.stamp == m.stamp
+	if not answered and m_Clock <= m.untilClock then return end
+	m_P = nil
+	if not answered then
+		m_EligStatus = m.label .. ": no answer from gameplay (see Lua.log)"
+		RefreshInfo()
+		return
+	end
+	local f = st.focus
+	if type(f) == "table" and f.stamp == m.stamp then LookAt(f) end
+	local me = LocalID()
+	local ok, ui = pcall(UIHalf, st, me)
+	if not ok then ui = "error " .. Str(ui) end
+	local head = ""
+	if m.p2 then
+		local okV, v = pcall(P2Verdict, st, me)
+		head = (okV and Str(v) or ("P2: error " .. Str(v))) .. "[NEWLINE]"
+	end
+	PPrint("summary " .. m.cmd .. ": " .. (m.p2 and (head .. " ") or "") .. Str(ui))
+	m_EligStatus = head .. Str(ans.text) .. "[NEWLINE]UI: " .. Str(ui)
+	RefreshInfo()
+end
+
+end -- VEF 1.0.5 test, UI side
+
+-- ---------------------------------------------------------------------------
+-- Upgrade spike U1, UI side (EFV_Dev 1.0.5.2; gameplay: the "Upgrade spike
+-- U1" block in EFV_Dev_Gameplay.lua; EFV/TESTING_1.0.5.md). The button
+-- sends a stamped upg_spike request; once gameplay answered (st.upg.ans,
+-- same stamp, or after SHOT_WAIT s) the camera goes to the scene and the
+-- status line shows gameplay's text. After press 1 the UI asks the engine
+-- whether Upgrade is available for VEF-U1-M and VEF-U1-S, as the base unit
+-- panel does (UnitManager.CanStartCommand(u, UnitCommandTypes.UPGRADE,
+-- false, true) and tResults[UnitCommandResults.UNIT_TYPE], UnitPanel.lua:
+-- 468-478). Events.UnitUpgraded (UI, UnitFlagManager.lua:1810, 2065) is
+-- traced for your units in the press-1 turn. "[EFV][Upg] UI ..." lines.
+-- The functions hang on ProxyUI (no new main-chunk local: register limit).
+-- ---------------------------------------------------------------------------
+do
+local m_U = nil              -- { stamp, untilClock }
+
+local function UPrint(msg) print("[EFV][Upg] UI " .. Str(msg)) end
+
+-- "yes -> UNIT_X", "NO (greyed)" or why it could not be read.
+local function Avail(e)
+	local u = (type(e) == "table") and OwnUnit(e.o, e.u) or nil
+	if u == nil then return "unit gone" end
+	local ok, can, res = pcall(UnitManager.CanStartCommand, u, UnitCommandTypes.UPGRADE, false, true)
+	if not ok then return "unreadable (" .. Str(can) .. ")" end
+	local t = nil
+	pcall(function() t = GameInfo.Units[res[UnitCommandResults.UNIT_TYPE]].UnitType end)
+	return (can and "yes" or "NO (greyed)") .. (t and (" -> " .. t) or "")
+end
+
+local function Desc(u)
+	if u == nil then return "FindID nil" end
+	local s = "?"
+	pcall(function()
+		local id = u:GetID()
+		s = "P" .. Str(u:GetOwner()) .. "/" .. Str(id) .. " serial=" .. math.floor(id / 65536) .. " slot=" .. (id % 65536) ..
+			" type=" .. Str(GameInfo.Units[u:GetType()].UnitType) .. " at=" .. Str(u:GetX()) .. "," .. Str(u:GetY()) ..
+			" moves=" .. Str(u:GetMovesRemaining()) .. "/" .. Str(u:GetMaxMoves()) .. " dmg=" .. Str(u:GetDamage())
+	end)
+	return s
+end
+
+function ProxyUI.U1Start()
+	local p = BaseParams("upg_spike")
+	m_U = { stamp = p.stamp, untilClock = m_Clock + SHOT_WAIT }
+	m_EligStatus = "U1: waiting for gameplay..."
+	Send(p)
+	RefreshInfo()
+end
+
+function ProxyUI.U1Step()
+	local m = m_U
+	if m == nil then return end
+	local st = ScnState()
+	local up = (st ~= nil and type(st.upg) == "table") and st.upg or nil
+	local ans = up and up.ans or nil
+	local answered = type(ans) == "table" and ans.stamp == m.stamp
+	if not answered and m_Clock <= m.untilClock then return end
+	m_U = nil
+	if not answered then
+		m_EligStatus = "U1: no answer from gameplay (see Lua.log)"
+		RefreshInfo()
+		return
+	end
+	local f = st.focus
+	if type(f) == "table" and f.stamp == m.stamp then LookAt(f) end
+	local ui = ""
+	if type(up.k) == "table" and tonumber(up.step) == 1 then
+		local a = "VEF-U1-M " .. Avail(up.k.M) .. ", VEF-U1-S " .. Avail(up.k.S)
+		UPrint("press 1 Upgrade button: " .. a)
+		ui = "[NEWLINE]UI: Upgrade " .. a
+	end
+	m_EligStatus = Str(ans.text) .. ui
+	RefreshInfo()
+end
+
+function ProxyUI.U1Trace(pid, uid, upType)
+	local st = ScnState()
+	local up = st and st.upg
+	if type(up) ~= "table" or type(up.k) ~= "table" or pid ~= LocalID() then return end
+	local turn = -1
+	pcall(function() turn = Game.GetCurrentGameTurn() end)
+	if tonumber(up.turn) ~= turn then return end
+	local parts = {}
+	for _, k in ipairs({ "M", "S" }) do
+		local e = up.k[k]
+		if type(e) == "table" then parts[#parts + 1] = "VEF-U1-" .. k .. " P" .. Str(e.o) .. "/" .. Str(e.u) .. ": " .. Desc(OwnUnit(e.o, e.u)) end
+	end
+	UPrint("Events.UnitUpgraded P" .. Str(pid) .. "/" .. Str(uid) .. " upgradeType=" .. Str(upType) .. " " .. Desc(OwnUnit(pid, uid)) ..
+		"; " .. table.concat(parts, "; "))
+end
+end -- upgrade spike U1, UI side
 
 local function OnUpdate(dt)
 	m_Clock = m_Clock + (tonumber(dt) or 0)
+	if m_Air ~= nil then
+		local ok, err = pcall(AirStep)
+		if not ok then
+			Log("air spike error: " .. Str(err))
+			m_Air = nil
+		end
+	end
+	local okC, errC = pcall(CorpsUI.Step)
+	if not okC then Log("corps spike error: " .. Str(errC)) end
+	local okP, errP = pcall(ProxyUI.Step)
+	if not okP then Log("proxy test error: " .. Str(errP)) end
+	local okU, errU = pcall(ProxyUI.U1Step)
+	if not okU then Log("upgrade spike error: " .. Str(errU)) end
+	if m_DP ~= nil then
+		local ok, err = pcall(DpStep)
+		if not ok then
+			Log("denounce spike error: " .. Str(err))
+			m_DP = nil
+		end
+	end
 	if m_AuditDue ~= nil and m_Clock >= m_AuditDue then
 		local ok, err = pcall(RunAudit)
 		if not ok then Log("badge audit error: " .. Str(err)) end
@@ -1421,9 +2415,25 @@ end
 -- Buttons: cmd = gameplay command (EFV_Dev_Gameplay.lua), ui = local function
 -- ---------------------------------------------------------------------------
 local UIFN = { ForgeSend = ForgeSend, ForgeRecall = ForgeRecall, ForgeEntrust = ForgeEntrust, UIStore = UIStore,
-	VetStart = VetStart, GoTo = GoTo, VsStart = VsStart }
+	VetStart = VetStart, GoTo = GoTo, VsStart = VsStart, DenounceSetup = DenounceSetup, DenounceProbe = DenounceProbe,
+	AirCity = AirCity, AirHost = AirHost, AirFuel = AirFuel, AirAlly = AirAlly, AirCarrier = AirCarrier, AirStatus = AirStatus,
+	C1 = function() CorpsUI.Start("corps_probe", "C1") end, C2 = function() CorpsUI.Start("corps_give", "C2") end,
+	C3 = function() CorpsUI.Start("corps_merge", "C3") end, C4 = function() CorpsUI.Start("corps_cs_ai", "C4") end,
+	C5 = function() CorpsUI.Start("corps_cs_force", "C5") end, C6 = function() CorpsUI.Start("corps_host", "C6") end,
+	C7 = function() CorpsUI.Start("corps_trip", "C7") end, CStatus = function() CorpsUI.Start("corps_status", "C Status") end,
+	C8 = function() CorpsUI.Start("corps_split", "C8") end, C9 = function() CorpsUI.Start("corps_vol", "C9") end,
+	C10 = function() CorpsUI.Guard() end,
+	P1 = function() ProxyUI.Start("scn_proxy", "P1") end, P2 = function() ProxyUI.AiDenounce() end,
+	P3 = function() ProxyUI.Start("proxy_lower", "P3") end, P4 = function() ProxyUI.Start("proxy_hold", "P4") end,
+	P5 = function() ProxyUI.Start("proxy_poor", "P5") end, PStatus = function() ProxyUI.Start("proxy_status", "P Status") end,
+	U1 = function() ProxyUI.U1Start() end,
+	AirRebase = AirRebase }
 
-local BUTTONS = {
+-- The list is built in a function of its own: a long table constructor holds up to
+-- 50 registers until it flushes, which the main chunk cannot spare (Havok Script
+-- register limit, see the do-block note at the top).
+local function ButtonList()
+return {
 	{ header = "Screenshots (VEF 0.7+, new game after one End Turn)" },
 	{ label = "Shot 1 Send picker",     shot = "shot1" },
 	{ label = "Shot 2 Arrival",         shot = "shot2" },
@@ -1458,6 +2468,37 @@ local BUTTONS = {
 	{ label = "T2 Shared enemy",        elig = "elig_t2", test = "T2" },
 	{ label = "Go to scenario",         ui = "GoTo" },
 	{ label = "Check now",              cmd = "scn_check" },
+	{ header = "VEF 1.0.5 test (EFV/TESTING_1.0.5.md): start a NEW game and press P1 instead of S0" },
+	{ label = "P1 Proxy war setup",     ui = "P1" },
+	{ label = "P2 X denounces you",     ui = "P2" },
+	{ label = "P3 X dislikes you (if P2 fails)", ui = "P3" },
+	{ label = "P4 Hold the unit on its way", ui = "P4" },
+	{ label = "P5 Poor host (press twice)", ui = "P5" },
+	{ label = "P Status",               ui = "PStatus" },
+	{ label = "U1 Upgrade spike (press 1, 2, 3)", ui = "U1" },
+	{ label = "A9 Carrier for a rebase (press twice)", ui = "AirRebase" },
+	{ header = "Denounce spike (EFV/TESTING_SPIKES.md): read only, details in Lua.log [EFV][Probe]" },
+	{ label = "D Setup",                ui = "DenounceSetup" },
+	{ label = "D Denounce probe",       ui = "DenounceProbe" },
+	{ header = "Air spike (EFV/TESTING_SPIKES.md): Ancient-era game after S0, details in Lua.log [EFV][Air]" },
+	{ label = "A1 Plane in your city",  ui = "AirCity" },
+	{ label = "A2 Plane for B",         ui = "AirHost" },
+	{ label = "A3 Fuel (press per step)", ui = "AirFuel" },
+	{ label = "A4 Plane with ally F",   ui = "AirAlly" },
+	{ label = "A5 Loaded carrier (again after the send)", ui = "AirCarrier" },
+	{ label = "A Status",               ui = "AirStatus" },
+	{ header = "Corps spike (EFV/TESTING_SPIKES.md): Ancient-era game after S0, details in Lua.log [EFV][Corps]" },
+	{ label = "C1 Formation probe (press per step)", ui = "C1" },
+	{ label = "C2 Formations for B and a city-state", ui = "C2" },
+	{ label = "C3 Merge as host (again after End Turn)", ui = "C3" },
+	{ label = "C4 City-state merges (optional)", ui = "C4" },
+	{ label = "C5 Forced city-state merges", ui = "C5" },
+	{ label = "C6 Host without the civic", ui = "C6" },
+	{ label = "C7 Formation round trip (press twice)", ui = "C7" },
+	{ label = "C8 Split a mixed Army (press twice)", ui = "C8" },
+	{ label = "C9 Volunteer merges (again after End Turn)", ui = "C9" },
+	{ label = "C10 Merge guard off/ask/block", ui = "C10" },
+	{ label = "C Status",               ui = "CStatus" },
 	{ header = "Units (selected unit, or extra rec=<id>; Type/Amount fields)" },
 	{ label = "Spawn Type x Amt -> Tgt", cmd = "spawn" },
 	{ label = "Fill rings (Amt) -> Tgt", cmd = "fill" },
@@ -1495,6 +2536,8 @@ local BUTTONS = {
 	{ label = "EFV_Recall sel. unit",   ui = "ForgeRecall" },
 	{ label = "EFV_Entrust sel. city",  ui = "ForgeEntrust" },
 }
+end
+local BUTTONS = ButtonList()
 
 local function OnButton(def)
 	RefreshInfo()
@@ -1548,6 +2591,8 @@ local function Toggle()
 end
 
 local function OnInput(pInput)
+	local okG, swallow = pcall(CorpsUI.Input, pInput)    -- C10 block mode
+	if not okG then Log("merge guard input error: " .. Str(swallow)) elseif swallow then return true end
 	if pInput:GetMessageType() == KeyEvents.KeyUp then
 		local key = pInput:GetKey()
 		if key == Keys.D and pInput:IsControlDown() and pInput:IsShiftDown() then
@@ -1614,6 +2659,12 @@ local function Initialize()
 	Subscribe("Events.LoadGameViewStateDone", function() return Events.LoadGameViewStateDone end, AttachLaunchButton)
 	Subscribe("Events.UnitSelectionChanged", function() return Events.UnitSelectionChanged end, OnSelectionChanged)
 	Subscribe("Events.PlayerTurnActivated", function() return Events.PlayerTurnActivated end, OnSelectionChanged)
+	Subscribe("Events.InterfaceModeChanged (corps)", function() return Events.InterfaceModeChanged end, CorpsUI.Mode)
+	Subscribe("Events.UnitUpgraded (U1 trace)", function() return Events.UnitUpgraded end, ProxyUI.U1Trace)
+	Subscribe("Events.UnitFormCorps (trace)", function() return Events.UnitFormCorps end, function(p, u) CorpsUI.Trace("UnitFormCorps", p, u) end)
+	Subscribe("Events.UnitFormArmy (trace)", function() return Events.UnitFormArmy end, function(p, u) CorpsUI.Trace("UnitFormArmy", p, u) end)
+	Subscribe("Events.UnitRemovedFromMap (trace)", function() return Events.UnitRemovedFromMap end,
+		function(p, u) CorpsUI.Trace("UnitRemovedFromMap", p, u) end)
 	Subscribe("LuaEvents.EFV_BadgeAuditReport", function() return LuaEvents.EFV_BadgeAuditReport end, OnAuditReport)
 	Subscribe("Events.PlayerTurnActivated (audit)", function() return Events.PlayerTurnActivated end, function(pid)
 		if pid == LocalID() then ScheduleAudit("turn start", true) end

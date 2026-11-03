@@ -160,7 +160,9 @@ end
 -- else the text listing why no destination is available (distinct row
 -- reasons that are not already listed as unit reasons). WRONG_TERRITORY
 -- names the land owner (row.landOwnerID, the same for every row; 0.7).
-local function DestinationSummary(rows, unitCodes, localID)
+-- forceType picks the NO_COMMON_WAR text (Expeditionary: the proxy-war
+-- text, 1.0.5).
+local function DestinationSummary(rows, unitCodes, localID, forceType)
 	if #rows == 0 then
 		return "[NEWLINE][COLOR:Red]" .. Locale.Lookup("LOC_EFV_SEND_NO_RECIPIENTS") .. "[ENDCOLOR]"
 	end
@@ -208,7 +210,7 @@ local function DestinationSummary(rows, unitCodes, localID)
 	end
 	ctx.GOLD = { minFee or 0 }
 	ctx.WRONG_TERRITORY = { EFV_UI_PlayerName(landOwnerID) }
-	return "[NEWLINE][NEWLINE]" .. Locale.Lookup("LOC_EFV_SEND_NO_DESTINATION") .. EFV_UI_ReasonsText(codes, ctx)
+	return "[NEWLINE][NEWLINE]" .. Locale.Lookup("LOC_EFV_SEND_NO_DESTINATION") .. EFV_UI_ReasonsText(codes, ctx, forceType)
 end
 
 -- ---------------------------------------------------------------------------
@@ -233,7 +235,7 @@ local function AddSendButtons(pUnit, localID, uiStore)
 			if not okR or type(rows) ~= "table" then
 				rows = {}
 			end
-			local summary = DestinationSummary(rows, unitCodes, localID)
+			local summary = DestinationSummary(rows, unitCodes, localID, def.ft)
 			local disabled = (#unitCodes > 0) or (summary ~= nil)
 			local tooltip = Locale.Lookup(def.key) .. "[NEWLINE]" .. Locale.Lookup(def.tt)
 				.. EFV_UI_ReasonsText(unitCodes, nil) .. (summary or "")

@@ -1894,3 +1894,875 @@ test("1.0.4.1 panel title: dev tools and loaded VEF version; a VEF build other t
 	local t = old.Controls.TitleLabel:GetText()
 	H.ok(string.find(t, "WRONG VEF", 1, true) ~= nil, "mismatch shown: " .. tostring(t))
 end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.4.2: the denouncement reader spike (FIXPLAN_proxy_war.md,
+-- EFV/TESTING_DENOUNCE_SPIKE.md). Since 1.0.5 the fake engine mirrors the
+-- in-game result (SPIKES 8.1): G has GetAi_Diplomacy():GetDiplomaticState
+-- (a StateType string) and no GetDiplomaticAI; UI has GetDiplomaticAI,
+-- GetDenounceTurn and GetDenounceTimeLimit and no GetAi_Diplomacy. A missing
+-- reader is logged as MISSING and never fails.
+-- ---------------------------------------------------------------------------
+test("1.0.4.2 D probe (gameplay): every reader by name for each met major, both ways; missing -> MISSING, a throwing one -> ERROR; answer saved", function()
+	FreshBoot()
+	Dev("meet", { target = 1 })
+	Dev("meet", { target = 3 })
+	local d0 = Players[0]:GetDiplomacy()
+	d0.GetDenounceTurn = function(_, b) if b == 3 then return 7 end return -1 end
+	d0.IsDenouncing = function() error("boom") end
+	H.markBody()
+	Dev("denounce_probe", { stamp = 41 })
+	H.ok(H.hasLine("[EFV][Probe] G GetDenounceTimeLimit()=MISSING"), "GetDenounceTimeLimit is nil in G (SPIKES 8.1)")
+	H.ok(H.hasLine("[EFV][Probe] G GetDenounceTurn(0->3)=7"))
+	H.ok(H.hasLine("[EFV][Probe] G GetDenounceTurn(3->0)=MISSING"))
+	H.ok(H.hasLine("[EFV][Probe] G IsDenouncing(0->1)=ERROR"))
+	H.ok(H.hasLine("[EFV][Probe] G HasDenounced(0->1)=MISSING"))
+	H.ok(H.hasLine("[EFV][Probe] G AiDiplo:GetDiplomaticState(1->0)=DIPLO_STATE_NEUTRAL (string"), "the G reader (A64)")
+	H.ok(H.hasLine("[EFV][Probe] G DiploAI:GetDiplomaticStateIndex(0->1)=MISSING"), "GetDiplomaticAI is nil in G")
+	H.ok(H.hasLine("[EFV][Probe] G has GetDiplomacy():GetDenounceTurn = yes"))
+	H.ok(not H.hasLine("(0->2)"), "P2 not met: not probed")
+	H.len(H.lines("->"), 7 * 2 * 2, "7 readers x 2 met majors x 2 directions")
+	local dp = H.prop("EFV_DEV_SCN").dprobe
+	H.eq(dp.stamp, 41); H.deq(dp.pids, { 1, 3 })
+	H.eq(dp.r[1].s, "mixed"); H.eq(dp.r[1].hits, "0>3=7")
+	H.eq(dp.r[2].s, "mixed"); H.eq(dp.r[3].s, "nil"); H.eq(dp.r[4].s, "ok"); H.eq(dp.r[4].hits, "-"); H.eq(dp.r[5].s, "nil")
+	H.ok(H.hasLine("[EFV][Probe] G summary: Turn mixed [0>3=7] | IsDen mixed [-] | HasDen nil [-]"))
+	H.ok(not H.hasLine("denounce_probe: ERROR"))
+	H.clean()
+end)
+
+test("1.0.4.2 panel: D Setup names and targets a civ to denounce; D Denounce probe runs the UI readers and shows G and UI", function()
+	FreshBoot()
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	FAKE_UI.FindButton("D Setup"):Click()
+	H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, "denounce_setup")
+	Pump({ panel }, 4)
+	H.ok(CheckLine("DENOUNCE_SETUP", "INFO"))
+	H.ok(Players[0]:GetDiplomacy():HasMet(1), "met")
+	H.eq(H.prop("EFV_DEV_SCN").dsetup.x, 1, "lowest-ID major you could denounce")
+	H.ok(Has(panel.Controls.RecordLabel:GetText(), "D Setup: denounce P1"), panel.Controls.RecordLabel:GetText())
+	H.ok(Has(panel.Controls.TargetLabel:GetText(), "P1"), "Target set to it")
+	local b = FAKE_UI.FindButton("D Denounce probe")
+	H.notnil(b)
+	b:Click()
+	local p = FAKE_UI.requests[#FAKE_UI.requests].params
+	H.eq(p.cmd, "denounce_probe"); H.notnil(p.stamp)
+	Pump({ panel }, 4)
+	H.ok(H.hasLine("[EFV][Probe] G GetDenounceTurn(0->1)=MISSING"))
+	H.ok(H.hasLine("[EFV][Probe] UI GetDenounceTurn(0->1)=-1"), "UI only (SPIKES 8.1)")
+	H.ok(H.hasLine("[EFV][Probe] UI DiploAI:GetDiplomaticStateIndex(1->0)=3"))
+	H.ok(H.hasLine("[EFV][Probe] UI AiDiplo:GetDiplomaticState(1->0)=MISSING"), "GetAi_Diplomacy is nil in UI")
+	-- As in game: each of Turn, AiState, StateIdx, AiMods, AIMods exists in one context only.
+	H.len(H.lines("-> same"), 2, "IsDen and HasDen: nil in both")
+	H.len(H.lines("-> DIFFERENT"), 5)
+	local rec = panel.Controls.RecordLabel:GetText()
+	H.ok(string.find(rec, "Denounce probe T", 1, true) == 1, rec)
+	H.ok(Has(rec, "5 reader(s) differ") and Has(rec, "G: Turn nil -") and Has(rec, "UI: Turn ok -") and Has(rec, "StateIdx ok -"), rec)
+end)
+
+test("1.0.4.2 D Setup: nobody you could denounce (friend, war) -> CHECK, nothing met", function()
+	FreshBoot()
+	for _, pid in ipairs({ 1, 2 }) do Dev("friend", { target = pid }) end
+	Dev("war", { target = 3 })
+	Dev("denounce_setup", { stamp = 5 })
+	H.ok(CheckLine("DENOUNCE_SETUP", "CHECK"))
+	H.eq(H.prop("EFV_DEV_SCN").dsetup.x, -1)
+	H.clean()
+end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.4.3: the air-unit spike (FIXPLAN_air_units.md section 7,
+-- EFV/TESTING_SPIKES.md). The fake engine has no air readers (plot /
+-- district / unit GetAirSlots / GetAirUnits, CanStartOperation and
+-- GetOperationTargets in gameplay): the handlers log them as MISSING and
+-- still answer.
+-- ---------------------------------------------------------------------------
+local function AirAns() return H.prop("EFV_DEV_SCN").air.ans end
+
+test("1.0.4.3 air spike (gameplay): A1-A5 and A Status answer with missing air readers; planes made, B's keeps promotion and damage", function()
+	local S = Setup()
+	H.markBody()
+	Dev("air_city", { stamp = 31 })
+	H.ok(CheckLine("AIR_A1", "INFO")); H.eq(AirAns().stamp, 31)
+	local air = H.unitsOf(0, "UNIT_FIGHTER")
+	H.len(air, 3, "AIR-1 and AIR-2 in the capital, AIR-3 off base")
+	H.ok(Named(0, "VEF-AIR-1").x == S.c0.x and Named(0, "VEF-AIR-1").y == S.c0.y, "AIR-1 in your capital")
+	H.ok(H.hasLine("[EFV][Air] G your capital @10,10: GetUnitCount="))
+	H.ok(H.hasLine("plot:GetAirUnits=MISSING"))
+	H.ok(H.hasLine("AIR-1: ") and H.hasLine("domain=DOMAIN_AIR"))
+	H.ok(H.hasLine("CanDEPLOY=MISSING"))
+	H.ok(string.find(AirAns().text, "A1: AIR-1 P0 @10,10 in city of P0", 1, true) == 1, AirAns().text)
+	Dev("air_host", { stamp = 32 })
+	H.ok(CheckLine("AIR_A2", "INFO"))
+	local b = Named(1, "VEF-AIR-B")
+	H.notnil(b, "B's plane made through EFV_Units.Recreate")
+	H.eq(b.x, S.c1.x); H.eq(b.y, S.c1.y); H.eq(b:GetDamage(), 20); H.eq(#H.promotionTypes(b), 1)
+	H.ok(Has(AirAns().text, "promotions 1/1"), AirAns().text)
+	Dev("air_fuel", { stamp = 33 })
+	H.ok(Has(AirAns().text, "A3 step 1: VEF-AIR-1 damage 30"), AirAns().text)
+	H.eq(H.res(0, "RESOURCE_ALUMINUM"), 0)
+	Dev("air_fuel", { stamp = 34 })
+	H.ok(Has(AirAns().text, "End Turn until turn " .. (FAKE.turn + 2)), "a plane does not heal in its first round: " .. AirAns().text)
+	H.endTurn(); H.endTurn()
+	H.ok(CheckLine("AIR_TURN", "INFO"), "positions at the turn start")
+	Dev("air_fuel", { stamp = 35 })
+	H.ok(Has(AirAns().text, "A3 step 2"), AirAns().text)
+	H.ok(H.res(0, "RESOURCE_ALUMINUM") >= 2, "top-up: 2 per Aluminium unit")
+	H.endTurn()
+	Dev("air_fuel", { stamp = 36 })
+	H.ok(Has(AirAns().text, "A3 step 3"), AirAns().text)
+	Dev("air_ally", { stamp = 37 })
+	H.ok(CheckLine("AIR_A4", "INFO"))
+	H.ok(Players[0]:GetDiplomacy():HasAllied(2), "F is your ally")
+	H.notnil(Named(0, "VEF-AIR-V"), "your plane in F's capital")
+	Dev("air_carrier", { stamp = 38 })
+	H.ok(Has(AirAns().text, "no free water"), "no sea next to the fake capital: " .. AirAns().text)
+	Dev("air_status", { stamp = 39 })
+	H.ok(string.find(AirAns().text, "Air T", 1, true) == 1 and Has(AirAns().text, "AIR-B P1"), AirAns().text)
+	H.ok(not H.hasLine("ERROR"), "no handler error")
+	H.clean()
+end)
+
+test("1.0.4.3 A5: carrier and plane on your water, VEF's send rule asked; second press before and after the carrier left", function()
+	local S = Setup()
+	for _, xy in ipairs({ { 9, 10 }, { 8, 10 }, { 8, 11 }, { 9, 11 }, { 7, 10 }, { 7, 11 } }) do H.terrain(xy[1], xy[2], "COAST") end
+	H.markBody()
+	Dev("air_carrier", { stamp = 51 })
+	H.ok(CheckLine("AIR_A5", "INFO"))
+	local cv, pl = Named(0, "VEF-CV"), Named(0, "VEF-AIR-CV")
+	H.notnil(cv); H.notnil(pl)
+	H.ok(cv.x == pl.x and cv.y == pl.y, "plane created on the carrier's tile")
+	H.ok(Has(AirAns().text, "send rule: B "), AirAns().text)
+	Dev("air_carrier", { stamp = 52 })
+	H.ok(Has(AirAns().text, "still on the map"), AirAns().text)
+	Dev("kill", Sel(cv))
+	Dev("air_carrier", { stamp = 53 })
+	H.ok(Has(AirAns().text, "A5 after the send: carrier gone, no VEF record; plane VEF-AIR-CV P0"), AirAns().text)
+	H.ok(not H.hasLine("ERROR"))
+	H.clean()
+end)
+
+test("1.0.4.3 air spike without S0: CHECK, nothing made", function()
+	FreshBoot()
+	Dev("air_city", { stamp = 3 })
+	H.ok(CheckLine("AIR_A1", "CHECK"))
+	H.len(H.unitsOf(0, "UNIT_FIGHTER"), 0)
+end)
+
+test("1.0.4.3 panel: the A buttons send their requests; the status line shows gameplay's answer and the UI's view", function()
+	FreshBoot()
+	Dev("scn_setup", { stamp = 1 })
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	local want = { { "A1 Plane in your city", "air_city", "A1: AIR-1" }, { "A2 Plane for B", "air_host", "A2: B's plane" },
+		{ "A3 Fuel (press per step)", "air_fuel", "A3 step 1" }, { "A4 Plane with ally F", "air_ally", "A4: allied" },
+		{ "A5 Loaded carrier (again after the send)", "air_carrier", "A5: " }, { "A Status", "air_status", "Air T" } }
+	for _, w in ipairs(want) do
+		local b = FAKE_UI.FindButton(w[1])
+		H.notnil(b, w[1])
+		b:Click()
+		H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, w[2])
+		Pump({ panel }, 4)
+		local rec = panel.Controls.RecordLabel:GetText()
+		H.ok(string.find(rec, w[3], 1, true) == 1 and Has(rec, "[NEWLINE]UI: "), rec)
+	end
+	H.ok(H.hasLine("[EFV][Air] UI summary air_city: AIR-1 based no"), "no air readers in the fake UI")
+	H.ok(not H.hasLine("air spike error"))
+end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.4.4: the Corps spike (FIXPLAN_corps.md section 5 and its
+-- designer rulings, EFV/TESTING_SPIKES.md). The fake engine has no civic,
+-- upkeep-per-type or CanFormMilitaryFormation-by-name readers: they are
+-- logged as MISSING and the buttons still answer.
+-- ---------------------------------------------------------------------------
+local function CorpsAns() return H.prop("EFV_DEV_SCN").corps.ans end
+local function Form(name) return MilitaryFormationTypes[name .. "_FORMATION"] end
+
+test("1.0.4.4 corps spike C1: three presses set your Swordsman to ARMY, CORPS, STANDARD; upkeep read; Builder and Ram read", function()
+	local S = Setup()
+	H.markBody()
+	Dev("corps_probe", { stamp = 61 })
+	H.ok(CheckLine("CORPS_C1", "INFO")); H.eq(CorpsAns().stamp, 61)
+	local u = Named(0, "VEF-C1")
+	H.notnil(u, "Swordsman made"); H.notnil(Named(0, "VEF-C1T"), "Tank made"); H.notnil(Named(0, "VEF-C1B"), "Builder made")
+	H.eq(u:GetMilitaryFormation(), Form("ARMY"))
+	H.ok(Has(CorpsAns().text, "C1 step 1 of 3 -> ARMY"), CorpsAns().text)
+	H.ok(H.hasLine("[EFV][Corps] G UNIT_TANK Maintenance (data)"), "per-type upkeep readers tried")
+	Dev("corps_probe", { stamp = 62 })
+	H.eq(u:GetMilitaryFormation(), Form("CORPS"))
+	Dev("corps_probe", { stamp = 63 })
+	H.eq(u:GetMilitaryFormation(), Form("STANDARD"))
+	H.ok(Has(CorpsAns().text, "Done"), CorpsAns().text)
+	Dev("corps_probe", { stamp = 64 })
+	H.len(H.unitsOf(0, "UNIT_TANK"), 1, "a new round replaces the C1 units")
+	H.ok(not H.hasLine("ERROR"), "no handler error")
+	H.clean()
+end)
+
+test("1.0.4.4 corps spike C2, C5, C6, C7 and C Status: formations for hosts without the civic, records, round trip", function()
+	local S = Setup()
+	H.markBody()
+	Dev("corps_give", { stamp = 71 })
+	H.ok(CheckLine("CORPS_C2", "INFO"), "C2 answers")
+	local a, b, r = Named(5, "VEF-C2-A") or Named(6, "VEF-C2-A"), Named(5, "VEF-C2-B") or Named(6, "VEF-C2-B"), Named(1, "VEF-C2-ARMY")
+	H.notnil(a, "C2-A for a second city-state"); H.notnil(b); H.notnil(r)
+	H.eq(a:GetMilitaryFormation(), Form("CORPS")); H.eq(b:GetMilitaryFormation(), Form("CORPS")); H.eq(r:GetMilitaryFormation(), Form("ARMY"))
+	H.eq(#H.promotionTypes(b), 2); H.eq(b:GetDamage(), 30)
+	H.ok(Has(CorpsAns().text, "Nationalism MISSING"), "civics read by name: " .. CorpsAns().text)
+	Dev("corps_cs_force", { stamp = 72 })
+	H.ok(CheckLine("CORPS_C5", "INFO"))
+	local s1 = Named(4, "VEF-C5-S")
+	H.notnil(s1, "case 1 at CS"); H.eq(s1:GetMilitaryFormation(), Form("CORPS"))
+	H.notnil(EFV_Records.FindByUnit(EFV_Records.Load(), 4, s1:GetID()), "C5-S is a tracked City-State unit")
+	Dev("corps_host", { stamp = 73 })
+	H.ok(CheckLine("CORPS_C6", "INFO"))
+	local uc, ua = Named(0, "VEF-C6-CORPS"), Named(0, "VEF-C6-ARMY")
+	H.notnil(uc); H.notnil(ua)
+	H.eq(uc:GetMilitaryFormation(), Form("CORPS")); H.eq(ua:GetMilitaryFormation(), Form("ARMY"))
+	H.eq(uc:GetMovesRemaining(), uc:GetMaxMoves(), "full moves to move and attack this turn")
+	local rec = EFV_Records.FindByUnit(EFV_Records.Load(), 0, uc:GetID())
+	H.notnil(rec, "lent by B"); H.eq(rec.senderID, 1)
+	H.notnil(Named(3, "VEF-C6-FOE"), "C's Warrior to attack")
+	H.eq(Named(1, "VEF-C6-B"):GetMilitaryFormation(), Form("CORPS"))
+	Dev("corps_trip", { stamp = 74 })
+	H.ok(CheckLine("CORPS_C7", "INFO"))
+	local u7 = Named(0, "VEF-C7")
+	H.notnil(u7, "recreated through VEF's own path")
+	H.eq(u7:GetMilitaryFormation(), Form("ARMY")); H.eq(u7:GetDamage(), 30)
+	H.ok(Has(CorpsAns().text, "snapshot ARMY, removed, restored"), CorpsAns().text)
+	Dev("corps_trip", { stamp = 75 })
+	H.ok(Has(CorpsAns().text, "C7 read back: ") and Has(CorpsAns().text, "ARMY yes"), CorpsAns().text)
+	Dev("corps_status", { stamp = 76 })
+	H.ok(string.find(CorpsAns().text, "Corps T", 1, true) == 1 and Has(CorpsAns().text, "C6-CORPS P0/"), CorpsAns().text)
+	H.endTurn()
+	H.ok(CheckLine("CORPS_WATCH", "INFO"), "watch line at the turn start")
+	H.ok(H.hasLine("C5-S gone, record") or H.hasLine("C5-S P4/"), "case 1 reported")
+	H.ok(not H.hasLine("[EFV][Corps] G C7 Recreate ERROR"))
+	H.clean()
+end)
+
+test("1.0.4.4 corps spike C3: Nationalism for you, two lent pairs; second press asks to merge; after End Turn the open records expire", function()
+	local S = Setup()
+	H.markBody()
+	Dev("corps_merge", { stamp = 81 })
+	H.ok(CheckLine("CORPS_C3", "INFO"))
+	local lent, own = Named(0, "VEF-C3-LENT"), Named(0, "VEF-C3-OWN")
+	H.notnil(lent); H.notnil(own)
+	H.eq(H.dist(lent, own), 1, "the pair stands side by side")
+	local rec = EFV_Records.FindByUnit(EFV_Records.Load(), 0, lent:GetID())
+	H.notnil(rec, "LENT is B's Expeditionary unit"); H.eq(rec.senderID, 1)
+	H.eq(lent:GetDamage(), 20); H.eq(#H.promotionTypes(own), 1)
+	H.ok(Has(CorpsAns().text, "select VEF-C3-LENT, Form Corps, click VEF-C3-OWN"), CorpsAns().text)
+	Dev("corps_merge", { stamp = 82 })
+	H.ok(Has(CorpsAns().text, "merge both pairs now"), CorpsAns().text)
+	H.endTurn()
+	Dev("corps_merge", { stamp = 83 })
+	H.ok(Has(CorpsAns().text, "C3 step 2: C3-LENT record"), CorpsAns().text)
+	H.eq(EFV_Records.Get(EFV_Records.Load(), rec.id).deployedTurn, FAKE.turn + 1 - EFV_Config.EXPEDITIONARY_DURATION)
+	H.clean()
+end)
+
+test("1.0.4.4 corps spike without S0: CHECK, nothing made", function()
+	FreshBoot()
+	Dev("corps_probe", { stamp = 3 })
+	H.ok(CheckLine("CORPS_C1", "CHECK"))
+	H.eq(Named(0, "VEF-C1"), nil)
+end)
+
+test("1.0.4.4 panel: the C buttons send their requests and show the answer with the UI's view; Form Corps mode is logged", function()
+	FreshBoot()
+	Dev("scn_setup", { stamp = 1 })
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	local want = { { "C1 Formation probe (press per step)", "corps_probe", "C1 step 1" }, { "C2 Formations for B and a city-state", "corps_give", "C2 " },
+		{ "C6 Host without the civic", "corps_host", "C6 civics" }, { "C Status", "corps_status", "Corps T" } }
+	for _, w in ipairs(want) do
+		local b = FAKE_UI.FindButton(w[1])
+		H.notnil(b, w[1])
+		b:Click()
+		H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, w[2])
+		Pump({ panel }, 4)
+		local rec = panel.Controls.RecordLabel:GetText()
+		H.ok(string.find(rec, w[3], 1, true) == 1 and Has(rec, "[NEWLINE]UI: "), rec)
+	end
+	for _, l in ipairs({ "C3 Merge as host (again after End Turn)", "C4 City-state merges (optional)", "C5 Forced city-state merges",
+		"C7 Formation round trip (press twice)" }) do H.notnil(FAKE_UI.FindButton(l), l) end
+	H.ok(H.hasLine("[EFV][Corps] UI summary corps_host: C6-CORPS CORPS strength"), "UI reads the formation")
+	-- Form Corps mode entered with the lent unit selected (the merge-confirm hook)
+	Dev("corps_merge", { stamp = 90 })
+	local lent, own = Named(0, "VEF-C3-LENT"), Named(0, "VEF-C3-OWN")
+	InterfaceModeTypes.FORM_CORPS, InterfaceModeTypes.FORM_ARMY = 50, 51
+	UnitCommandTypes.FORM_CORPS, UnitCommandResults.UNITS = "FORM_CORPS", "UNITS"
+	UnitManager.GetCommandTargets = function(u, cmd)
+		if cmd == "FORM_CORPS" and u == lent then return { UNITS = { { player = 0, id = own:GetID() } } } end
+		return {}
+	end
+	FAKE_UI.selectedUnit = lent
+	Events.InterfaceModeChanged(0, 50)
+	H.ok(H.hasLine("[EFV][Corps] UI FORM_CORPS mode: selected VEF-C3-LENT P0/" .. lent:GetID() .. " (lent: record "), "the lent unit is named")
+	H.ok(H.hasLine("can merge with: VEF-C3-OWN P0/" .. own:GetID() .. " (not lent)"), "the target is named")
+	H.ok(string.find(panel.Controls.RecordLabel:GetText(), "FORM_CORPS mode: selected VEF-C3-LENT", 1, true) == 1)
+	H.ok(not H.hasLine("corps spike error"))
+end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.4.5: C8 split, C9 Volunteer merges, C10 merge guard and the
+-- passive merge trace (FIXPLAN_corps.md "Rulings 2", R2.7).
+-- ---------------------------------------------------------------------------
+local function NamedAny(name)
+	for pid = 0, 10 do
+		local u = Named(pid, name)
+		if u ~= nil then return u end
+	end
+	return nil
+end
+
+test("1.0.4.5 corps spike C8: press 1 builds B's Army and CS2's Corps; press 2 lowers B's in place, removes CS2's, four parts home", function()
+	local S = Setup()
+	H.markBody()
+	Dev("corps_split", { stamp = 101 })
+	H.ok(CheckLine("CORPS_C8", "INFO"))
+	local b, cs = Named(1, "VEF-C8-B"), NamedAny("VEF-C8-CS")
+	H.notnil(b, "B's Army"); H.notnil(cs, "CS2's Corps")
+	H.eq(b:GetMilitaryFormation(), Form("ARMY")); H.eq(b:GetDamage(), 30); H.eq(#H.promotionTypes(b), 1)
+	H.eq(cs:GetMilitaryFormation(), Form("CORPS")); H.eq(cs:GetDamage(), 30)
+	H.ok(Has(CorpsAns().text, "C8 set up: B's VEF-C8-B ARMY (host + you + F)") and Has(CorpsAns().text, "Press C8 again"), CorpsAns().text)
+	local id = b:GetID()
+	Dev("corps_split", { stamp = 102 })
+	H.eq(CorpsAns().stamp, 102)
+	H.ok(Has(CorpsAns().text, "C8 split: VEF-C8-B ARMY -> STANDARD, same ID yes") and Has(CorpsAns().text, "promotions 1/1, dmg 30"), CorpsAns().text)
+	H.ok(Has(CorpsAns().text, "VEF-C8-CS removed"), CorpsAns().text)
+	H.eq(Named(1, "VEF-C8-B"):GetID(), id); H.eq(b:GetMilitaryFormation(), Form("STANDARD"))
+	H.eq(NamedAny("VEF-C8-CS"), nil, "CS2's Corps removed")
+	for _, d in ipairs({ { 0, "VEF-C8-YOU" }, { 2, "VEF-C8-F" }, { 0, "VEF-C8-YOU2" }, { 2, "VEF-C8-F2" } }) do
+		local u = Named(d[1], d[2])
+		H.notnil(u, d[2] .. " home to its sender"); H.eq(u:GetDamage(), 30, d[2])
+	end
+	H.eq(#H.promotionTypes(Named(2, "VEF-C8-F")), 0)
+	Dev("corps_split", { stamp = 103 })
+	H.ok(Has(CorpsAns().text, "C8 set up"), "a third press starts over")
+	H.eq(Named(0, "VEF-C8-YOU"), nil, "the old parts are gone")
+	H.ok(not H.hasLine("ERROR"), "no handler error")
+end)
+
+test("1.0.4.5 corps spike C8 and C9 without S0: CHECK, nothing made", function()
+	FreshBoot()
+	Dev("corps_split", { stamp = 3 })
+	H.ok(CheckLine("CORPS_C8", "CHECK"))
+	Dev("corps_vol", { stamp = 4 })
+	H.ok(CheckLine("CORPS_C9", "CHECK"))
+	H.eq(NamedAny("VEF-C8-B"), nil); H.eq(Named(0, "VEF-C9-V1"), nil)
+end)
+
+test("1.0.4.5 corps spike C9: three pairs with Volunteer records; wait message; after End Turn each pair's survivor; the merge trace", function()
+	local S = Setup()
+	H.markBody()
+	Dev("corps_vol", { stamp = 111 })
+	H.ok(CheckLine("CORPS_C9", "INFO"))
+	H.ok(Has(CorpsAns().text, "pair 1 select VEF-C9-V1, Form Corps, click VEF-C9-V2") and Has(CorpsAns().text, "Merge trace on"), CorpsAns().text)
+	local store = EFV_Records.Load()
+	local u = {}
+	for _, k in ipairs({ "V1", "V2", "REG", "V3", "V4", "REG2" }) do
+		u[k] = Named(0, "VEF-C9-" .. k)
+		H.notnil(u[k], k)
+		local rec = EFV_Records.FindByUnit(store, 0, u[k]:GetID())
+		if string.sub(k, 1, 1) == "V" then
+			H.notnil(rec, k .. " is a Volunteer"); H.eq(rec.forceType, EFV_Config.FT_VOL); H.eq(rec.recipientID, 1)
+			H.eq(rec.deployedTurn, FAKE.turn - 10)
+		else
+			H.eq(rec, nil, k .. " is a regular unit")
+		end
+	end
+	H.eq(H.dist(u.V1, u.V2), 1); H.eq(H.dist(u.REG, u.V3), 1); H.eq(H.dist(u.V4, u.REG2), 1)
+	H.ok(H.dist(u.V1, u.REG) >= 3 and H.dist(u.REG, u.V4) >= 3, "pairs at least 3 tiles apart")
+	H.eq(#H.promotionTypes(u.V1), 1); H.eq(u.V2:GetDamage(), 20)
+	-- merge trace: armed this turn, only for C3 / C9 units
+	local n0 = #H.lines("[EFV][Corps] G trace OnUnitMoved", true)
+	GameEvents.OnUnitMoved(0, u.V1:GetID())
+	H.ok(H.hasLine("[EFV][Corps] G trace OnUnitMoved P0/" .. u.V1:GetID() .. " (C9-V1): C9-V1 P0/" .. u.V1:GetID() .. " alive STANDARD xp "),
+		"trace line with every C9 unit")
+	GameEvents.OnUnitMoved(1, 999999)
+	H.eq(#H.lines("[EFV][Corps] G trace OnUnitMoved", true), n0 + 1, "other units are not traced")
+	Dev("corps_vol", { stamp = 112 })
+	H.ok(Has(CorpsAns().text, "merge the three pairs now"), CorpsAns().text)
+	-- "merges": pair 1 V1 survives, pair 2 REG survives, pair 3 V4 survives
+	for _, d in ipairs({ { "V1", "V2" }, { "REG", "V3" }, { "V4", "REG2" } }) do
+		u[d[1]]:SetMilitaryFormation(Form("CORPS"))
+		Players[0]:GetUnits():Destroy(u[d[2]])
+	end
+	H.endTurn()
+	local n1 = #H.lines("[EFV][Corps] G trace OnUnitMoved", true)
+	GameEvents.OnUnitMoved(0, u.V1:GetID())
+	H.eq(#H.lines("[EFV][Corps] G trace OnUnitMoved", true), n1, "the trace is off after the turn start")
+	Dev("corps_vol", { stamp = 113 })
+	local t = CorpsAns().text
+	H.ok(Has(t, "pair 1 survived: C9-V1 (C9-V1 P0/" .. u.V1:GetID() .. " CORPS"), t)
+	H.ok(Has(t, "C9-V2 P0/" .. u.V2:GetID() .. " FindID nil"), t)
+	H.ok(Has(t, "pair 2 survived: C9-REG (") and Has(t, "pair 3 survived: C9-V4 ("), t)
+	H.ok(Has(t, "Volunteer record "), t)
+	H.ok(not H.hasLine("ERROR"), "no handler error")
+end)
+
+test("1.0.4.5 panel: C8 / C9 buttons; C10 cycles off -> ask -> block -> off; popup and Cancel; the blocked click; UI trace", function()
+	FreshBoot()
+	Dev("scn_setup", { stamp = 1 })
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	for _, w in ipairs({ { "C8 Split a mixed Army (press twice)", "corps_split", "C8 set up" },
+		{ "C9 Volunteer merges (again after End Turn)", "corps_vol", "C9 (" } }) do
+		local b = FAKE_UI.FindButton(w[1])
+		H.notnil(b, w[1])
+		b:Click()
+		H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, w[2])
+		Pump({ panel }, 4)
+		local rec = panel.Controls.RecordLabel:GetText()
+		H.ok(string.find(rec, w[3], 1, true) == 1 and Has(rec, "[NEWLINE]UI: "), rec)
+	end
+	H.ok(H.hasLine("[EFV][Corps] UI summary corps_split: C8-B "), "UI reads the C8 units")
+	-- C10 mode cycling (UI only: no request)
+	local nReq = #FAKE_UI.requests
+	local g = FAKE_UI.FindButton("C10 Merge guard off/ask/block")
+	H.notnil(g)
+	g:Click()
+	H.ok(string.find(panel.Controls.RecordLabel:GetText(), "C10 merge guard: ask", 1, true) == 1, panel.Controls.RecordLabel:GetText())
+	H.eq(#FAKE_UI.requests, nReq, "C10 sends nothing")
+	-- ask: Form Corps with B's lent unit selected
+	Dev("corps_merge", { stamp = 90 })
+	local lent, own = Named(0, "VEF-C3-LENT"), Named(0, "VEF-C3-OWN")
+	InterfaceModeTypes.FORM_CORPS, InterfaceModeTypes.FORM_ARMY = 50, 51
+	UnitCommandTypes.FORM_CORPS, UnitCommandResults.UNITS = "FORM_CORPS", "UNITS"
+	UnitManager.GetCommandTargets = function(u, cmd)
+		if cmd == "FORM_CORPS" and (u == lent or u == own) then return { UNITS = { { player = 0, id = ((u == lent) and own or lent):GetID() } } } end
+		return {}
+	end
+	local mode = 50
+	UI.GetInterfaceMode = function() return mode end
+	UI.SetInterfaceMode = function(m) mode = m end
+	FAKE_UI.selectedUnit = lent
+	FAKE_UI.popups = {}
+	Events.InterfaceModeChanged(0, 50)
+	local pop = FAKE_UI.popups[1]
+	H.notnil(pop, "guard popup opened")
+	H.eq(pop.id, "EFV_DevMergeGuard")
+	H.ok(Has(pop.texts[1], "VEF-C3-LENT P0/" .. lent:GetID() .. " (lent by P1"), pop.texts[1])
+	H.ok(not Has(pop.texts[1], "VEF-C3-OWN P0"), "the host's own unit is not listed")
+	pop.cancel()
+	H.eq(mode, InterfaceModeTypes.SELECTION, "Cancel leaves the mode")
+	H.ok(H.hasLine("[EFV][Corps] UI guard FORM_CORPS Cancel: SetInterfaceMode(SELECTION) ok=true, mode now SELECTION"))
+	-- block: the click on a VEF unit's plot is swallowed, another plot passes
+	g:Click()
+	H.ok(string.find(panel.Controls.RecordLabel:GetText(), "C10 merge guard: block", 1, true) == 1)
+	MouseEvents = { LButtonUp = 9 }
+	mode = 50
+	local cursor = Map.GetPlot(lent:GetX(), lent:GetY()):GetIndex()
+	UI.GetCursorPlotID = function() return cursor end
+	local click = { GetMessageType = function() return MouseEvents.LButtonUp end }
+	H.eq(panel.ContextPtr.inputHandler(click), true, "click on the lent unit swallowed")
+	H.ok(H.hasLine("[EFV][Corps] UI guard click blocked at " .. lent:GetX() .. "," .. lent:GetY()))
+	H.ok(Has(panel.Controls.RecordLabel:GetText(), "C10: click blocked at"), panel.Controls.RecordLabel:GetText())
+	cursor = Map.GetPlot(own:GetX(), own:GetY()):GetIndex()
+	H.eq(panel.ContextPtr.inputHandler(click), false, "a click on your own unit passes")
+	mode = InterfaceModeTypes.SELECTION
+	cursor = Map.GetPlot(lent:GetX(), lent:GetY()):GetIndex()
+	H.eq(panel.ContextPtr.inputHandler(click), false, "outside Form Corps every click passes")
+	-- off: nothing swallowed, no popup
+	g:Click()
+	H.ok(string.find(panel.Controls.RecordLabel:GetText(), "C10 merge guard: off", 1, true) == 1)
+	mode = 50
+	H.eq(panel.ContextPtr.inputHandler(click), false, "guard off: nothing swallowed")
+	FAKE_UI.popups = {}
+	Events.InterfaceModeChanged(0, 50)
+	H.eq(#FAKE_UI.popups, 0, "guard off: no popup")
+	-- UI merge trace (C3 armed it this turn)
+	Events.UnitFormCorps(0, own:GetID())
+	H.ok(H.hasLine("[EFV][Corps] UI trace UnitFormCorps P0/" .. own:GetID() .. " (C3-OWN): "), "UI trace line")
+	H.ok(H.hasLine("C3-LENT P0/" .. lent:GetID() .. " alive STANDARD xp "), "every C3 unit listed")
+	H.ok(not H.hasLine("corps spike error") and not H.hasLine("merge guard input error") and not H.hasLine("guard ERROR"))
+	MouseEvents = nil
+end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.5.1: the VEF 1.0.5 test (FIXPLAN_proxy_war.md B5,
+-- EFV/TESTING_1.0.5.md). FreshBoot: B = P1 (capital a 2-turn trip from
+-- yours), E = P2, X = P3.
+-- ---------------------------------------------------------------------------
+local function ProxyAns() return H.prop("EFV_DEV_SCN").proxy.ans end
+
+local function ProxyBoot(opts)
+	local S = FreshBoot(opts)
+	Dev("scn_proxy", { stamp = 1 })
+	H.ok(CheckLine("PROXY_P1", "PASS"), "P1 passes")
+	H.markBody()
+	return S
+end
+
+test("1.0.5.1 P1: roles (B band 2, E and X at war with B), friend + open borders, three Swordsmen, no S0 war, answer text", function()
+	local S = FreshBoot()
+	Dev("scn_proxy", { stamp = 7 })
+	H.ok(CheckLine("PROXY_P1", "PASS"))
+	local st = H.prop("EFV_DEV_SCN")
+	H.eq(st.proxy.b, 1); H.eq(st.proxy.e, 2); H.eq(st.proxy.x, 3); H.eq(st.proxy.band, 2)
+	H.eq(st.proxy.fee, EFV_Fee("UNIT_SWORDSMAN", "EXPEDITIONARY", 2))
+	H.eq(st.me, 0); H.eq(st.ally, 1); H.isnil(st.enemy); H.isnil(st.friend); H.isnil(st.cs)
+	H.ok(Players[1]:GetDiplomacy():IsAtWarWith(2) and Players[1]:GetDiplomacy():IsAtWarWith(3), "B at war with E and X")
+	for _, pid in ipairs({ 1, 2, 3, 4 }) do H.ok(not FAKE.PairGet(FAKE.diplo.war, 0, pid), "you at peace with P" .. pid) end
+	H.eq(EFV_PartnerBasis(0, 1), "FRIEND"); H.eq(EFV_VolunteerBasis(0, 1), "FRIEND_OB")
+	for i = 1, 3 do
+		local u = Named(0, "VEF-PROXY-" .. i)
+		H.notnil(u, "VEF-PROXY-" .. i)
+		H.eq(u:GetMovesRemaining(), u:GetMaxMoves(), "full moves")
+		H.eq(Map.GetPlot(u:GetX(), u:GetY()):GetOwner(), 0, "on your land")
+	end
+	local lim = GameInfo.GlobalParameters["DIPLOMACY_DENOUNCE_TIME_LIMIT"].Value
+	local t = ProxyAns().text
+	H.eq(ProxyAns().stamp, 7)
+	H.ok(string.find(t, "P1: B=P1 (friend, open borders, trip 2 turns, fee " .. st.proxy.fee .. "), E=P2 and X=P3 at war with B; you at war with nobody: yes; Expeditionary to B NO_COMMON_WAR, Volunteers to B NO_COMMON_WAR", 1, true) == 1, t)
+	H.ok(Has(t, "denounce limit in the game data " .. tostring(lim)), t)
+	H.eq(st.focus.u, Named(0, "VEF-PROXY-1"):GetID(), "VEF-PROXY-1 selected")
+	H.clean()
+end)
+
+test("1.0.5.1 P1 refusals: after S0, at war with someone, too few civs, twice -> CHECK, nothing made", function()
+	Setup()
+	Dev("scn_proxy", { stamp = 2 })
+	H.ok(CheckLine("PROXY_P1", "CHECK")); H.ok(Has(ProxyAns().text, "S0 ran in this game"))
+	H.isnil(Named(0, "VEF-PROXY-1"))
+	for k in pairs(FAKE.props) do FAKE.props[k] = nil end   -- a new game
+	for k in pairs(FAKE.diplo) do FAKE.diplo[k] = {} end
+	FreshBoot()
+	H.war(0, 4)
+	Dev("scn_proxy", { stamp = 3 })
+	H.ok(CheckLine("PROXY_P1", "CHECK")); H.ok(Has(ProxyAns().text, "you are at war with P4"), ProxyAns().text)
+	H.isnil(Named(0, "VEF-PROXY-1"))
+	for k in pairs(FAKE.props) do FAKE.props[k] = nil end
+	for k in pairs(FAKE.diplo) do FAKE.diplo[k] = {} end
+	FreshBoot()
+	H.kill(3)
+	Dev("scn_proxy", { stamp = 4 })
+	H.ok(CheckLine("PROXY_P1", "CHECK")); H.ok(Has(ProxyAns().text, "needs 3 other civs"), ProxyAns().text)
+	H.isnil(H.prop("EFV_DEV_SCN").proxy.b)
+	for k in pairs(FAKE.props) do FAKE.props[k] = nil end
+	for k in pairs(FAKE.diplo) do FAKE.diplo[k] = {} end
+	ProxyBoot()
+	Dev("scn_proxy", { stamp = 5 })
+	H.ok(Has(ProxyAns().text, "P1 already ran"), ProxyAns().text)
+	local n = 0
+	for _, u in ipairs(H.unitsOf(0, "UNIT_SWORDSMAN")) do if u.vetName == "VEF-PROXY-1" then n = n + 1 end end
+	H.eq(n, 1, "no second set")
+end)
+
+test("1.0.5.1 P1 band preference: a band-2 capital wins over a lower-ID band-1 one", function()
+	H.world({ turn = 2 })
+	FAKE.NewPlayer(5, { gold = 1000 })
+	H.city(0, 10, 10, { capital = true })
+	H.city(1, 14, 10, { capital = true })
+	H.city(2, 40, 30, { capital = true })
+	H.city(3, 70, 40, { capital = true })
+	H.city(5, 22, 10, { capital = true })
+	H.loadEFV()
+	FAKE.dofile("EFV_Dev/Scripts/EFV_Dev_Gameplay.lua")
+	H.eq(EFV_Band(10, 10, 14, 10), 1); H.eq(EFV_Band(10, 10, 22, 10), 2)
+	Dev("scn_proxy", { stamp = 1 })
+	local P = H.prop("EFV_DEV_SCN").proxy
+	H.eq(P.b, 5); H.eq(P.band, 2); H.eq(P.e, 1); H.eq(P.x, 2)
+end)
+
+test("1.0.5.1 P Status and PROXY_WATCH: states, wars, the send rule (proxy war after a denouncement), 12 turns of watch lines", function()
+	ProxyBoot()
+	Dev("proxy_status", { stamp = 9 })
+	H.ok(string.find(ProxyAns().text, "P T2: you-E NEUTRAL, you-X NEUTRAL; B at war with E yes, X yes; you at war with E no, X no; Expeditionary to B NO_COMMON_WAR, Volunteers to B NO_COMMON_WAR; B gold 1000; your records: none", 1, true) == 1, ProxyAns().text)
+	H.denounce(0, 2)
+	Dev("proxy_status", { stamp = 10 })
+	H.ok(Has(ProxyAns().text, "you-E DENOUNCED") and Has(ProxyAns().text, "Expeditionary to B ok (proxy war against P2), Volunteers to B NO_COMMON_WAR"), ProxyAns().text)
+	H.turns(14)
+	H.len(H.lines("[EFV][CHECK] PROXY_WATCH INFO"), 12, "turns 3 to 14")
+	H.ok(not H.hasLine("ERROR evaluate"))
+end)
+
+test("1.0.5.1 P3: the target is X, else E (when X denounced you); opinion pushed to -30", function()
+	ProxyBoot()
+	Dev("proxy_lower", { stamp = 11 })
+	H.eq(FAKE.diplo.score[3][0], -30)
+	H.ok(Has(ProxyAns().text, "P3: P3's opinion of you 0 -> -30; End Turn until P3 denounces you"), ProxyAns().text)
+	H.denounce(3, 0)
+	Dev("proxy_lower", { stamp = 12 })
+	H.eq(FAKE.diplo.score[2][0], -30, "E now")
+	H.ok(Has(ProxyAns().text, "P3: P2's opinion"), ProxyAns().text)
+	H.denounce(2, 0)
+	Dev("proxy_lower", { stamp = 13 })
+	H.ok(CheckLine("PROXY_P3", "CHECK"))
+end)
+
+test("1.0.5.1 P4: the newest outbound record arrives 8 turns from now", function()
+	local S = ProxyBoot()
+	Dev("proxy_hold", { stamp = 14 })
+	H.ok(CheckLine("PROXY_P4", "CHECK"), "nothing on its way yet")
+	H.denounce(0, 2)
+	H.send(0, Named(0, "VEF-PROXY-1"), 1, S.c1, "EXPEDITIONARY", 999)
+	local r = H.records()[1]
+	H.eq(r.state, "OUTBOUND")
+	Dev("proxy_hold", { stamp = 15 })
+	r = H.records()[1]
+	H.eq(r.arrivalTurn, FAKE.turn + 8)
+	H.eq(ProxyAns().text, "P4: VEF-PROXY-1 (record " .. r.id .. ") now arrives on turn " .. (FAKE.turn + 8))
+	H.clean()
+end)
+
+test("1.0.5.1 P5: press 1 makes VEF-UPKEEP; press 2 without the send -> CHECK; after the send it arrives next turn and B's gold is 0", function()
+	local S = ProxyBoot()
+	Dev("proxy_poor", { stamp = 16 })
+	local u = Named(0, "VEF-UPKEEP")
+	H.notnil(u); H.eq(GameInfo.Units[u:GetType()].UnitType, "UNIT_MODERN_AT")
+	H.eq(u:GetMovesRemaining(), u:GetMaxMoves())
+	H.ok(Has(ProxyAns().text, "send it to B as Expeditionary, then press P5 again"))
+	Dev("proxy_poor", { stamp = 17 })
+	H.ok(CheckLine("PROXY_P5", "CHECK")); H.ok(Has(ProxyAns().text, "send VEF-UPKEEP first"))
+	H.denounce(0, 2)
+	H.send(0, u, 1, S.c1, "EXPEDITIONARY", 999)
+	local r = H.records()[1]
+	Dev("proxy_poor", { stamp = 18 })
+	H.eq(H.records()[1].arrivalTurn, FAKE.turn + 1)
+	H.eq(H.gold(1), 0)
+	H.eq(ProxyAns().text, "P5: VEF-UPKEEP (record " .. r.id .. ") arrives for B next turn; B's gold now 0 (was 1000)")
+	H.endTurn()
+	H.eq(H.records()[1].state, "DEPLOYED")
+	H.ok(H.hasLine("VEF-UPKEEP (record " .. r.id .. "): DEPLOYED, unit on the map, B gold"), "PROXY_WATCH follows it")
+end)
+
+test("1.0.5.1 A9: carrier and plane apart (send rule without CARRIER_LOADED); plane moved aboard -> CARRIER_LOADED", function()
+	ProxyBoot()
+	for _, xy in ipairs({ { 9, 10 }, { 8, 10 }, { 8, 11 }, { 9, 11 }, { 7, 10 }, { 7, 11 }, { 6, 10 }, { 6, 11 } }) do H.terrain(xy[1], xy[2], "COAST") end
+	Dev("air_rebase", { stamp = 19 })
+	H.ok(CheckLine("AIR_A9", "INFO"))
+	local cv, pl = Named(0, "VEF-CV9"), Named(0, "VEF-AIR-9")
+	H.notnil(cv); H.notnil(pl)
+	H.ok(not (cv.x == pl.x and cv.y == pl.y), "not on the carrier's tile")
+	H.ok(H.dist(cv, pl) >= 2 and H.dist(cv, pl) <= 3)
+	local t = AirAns().text
+	H.ok(Has(t, "carrier send rule now:") and not Has(t, "CARRIER_LOADED") and Has(t, "Rebase VEF-AIR-9 onto VEF-CV9"), t)
+	H.moveUnit(pl, cv.x, cv.y)
+	Dev("air_rebase", { stamp = 20 })
+	t = AirAns().text
+	H.ok(Has(t, "plane on the carrier's tile yes") and Has(t, "CARRIER_LOADED"), t)
+	H.eq(H.prop("EFV_DEV_SCN").focus.u, cv:GetID(), "carrier selected")
+	H.ok(not H.hasLine("ERROR"))
+end)
+
+test("1.0.5.1 modinfo: Data/EFV_Dev_Denounce.xml in an UpdateDatabase action and in Files, value 3", function()
+	local mi = __py_read("EFV_Dev/EFV_Dev.modinfo")
+	H.ok(Has(mi, '<UpdateDatabase id="EFV_DEV_Denounce" criteria="EFV_DEV_XP2">'))
+	local _, n = string.gsub(mi, "<File>Data/EFV_Dev_Denounce.xml</File>", "")
+	H.eq(n, 2, "action and Files")
+	H.ok(Has(mi, "Requires Volunteers &amp; Expeditionary Forces (VEF) 1.0.5."))
+	local x = __py_read("EFV_Dev/Data/EFV_Dev_Denounce.xml")
+	H.ok(Has(x, '<Replace Name="DIPLOMACY_DENOUNCE_TIME_LIMIT" Value="3"/>'), x)
+end)
+
+test("1.0.5.1 panel: the P buttons and A9 send their commands; P2's three verdicts; the session line names B, E and X", function()
+	FreshBoot()
+	local panel = PanelUI()
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	FAKE_UI.FindButton("P1 Proxy war setup"):Click()
+	H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, "scn_proxy")
+	Pump({ panel }, 4)
+	local rec = panel.Controls.RecordLabel:GetText()
+	H.ok(string.find(rec, "P1: B=P1", 1, true) == 1 and Has(rec, "[NEWLINE]UI: B=") and Has(rec, "denounce limit "), rec)
+	H.ok(Has(rec, "E: never denounced"), rec)
+	FAKE_UI.FindButton("P Status"):Click()
+	H.ok(Has(panel.Controls.InfoLabel:GetText(), "Proxy test: B="), panel.Controls.InfoLabel:GetText())
+	for _, w in ipairs({ { "P Status", "proxy_status" }, { "P3 X dislikes you (if P2 fails)", "proxy_lower" },
+			{ "P4 Hold the unit on its way", "proxy_hold" }, { "P5 Poor host (press twice)", "proxy_poor" },
+			{ "A9 Carrier for a rebase (press twice)", "air_rebase" } }) do
+		FAKE_UI.FindButton(w[1]):Click()
+		H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, w[2], w[1])
+		Pump({ panel }, 4)
+	end
+	local verdicts = { INITIATOR = "P2: X denounced you on turn 2", LOCAL = "P2: WRONG WAY: the game made you denounce X",
+		IGNORE = "P2: nothing happened: press P3" }
+	for _, mode in ipairs({ "IGNORE", "LOCAL", "INITIATOR" }) do
+		FAKE.diplo.denounced, FAKE.diplo.denounceTurn = {}, {}
+		FAKE.requestSessionMode = mode
+		FAKE.diploSessions = {}
+		FAKE_UI.requests = {}
+		FAKE_UI.FindButton("P2 X denounces you"):Click()
+		H.len(FAKE_UI.requests, 0, "P2 sends no request at once")
+		H.eq(FAKE.diploSessions[1].a, 3); H.eq(FAKE.diploSessions[1].b, 0); H.eq(FAKE.diploSessions[1].kind, "DENOUNCE")
+		Pump({ panel }, 8)
+		rec = panel.Controls.RecordLabel:GetText()
+		H.ok(string.find(rec, verdicts[mode], 1, true) == 1, mode .. ": " .. rec)
+	end
+	H.ok(Has(rec, "X: denounced you on T2"), rec)
+	H.ok(not H.hasLine("proxy test error"))
+end)
+
+-- ---------------------------------------------------------------------------
+-- EFV_Dev 1.0.5.2: the upgrade spike U1 (FIXPLAN_upgrade_relink.md U6,
+-- EFV/TESTING_1.0.5.md). After P1 (B = st.proxy.b) or S0 (B = st.ally).
+-- ---------------------------------------------------------------------------
+local function UpgAns() return H.prop("EFV_DEV_SCN").upg.ans end
+
+-- A free tile of pid's land next to u (the designer's one-tile move).
+local function OwnFreeNeighbor(u, pid)
+	for _, p in ipairs(Map.GetNeighborPlots(u.x, u.y, 1)) do
+		if H.dist(p, u) == 1 and p.owner == pid and not p:IsWater() and not p:IsImpassable() and p:GetUnitCount() == 0
+				and CityManager.GetCityAt(p.x, p.y) == nil then
+			return p
+		end
+	end
+	return nil
+end
+
+local function U1Press1()
+	Dev("upg_spike", { stamp = 30 })
+	H.ok(CheckLine("UPG_U1", "PASS"), "press 1 passes")
+	return Named(0, "VEF-U1-M"), Named(0, "VEF-U1-S")
+end
+
+test("1.0.5.2 U1 after P1: press 1 lends you two Warriors from B in your land, Ram 2 tiles away, grants, answer", function()
+	ProxyBoot()
+	FAKE.supportFormation = -1
+	local gold = H.gold(0)
+	local m, s = U1Press1()
+	local up = H.prop("EFV_DEV_SCN").upg
+	H.eq(up.b, 1, "B from P1"); H.eq(up.step, 1); H.eq(up.from, "UNIT_WARRIOR"); H.eq(up.to, "UNIT_SWORDSMAN")
+	H.notnil(m); H.notnil(s)
+	H.eq(m.typeName, "UNIT_WARRIOR"); H.eq(s.typeName, "UNIT_WARRIOR")
+	for _, u in ipairs({ m, s }) do H.eq(Map.GetPlot(u.x, u.y):GetOwner(), 0, "in your land") end
+	H.ok(H.dist(m, s) >= 2, "at least 2 tiles apart")
+	H.eq(#H.promotionTypes(m), 1, "one promotion"); H.eq(m.damage, 30); H.eq(m.moves, m.maxMoves + 2, "2 extra moves")
+	H.eq(#H.promotionTypes(s), 0); H.eq(s.damage, 0); H.eq(s.moves, s.maxMoves)
+	H.notnil(OwnFreeNeighbor(m, 0), "a free tile of yours next to VEF-U1-M")
+	local r, b = Named(0, "VEF-U1-R"), Named(0, "VEF-U1-B")
+	H.eq(r.typeName, "UNIT_BATTERING_RAM"); H.eq(b.typeName, "UNIT_BUILDER")
+	H.eq(H.dist(r, m), 2, "Ram exactly 2 tiles from VEF-U1-M")
+	H.eq(up.ram.f, "-1"); H.eq(up.bld.f, "0")
+	local recs = H.records()
+	H.len(recs, 2)
+	for i, u in ipairs({ m, s }) do
+		local rec = recs[i]
+		H.eq(rec.forceType, "EXPEDITIONARY"); H.eq(rec.senderID, 1); H.eq(rec.recipientID, 0)
+		H.eq(rec.onMapPlayerID, 0); H.eq(rec.onMapUnitID, u.id); H.eq(rec.state, "DEPLOYED")
+	end
+	H.eq(H.records()[1].experience, m.xp, "the record has VEF-U1-M's XP")
+	H.eq(H.gold(0), gold + 3000)
+	H.ok(H.res(0, "RESOURCE_IRON") >= 40, "Iron for two Swordsman upgrades")
+	local t = UpgAns().text
+	H.ok(string.find(t, "U1: B=P1; VEF-U1-M (record 1, UNIT_WARRIOR, xp ", 1, true) == 1, t)
+	H.ok(Has(t, "both lent to you by B") and not Has(t, "NOT BOTH") and Has(t, "Ram formation -1, Builder formation 0"), t)
+	H.ok(Has(t, "RESOURCE_IRON +50") and Has(t, "one upgrade needs 20"), t)
+	H.ok(Has(t, "move VEF-U1-M one tile inside your borders, then Upgrade it; Upgrade VEF-U1-S without moving it; then press U1 again"), t)
+	H.ok(H.hasLine("[EFV][Upg] G U1 press 1: VEF-U1-M P0/" .. m.id), "press 1 line")
+	H.eq(H.prop("EFV_DEV_SCN").focus.u, m.id, "VEF-U1-M selected")
+	H.clean()
+end)
+
+test("1.0.5.2 U1: move then upgrade, upgrade in place; trace, press 2 (moves left), turn-start line, press 3 answers", function()
+	ProxyBoot({ flags = { FLAG_UPGRADE_CREATE_HOOK = true } })   -- F2 ships off (spike U6); this test covers it on
+	FAKE.supportFormation = -1
+	FAKE.upgradeEvents = "ghost"
+	FAKE.upgradeGhostOffMap = true   -- the old object goes off the map (final session L479)
+	local m, s = U1Press1()
+	local mOld, sOld = m.id, s.id
+	local to = OwnFreeNeighbor(m, 0)
+	H.move(m, to.x, to.y)
+	H.ok(H.hasLine("[EFV][Upg] G OnUnitMoved #1 P0/" .. mOld), "the move is traced")
+	H.ok(H.hasLine("= VEF-U1-M (old unit); VEF-U1-M P0/" .. mOld .. ": live at " .. to.x .. "," .. to.y), "old unit live on its new tile")
+	local nm = H.upgrade(m, "UNIT_SWORDSMAN")
+	local ns = H.upgrade(s, "UNIT_SWORDSMAN")
+	H.ok(H.hasLine("[EFV][Upg] G UnitCreated #2 P0/" .. nm.id), "UnitCreated traced")
+	H.ok(H.hasLine("= VEF-U1-M (new unit)"), "matched by tile")
+	H.ok(H.hasLine("[EFV][Upg] G UnitInitialized #5 P0/" .. ns.id), "UnitInitialized of the second upgrade")
+	Dev("upg_spike", { stamp = 31 })
+	local t = UpgAns().text
+	H.ok(string.find(t, "U1 press 2 (T2): VEF-U1-M: record 1 DEPLOYED", 1, true) == 1, t)
+	H.ok(Has(t, "; new (trace) P0/" .. nm.id) and Has(t, "moves left 0/2"), t)
+	H.ok(Has(t, "old P0/" .. mOld .. " ghost (GONE_OFFMAP) at -9999,-9999 dmg 30"), t)
+	H.ok(Has(t, "VEF-U1-M: record 1 DEPLOYED unit=" .. nm.id .. " type=UNIT_SWORDSMAN last=" .. to.x .. "," .. to.y .. " (follows the new unit)"), t)
+	H.ok(Has(t, "VEF-U1-S: record 2 DEPLOYED unit=" .. ns.id .. " type=UNIT_SWORDSMAN"), t)
+	H.ok(Has(t, "Now End Turn, then press U1 a third time"), t)
+	H.eq(H.prop("EFV_DEV_SCN").upg.step, 2)
+	H.endTurn()
+	H.ok(CheckLine("UPG_SPIKE", "INFO"), "turn-start line")
+	H.ok(H.hasLine("(at your turn start; press U1 for the same line)"))
+	Dev("upg_spike", { stamp = 32 })
+	t = UpgAns().text
+	H.ok(Has(t, "Q-A OnUnitMoved for the old units: M 1, S 0"), t)
+	H.ok(Has(t, "Q-B events about the new units: M UnitCreated #2 UnitInitialized #3 Events.UnitUpgraded no, S UnitCreated #4 UnitInitialized #5"), t)
+	H.ok(Has(t, "Q-C old unit at the first of them: M ghost (GONE_OFFMAP) at -9999,-9999 dmg 30, S ghost (GONE_OFFMAP) at -9999,-9999 dmg 0"), t)
+	H.ok(string.find(t, "U1 T3 VEF: VEF-U1-M record 1 DEPLOYED unit=" .. nm.id .. " type=UNIT_SWORDSMAN", 1, true) == 1, t)
+	H.ok(Has(t, "= the upgraded unit; VEF-U1-S record 2 DEPLOYED unit=" .. ns.id), t)
+	H.len(H.notifs(0, "EFV_NOTIF_MERGED"), 0, "no merge misread from the Ram")
+	H.ok(Has(t, "Q-D moves left on the new units (press 2): M 0/2, S 0/2; OnUnitMoved for the new units: M 0, S 0"), t)
+	H.ok(Has(t, "Q-E xp/promotions/damage old -> new: M " .. nm.xp .. "/1/30 -> " .. nm.xp .. "/1/30, S 0/0/0 -> 0/0/0"), t)
+	H.ok(Has(t, "Q-F formations: Ram -1, Builder 0 (STANDARD 0)"), t)
+	H.ok(Has(t, "Q-G new serials above 2: M 2 no, S 2 no"), t)
+	H.eq(H.prop("EFV_DEV_SCN").upg.step, 3)
+	H.ok(not H.hasLine("[EFV][Upg] G OnUnitMoved #6"), "no trace after the press-1 turn")
+	H.clean()
+end)
+
+test("1.0.5.2 U1 after S0: B is S0's B; without a session -> CHECK, nothing made", function()
+	FreshBoot()
+	Dev("upg_spike", { stamp = 40 })
+	H.ok(CheckLine("UPG_U1", "CHECK")); H.ok(Has(UpgAns().text, "press P1 (or S0) first"))
+	H.isnil(Named(0, "VEF-U1-M"))
+	H.len(H.records(), 0)
+	Dev("scn_setup", { stamp = 41 })
+	H.markBody()
+	local m = U1Press1()
+	H.notnil(m)
+	H.eq(H.prop("EFV_DEV_SCN").upg.b, H.prop("EFV_DEV_SCN").ally, "B = S0's B")
+	H.eq(H.records()[1].senderID, 1)
+	H.clean()
+end)
+
+test("1.0.5.2 panel: U1 sends upg_spike; the answer, the UI's Upgrade check and the UI Events.UnitUpgraded trace", function()
+	FreshBoot()
+	Dev("scn_proxy", { stamp = 1 })
+	local panel = PanelUI()
+	UnitCommandTypes.UPGRADE, UnitCommandResults.UNIT_TYPE = "UPGRADE", "UNIT_TYPE"
+	local base = UnitManager.CanStartCommand
+	UnitManager.CanStartCommand = function(u, cmd, bTest, bResults)
+		if cmd == "UPGRADE" then return u.moves > 0, { UNIT_TYPE = GameInfo.Units["UNIT_SWORDSMAN"].Index } end
+		return base(u, cmd, bTest, bResults)
+	end
+	FAKE_UI.KeyTo(panel, Keys.D, { ctrl = true, shift = true })
+	FAKE_UI.FindButton("U1 Upgrade spike (press 1, 2, 3)"):Click()
+	H.eq(FAKE_UI.requests[#FAKE_UI.requests].params.cmd, "upg_spike")
+	Pump({ panel }, 4)
+	local rec = panel.Controls.RecordLabel:GetText()
+	H.ok(string.find(rec, "U1: B=P1", 1, true) == 1, rec)
+	H.ok(Has(rec, "[NEWLINE]UI: Upgrade VEF-U1-M yes -> UNIT_SWORDSMAN, VEF-U1-S yes -> UNIT_SWORDSMAN"), rec)
+	H.ok(H.hasLine("[EFV][Upg] UI press 1 Upgrade button: VEF-U1-M yes"))
+	local m = Named(0, "VEF-U1-M")
+	local nm = H.upgrade(m, "UNIT_SWORDSMAN")
+	Events.UnitUpgraded(0, nm.id, nm.typeIndex)
+	H.ok(H.hasLine("[EFV][Upg] UI Events.UnitUpgraded P0/" .. nm.id .. " upgradeType=" .. nm.typeIndex .. " P0/" .. nm.id), "UI trace")
+	H.ok(H.hasLine("[EFV][Upg] G Events.UnitUpgraded #1 P0/" .. nm.id), "gameplay trace of the same event")
+	FAKE_UI.FindButton("U1 Upgrade spike (press 1, 2, 3)"):Click()
+	Pump({ panel }, 4)
+	rec = panel.Controls.RecordLabel:GetText()
+	H.ok(string.find(rec, "U1 press 2 (T2)", 1, true) == 1 and not Has(rec, "UI: Upgrade"), rec)
+	H.ok(not H.hasLine("upgrade spike error"))
+end)
+
+test("1.0.5.2 U1 at turn 2 (capital owns only ring 1, P1's Swordsmen on it): they move to neutral land, both U1 units fit in your land", function()
+	local S = FreshBoot()
+	for _, p in ipairs(Map.GetNeighborPlots(S.c0.x, S.c0.y, 2)) do
+		if H.dist(p, S.c0) == 2 then p.owner = -1 end
+	end
+	Dev("scn_proxy", { stamp = 1 })
+	H.ok(CheckLine("PROXY_P1", "PASS"))
+	H.markBody()
+	local m, s = U1Press1()
+	for _, u in ipairs({ m, s }) do H.eq(Map.GetPlot(u.x, u.y):GetOwner(), 0, "in your land") end
+	H.notnil(OwnFreeNeighbor(m, 0), "a free tile of yours next to VEF-U1-M")
+	H.ok(Has(UpgAns().text, "idle test Swordsmen moved out of your land"), UpgAns().text)
+	for i = 1, 3 do
+		local u = Named(0, "VEF-PROXY-" .. i)
+		H.ok(H.dist(u, S.c0) >= 3, "VEF-PROXY-" .. i .. " placed away")
+	end
+	H.clean()
+end)

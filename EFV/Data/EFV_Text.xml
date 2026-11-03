@@ -37,6 +37,9 @@
          _WAR           1 Unit, 2 City (return city), 3 N transit turns,
                         4 Recipient civ (sender of an EXP / CS unit sent home
                         because the sender and the host went to war, 1.0.4)
+         _DISBANDED     1 Unit, 2 City (return city), 3 N transit turns,
+                        4 Recipient civ (the AI or city-state holder that
+                        disbanded it), 5 Refund text or empty (1.0.5)
          _CANCELLED     1 Unit, 2 City (destination), 3 Reason text, 4 Home
                         city, 5 N transit turns, 6 Refund text (sender of a
                         cancelled transit without a free tile, 2026-09-30)
@@ -72,6 +75,10 @@
                                         1 recipient name(s) (EFV_UIShared
                                           NAME_REASON_LIST; comma-joined list
                                           in the Send-button summary)
+       LOC_EFV_NO_COMMON_WAR_EXP        1 recipient name(s) (the Expeditionary
+                                          text of NO_COMMON_WAR while
+                                          FLAG_PROXY_WAR is on;
+                                          EFV_ReasonTextKey, 1.0.5)
        LOC_EFV_REASON_WRONG_TERRITORY   1 land owner name (the player whose
                                           territory the unit stands on, not
                                           the row's recipient; 0.7)
@@ -80,6 +87,10 @@
        LOC_EFV_PICKER_FEE               1 fee (> 0; a fee of 0 uses
                                           LOC_EFV_FEE_FREE; 0.7)
        LOC_EFV_PICKER_FROM_LAND         1 land owner name (0.7)
+       LOC_EFV_PICKER_PROXY_WAR         1 enemy civ, 2 N turns of denouncement
+                                          left (EFV_UI_ProxyWarNote, 1.0.5)
+       LOC_EFV_PICKER_PROXY_WAR_ANY     1 enemy civ (turns left unreadable)
+       LOC_EFV_PICKER_PROXY_TRIP        1 N trip turns
        LOC_EFV_STATE_*                  1 N (turns; see each row); _BLOCKED,
                                           _DEPLOYED_EXPIRED, _DEPLOYED_VOLUNTEER_READY
                                           take none
@@ -103,7 +114,9 @@
        LOC_EFV_CANCEL_REASON_<status>   1 Civ (sender's copy: the recipient;
                                           recipient's copy: the sender;
                                           _HOST variants where the wording
-                                          differs; DEST_LOST ignores it)
+                                          differs; DEST_LOST ignores it;
+                                          NO_COMMON_WAR has _EXP / _EXP_HOST
+                                          for Expeditionary sends, 1.0.5)
        LOC_EFV_CANCEL_REFUND            1 N gold refunded; _REFUND_FREE and
                                           LOC_EFV_CANCEL_DEST_GENERIC none
        LOC_EFV_ENTRUST_TO               1 Recipient civ
@@ -134,7 +147,7 @@
 			<Text>Send as Expeditionary</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_EXPEDITIONARY_TT" Language="en_US">
-			<Text>Lend this unit to an ally, teammate or declared friend who shares one of your wars. It can leave from your territory or from theirs. It travels off-map, serves under their control for 20 turns and comes back to you with its promotions and level. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
+			<Text>Lend this unit to an ally, teammate or declared friend who shares one of your wars, or who fights a civ you have denounced or that has denounced you (a proxy war). It can leave from your territory or from theirs. It travels off-map, serves under their control for 20 turns and comes back to you with its promotions and level. Free for the nearest destinations (1 turn of transit); farther ones cost a one-time [ICON_Gold] Gold fee. Normal maintenance is paid while in transit.</Text>
 		</Row>
 		<Row Tag="LOC_EFV_ACTION_SEND_VOLUNTEER" Language="en_US">
 			<Text>Send as Volunteers</Text>
@@ -228,6 +241,9 @@
 		<Row Tag="LOC_EFV_REASON_ALREADY_TRACKED" Language="en_US">
 			<Text>The unit is already serving abroad.</Text>
 		</Row>
+		<Row Tag="LOC_EFV_REASON_CARRIER_LOADED" Language="en_US">
+			<Text>Unload its planes first: a carrier can't be sent with aircraft aboard.</Text>
+		</Row>
 		<!-- destination level -->
 		<Row Tag="LOC_EFV_REASON_NOT_PARTNER" Language="en_US">
 			<Text>Not an eligible partner (needs an alliance, a shared team, or a declared friendship): {1_Name}</Text>
@@ -243,6 +259,12 @@
 		</Row>
 		<Row Tag="LOC_EFV_REASON_NO_COMMON_WAR" Language="en_US">
 			<Text>No common enemy (Barbarians do not count): {1_Name}</Text>
+		</Row>
+		<!-- 1.0.5 proxy war (DECISIONS 2026-10-05, 2026-10-24): the Expeditionary text of
+		     NO_COMMON_WAR (EFV_ReasonTextKey). Not a LOC_EFV_REASON_* key: validate_data ties
+		     those to reason codes. 1 recipient name(s), like LOC_EFV_REASON_NO_COMMON_WAR. -->
+		<Row Tag="LOC_EFV_NO_COMMON_WAR_EXP" Language="en_US">
+			<Text>No common enemy, and not at war with a civ you denounced or that denounced you (Barbarians do not count): {1_Name}</Text>
 		</Row>
 		<Row Tag="LOC_EFV_REASON_CITY_NOT_OWNED" Language="en_US">
 			<Text>This city no longer belongs to the recipient.</Text>
@@ -394,6 +416,19 @@
 		</Row>
 		<Row Tag="LOC_EFV_PICKER_FROM_LAND" Language="en_US">
 			<Text>This unit stands in {1_Name}'s territory, so it can only be sent to {1_Name}.</Text>
+		</Row>
+		<!-- Picker (EFV_UI_ProxyWarNote, 1.0.5): an enabled Expeditionary row whose send rests on a proxy war.
+		     1 enemy civ, 2 N turns of the denouncement left (the base game's own count). -->
+		<Row Tag="LOC_EFV_PICKER_PROXY_WAR" Language="en_US">
+			<Text>Proxy war against {1_Name}: {2_Num} {2_Num : plural 1?turn; other?turns;} of denouncement left.</Text>
+		</Row>
+		<!-- Same, when the turns left cannot be read. 1 enemy civ. -->
+		<Row Tag="LOC_EFV_PICKER_PROXY_WAR_ANY" Language="en_US">
+			<Text>Proxy war against {1_Name}, for as long as the denouncement lasts.</Text>
+		</Row>
+		<!-- In red under the line above when the trip is as long as the turns left, or longer. 1 N trip turns. -->
+		<Row Tag="LOC_EFV_PICKER_PROXY_TRIP" Language="en_US">
+			<Text>The trip takes {1_Num} {1_Num : plural 1?turn; other?turns;}. If the denouncement ends first, the send is called off.</Text>
 		</Row>
 		<!-- 0.5.2 fee ruling: band 1 is free for Expeditionary and City-State
 		     Expeditionary; EFV_UI_FeeText shows "Free" for a fee of 0. -->
@@ -648,6 +683,15 @@
 		<Row Tag="LOC_EFV_CANCEL_REASON_NO_COMMON_WAR" Language="en_US">
 			<Text>You and {1_Civ} are no longer at war with a common enemy.</Text>
 		</Row>
+		<!-- 1.0.5: transit cancel of an Expeditionary send (status NO_COMMON_WAR, FLAG_PROXY_WAR on).
+		     The sender's copy names the host. -->
+		<Row Tag="LOC_EFV_CANCEL_REASON_NO_COMMON_WAR_EXP" Language="en_US">
+			<Text>You and {1_Civ} no longer share an enemy, and {1_Civ} is no longer at war with a civ you denounced or that denounced you.</Text>
+		</Row>
+		<!-- The host's copy names the sender. -->
+		<Row Tag="LOC_EFV_CANCEL_REASON_NO_COMMON_WAR_EXP_HOST" Language="en_US">
+			<Text>You and {1_Civ} no longer share an enemy, and you are no longer at war with a civ {1_Civ} denounced or that denounced {1_Civ}.</Text>
+		</Row>
 		<Row Tag="LOC_EFV_CANCEL_REASON_NOT_ELIGIBLE" Language="en_US">
 			<Text>{1_Civ} can no longer receive this unit.</Text>
 		</Row>
@@ -783,6 +827,16 @@
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_RETURNING_WAR_SUMMARY" Language="en_US">
 			<Text>You and {4_Recipient} are now at war, so {1_Unit} has left their service. It is returning to {2_City} and arrives in {3_Num} {3_Num : plural 1?turn; other?turns;}.</Text>
+		</Row>
+		<!-- sender of an EXP / CS unit its AI or city-state holder disbanded,
+		     brought home (1.0.5): 1 Unit, 2 City, 3 N turns, 4 Recipient civ
+		     (the holder), 5 Refund text (LOC_EFV_CANCEL_REFUND /
+		     _REFUND_FREE) or empty -->
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_DISBANDED_MESSAGE" Language="en_US">
+			<Text>Unit Coming Home</Text>
+		</Row>
+		<Row Tag="LOC_EFV_NOTIF_RETURNING_DISBANDED_SUMMARY" Language="en_US">
+			<Text>{4_Recipient} disbanded {1_Unit}, so it is coming home to {2_City} and arrives in {3_Num} {3_Num : plural 1?turn; other?turns;}. {5_Refund}</Text>
 		</Row>
 		<Row Tag="LOC_EFV_NOTIF_RETURNED_MESSAGE" Language="en_US">
 			<Text>Unit Returned</Text>

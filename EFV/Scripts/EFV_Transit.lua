@@ -13,7 +13,10 @@
 -- Return reasons (record.returnReason): "EXPIRED", "GRACE_RETURN",
 -- "MUTINY_RETURN", "RECALL", "RECIPIENT_GONE" (on-map EXP / CS of an
 -- eliminated recipient), "WAR" (on-map EXP / CS whose sender and host went
--- to war; the sender gets the RETURNING _WAR text, 1.0.4), "CANCELLED"
+-- to war; the sender gets the RETURNING _WAR text, 1.0.4), "DISBANDED"
+-- (on-map EXP / CS disbanded by an AI or city-state holder, brought home
+-- from the snapshot; the sender gets the RETURNING _DISBANDED text, 1.0.5,
+-- EFV_Lifecycle HostDisbandReturn), "CANCELLED"
 -- (a cancelled transit with no free tile near its origin or home city,
 -- fallback B). "DEST_LOST" and outbound "RECIPIENT_GONE" / "WAR" only appear
 -- on RETURNING records from older saves (still handled by ArriveReturning).
@@ -28,7 +31,9 @@
 -- Destination city gone, owned by someone else or conquered since the last
 -- check (rec.destLost, set in GameEvents.CityConquered), recipient
 -- eliminated, or the recipient-level send conditions no longer holding
--- (EFV_SendRecipientReasons) -> the transit is cancelled: half the fee back
+-- (EFV_SendRecipientReasons; for Expeditionary since 1.0.5 they include the
+-- proxy war, so a proxy war that ends in transit cancels the same way)
+-- -> the transit is cancelled: half the fee back
 -- (TRANSIT_CANCEL_REFUND_PCT), the unit is recreated for the sender on the
 -- tile it left from (rec.sentX / sentY, legacy lastX / lastY) or the
 -- nearest valid free tile within SPAWN_SEARCH_MAX_RING, else near the
@@ -47,6 +52,9 @@
 --   RETURNING      {1 unit, 2 return city, 3 N transit turns}
 --     _WAR         {1 unit, 2 return city, 3 N transit turns, 4 recipient
 --                   civ} (sender; reason "WAR", 1.0.4)
+--     _DISBANDED   {1 unit, 2 return city, 3 N transit turns, 4 holder civ
+--                   (rec.disbandBy), 5 refund text or ""} (sender; reason
+--                   "DISBANDED", 1.0.5)
 --     _CANCELLED   {1 unit, 2 destination, 3 reason text, 4 home city,
 --                   5 N transit turns, 6 refund text} (sender, fallback B)
 --   RETURNED       {1 unit, 2 city}
@@ -152,12 +160,14 @@ for _, code in ipairs(EFV_Rules.NAME_REASON_CODES) do
 	NAME_REASONS[code] = true
 end
 
--- Localized reason text for EFV_NOTIF_REQUEST_FAILED (LOC_EFV_REASON_<CODE>).
+-- Localized reason text for EFV_NOTIF_REQUEST_FAILED (LOC_EFV_REASON_<CODE>;
+-- the key comes from EFV_ReasonTextKey, so an Expeditionary NO_COMMON_WAR
+-- gets the proxy-war text, 1.0.5).
 -- Argument contract (EFV_Text.xml): GOLD / FEE_CHANGED {1_Num} = fee;
 -- NAME_REASONS {1_Name} = recipient civ name; WRONG_TERRITORY {1_Name} = the
 -- land owner's civ name (0.7); all others none.
-local function ReasonText(code, fee, recipientID, landOwnerID)
-	local key = "LOC_EFV_REASON_" .. tostring(code)
+local function ReasonText(code, fee, recipientID, landOwnerID, forceType)
+	local key = EFV_ReasonTextKey(code, forceType)
 	local arg = nil
 	if code == "GOLD" or code == "FEE_CHANGED" then
 		arg = fee or 0
@@ -222,12 +232,22 @@ local function NotifyUnitLost(rec, lossKey, alsoRecipient)
 	end
 end
 
+-- Refund text of the cancel and AI disband notices: LOC_EFV_CANCEL_REFUND
+-- {1 gold}, or LOC_EFV_CANCEL_REFUND_FREE for a free send.
+local function RefundText(fee, refund)
+	if fee <= 0 then
+		return Locale.Lookup("LOC_EFV_CANCEL_REFUND_FREE")
+	end
+	return Locale.Lookup("LOC_EFV_CANCEL_REFUND", refund)
+end
+
 -- Moves a record into RETURNING towards pCity (spec 10.2 step 3). The band is
 -- measured from (fromX, fromY) = the associated recipient city (spec 10.2) or
 -- the origin tile of a cancelled transit (fallback B). Clears on-map, grace,
 -- mutiny and lapse fields (incl. lapsePaused). Queues EFV_NOTIF_RETURNING
--- (sender; the _WAR text for reason "WAR", 1.0.4) unless quiet (the transit
--- cancel sends its own _CANCELLED text).
+-- (sender; the _WAR text for reason "WAR", 1.0.4; the _DISBANDED text for
+-- reason "DISBANDED", 1.0.5) unless quiet (the transit cancel sends its own
+-- _CANCELLED text).
 local function EnterReturning(store, rec, pCity, reason, fromX, fromY, turn, quiet)
 	local cx, cy = pCity:GetX(), pCity:GetY()
 	local band, d = nil, nil
@@ -267,6 +287,13 @@ local function EnterReturning(store, rec, pCity, reason, fromX, fromY, turn, qui
 			-- 1.0.4: sent home because the sender and the host went to war.
 			key = key .. "_WAR"
 			args[4] = PlayerName(rec.recipientID)
+		elseif reason == "DISBANDED" then
+			-- 1.0.5: disbanded by an AI or city-state holder. The refund text is
+			-- built here, never stored (records hold no localized strings).
+			key = key .. "_DISBANDED"
+			args[4] = PlayerName(rec.disbandBy or rec.recipientID)
+			args[5] = (rec.disbandRefund ~= nil)
+				and RefundText(math.max(0, math.floor(tonumber(rec.feePaid) or 0)), rec.disbandRefund) or ""
 		end
 		EFV_Notify.Queue(rec.senderID, EFV_Config.NOTIF.RETURNING, key,
 			args, cx, cy, Extra(rec, "RETURNING"))
@@ -287,12 +314,12 @@ VALID_FORCE[EFV_Config.FT_CS]  = true
 -- Rejects a send: logs every reason, notifies the requester with the first
 -- (fee = argument of GOLD / FEE_CHANGED; recipientID names the civ for the
 -- recipient-level reasons; landOwnerID names the land owner for
--- WRONG_TERRITORY).
-local function RejectSend(playerID, reasons, fee, recipientID, landOwnerID)
+-- WRONG_TERRITORY; forceType picks the NO_COMMON_WAR text, 1.0.5).
+local function RejectSend(playerID, reasons, fee, recipientID, landOwnerID, forceType)
 	EFV_Log(2, "Send", "rejected player=%s reasons=%s", tostring(playerID), table.concat(reasons, ","))
 	local first = reasons[1] or "REQ_STALE"
 	EFV_Notify.Queue(playerID, EFV_Config.NOTIF.REQUEST_FAILED, "LOC_" .. EFV_Config.NOTIF.REQUEST_FAILED,
-		{ ReasonText(first, fee, recipientID, landOwnerID) }, nil, nil, { kind = "REQUEST_FAILED" })
+		{ ReasonText(first, fee, recipientID, landOwnerID, forceType) }, nil, nil, { kind = "REQUEST_FAILED" })
 end
 
 -- Finishes an open veteran-restore job of the unit (route B, item 7 step 5)
@@ -350,7 +377,7 @@ local function SendBody(playerID, params, store)
 		if landOwnerID == -1 then
 			landOwnerID = nil
 		end
-		RejectSend(playerID, reasons, calc and calc.fee, recipientID, landOwnerID)
+		RejectSend(playerID, reasons, calc and calc.fee, recipientID, landOwnerID, forceType)
 		return
 	end
 	if calc == nil or calc.origin == nil or calc.fee == nil or calc.transit == nil then
@@ -387,6 +414,7 @@ local function SendBody(playerID, params, store)
 		senderID       = playerID,
 		recipientID    = recipientID,
 		accessBasis    = calc.basis,
+		warBasis       = calc.warBasis,        -- 1.0.5: "COMMON" / "PROXY" / nil (CS); logs and tests only
 		originCityID   = origin:GetID(),
 		originX        = origin:GetX(),
 		originY        = origin:GetY(),
@@ -432,11 +460,11 @@ local function SendBody(playerID, params, store)
 
 	EFV_Notify.Queue(playerID, EFV_Config.NOTIF.DEPARTED, "LOC_" .. EFV_Config.NOTIF.DEPARTED,
 		{ UnitName(rec), CityName(pCity), calc.transit }, rec.destX, rec.destY, Extra(rec, "DEPARTED"))
-	EFV_Log(2, "Send", "ok id=%d force=%s sender=%d recipient=%d unit=%s type=%s fee=%d band=%s dist=%s transit=%d arrival=%d origin=%s dest=%d,%d basis=%s from=%s,%s",
+	EFV_Log(2, "Send", "ok id=%d force=%s sender=%d recipient=%d unit=%s type=%s fee=%d band=%s dist=%s transit=%d arrival=%d origin=%s dest=%d,%d basis=%s from=%s,%s war=%s",
 		rec.id, forceType, playerID, recipientID, tostring(unitID), tostring(rec.unitType), fee,
 		tostring(calc.band), tostring(calc.distance), calc.transit, rec.arrivalTurn,
 		tostring(rec.originCityID), rec.destX, rec.destY, tostring(calc.basis),
-		tostring(rec.sentX), tostring(rec.sentY))
+		tostring(rec.sentX), tostring(rec.sentY), tostring(calc.warBasis))
 end
 
 -- ---------------------------------------------------------------------------
@@ -928,9 +956,13 @@ end
 
 -- Localized reason text LOC_EFV_CANCEL_REASON_<status> {1_Civ = civID};
 -- host = the recipient's copy (_HOST variant where the wording differs).
-local function ReasonTextFor(status, civID, host)
+-- An Expeditionary NO_COMMON_WAR (forceType, 1.0.5) uses the _EXP / _EXP_HOST
+-- texts, which also name the proxy war, while FLAG_PROXY_WAR is on.
+local function ReasonTextFor(status, civID, host, forceType)
 	local key = "LOC_EFV_CANCEL_REASON_" .. tostring(status)
-	if host and HOST_REASON_SUFFIX[status] ~= nil then
+	if status == "NO_COMMON_WAR" and forceType == EFV_Config.FT_EXP and EFV_Config.FLAG_PROXY_WAR == true then
+		key = key .. "_EXP" .. (host and "_HOST" or "")
+	elseif host and HOST_REASON_SUFFIX[status] ~= nil then
 		key = key .. HOST_REASON_SUFFIX[status]
 	end
 	local ok, s = pcall(Locale.Lookup, key, PlayerName(civID))
@@ -938,13 +970,6 @@ local function ReasonTextFor(status, civID, host)
 		return s
 	end
 	return tostring(status)
-end
-
-local function RefundText(fee, refund)
-	if fee <= 0 then
-		return Locale.Lookup("LOC_EFV_CANCEL_REFUND_FREE")
-	end
-	return Locale.Lookup("LOC_EFV_CANCEL_REFUND", refund)
 end
 
 -- Cancel notices (one-off, created at the start of the sender's turn):
@@ -955,7 +980,7 @@ end
 local function NotifyCancelled(rec, status, fee, refund, plot, pHome)
 	local unit = UnitName(rec)
 	local dest = DestName(rec)
-	local reason = ReasonTextFor(status, rec.recipientID, false)
+	local reason = ReasonTextFor(status, rec.recipientID, false, rec.forceType)
 	local refundText = RefundText(fee, refund)
 	if plot ~= nil then
 		local typeName = EFV_Config.NOTIF.RETURNED
@@ -970,7 +995,7 @@ local function NotifyCancelled(rec, status, fee, refund, plot, pHome)
 	if rec.recipientID ~= nil and rec.recipientID ~= rec.senderID and IsAlive(rec.recipientID) then
 		local typeName = EFV_Config.NOTIF.ARRIVED
 		EFV_Notify.Queue(rec.recipientID, typeName, "LOC_" .. typeName .. "_CANCELLED",
-			{ unit, PlayerName(rec.senderID), dest, ReasonTextFor(status, rec.senderID, true) },
+			{ unit, PlayerName(rec.senderID), dest, ReasonTextFor(status, rec.senderID, true, rec.forceType) },
 			rec.destX, rec.destY, Extra(rec, "CANCELLED"))
 	end
 end
@@ -1110,10 +1135,10 @@ function EFV_Transit.CancelOutbound(store, rec, status, turn, hook, code)
 	end
 
 	local ox, oy, src = OriginTile(rec)
-	EFV_Log(2, "Cancel", "id=%d force=%s sender=%s recipient=%s reason=%s code=%s hook=%s dest=%s,%s fee=%d refund=%d origin=%s,%s (%s)",
+	EFV_Log(2, "Cancel", "id=%d force=%s sender=%s recipient=%s reason=%s code=%s hook=%s dest=%s,%s fee=%d refund=%d origin=%s,%s (%s) war=%s",
 		rec.id, tostring(rec.forceType), tostring(rec.senderID), tostring(rec.recipientID), tostring(status),
 		tostring(code), tostring(hook), tostring(rec.destX), tostring(rec.destY), fee, refund,
-		tostring(ox), tostring(oy), src)
+		tostring(ox), tostring(oy), src, tostring(rec.warBasis))
 
 	local domain = EFV_Spawn.DomainOf(rec.unitType)
 	local pHome = EFV_Transit.ResolveReturnCity(rec)
@@ -1222,7 +1247,8 @@ end
 -- left unchanged (logged; retried by the caller next turn) and false is
 -- returned. Logs "[Return] start reason=...".
 -- Params:  store; rec record; pUnit unit object or nil (then the stored
---          snapshot is used, S9); reason string (return reasons above);
+--          snapshot is used, S9: "RECIPIENT_GONE", "DISBANDED"); reason
+--          string (return reasons above);
 --          turn number (nil -> current turn).
 -- Returns: true if the record is now RETURNING, false otherwise.
 -- PLAN 2.8; spec 10.2. APIs: via helpers.

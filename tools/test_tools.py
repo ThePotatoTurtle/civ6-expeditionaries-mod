@@ -78,6 +78,36 @@ class TestCheckLua(unittest.TestCase):
         gl = {(op, n, d) for op, n, _l, d in check_lua.read_globals(dump)}
         self.assertEqual(gl, {("get", "Foo", 0), ("set", "Baz", 0), ("set", "f", 0), ("set", "Qux", 1)})
 
+    def test_register_limit(self):
+        """Havok Script register ceiling: maxstacksize of every function, main chunk included."""
+        def chunk(n_main, n_func):
+            main = "".join("local m%d = %d\n" % (i, i) for i in range(n_main))
+            body = "".join("  local f%d = %d\n" % (i, i) for i in range(n_func))
+            return main + "local function Big()\n" + body + "end\n"
+        ok, dump = check_lua.compile_lua(chunk(3, 20).encode(), "@t.lua")
+        self.assertTrue(ok)
+        protos = check_lua.read_protos(dump)
+        self.assertEqual([(d, m >= 20) for _f, _l, m, d in protos], [(0, False), (1, True)])
+        self.assertEqual(protos[1][0], 4)                       # linedefined of Big
+        cases = {"EFV_Low.lua": (100, 10, None),
+                 "EFV_WarnMain.lua": (check_lua.REG_WARN + 5, 10, "registers-high"),
+                 "EFV_ErrMain.lua": (check_lua.REG_ERROR + 5, 10, "registers"),
+                 "EFV_ErrFunc.lua": (10, check_lua.REG_ERROR + 5, "registers")}
+        tmp = tempfile.mkdtemp(prefix="efv_regs_")
+        try:
+            for name, (n_main, n_func, _code) in cases.items():
+                with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
+                    fh.write(chunk(n_main, n_func))
+            rep = check_lua.check(tmp, globals_check=False, luacheck="off")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        got = {(os.path.basename(f.path), f.code): (f.level, f.line) for f in rep.items if f.code.startswith("registers")}
+        n_err = check_lua.REG_ERROR + 5
+        self.assertEqual(got, {("EFV_WarnMain.lua", "registers-high"): ("WARN", 1),
+                               ("EFV_ErrMain.lua", "registers"): ("ERROR", 1),
+                               ("EFV_ErrFunc.lua", "registers"): ("ERROR", 11)})
+        self.assertTrue(any("needs %d registers" % n_err in f.msg for f in rep.items if f.code == "registers"))
+
 
 class TestValidateData(unittest.TestCase):
     def test_make_hash_matches_game(self):

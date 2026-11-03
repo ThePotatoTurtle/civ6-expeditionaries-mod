@@ -27,6 +27,10 @@
 -- {1_Unit} {2_City} {3_Recipient} {4_Fee} {5_Transit} {6_Duration} {7_Force},
 -- LOC_EFV_CONFIRM_SEND_CANCEL / _CANCEL_FREE {1_Recipient} (the cancel rule,
 -- designer answer Q9, 2026-09-30),
+-- LOC_EFV_PICKER_PROXY_WAR / _PROXY_WAR_ANY / _PROXY_TRIP (1.0.5, through
+-- EFV_UI_ProxyWarNote: the tooltip of an enabled proxy-war row and the
+-- confirm dialog), LOC_EFV_NO_COMMON_WAR_EXP (disabled Expeditionary rows,
+-- through EFV_UI_ReasonsText with the force type),
 -- LOC_YES / LOC_NO (base game).
 -- ===========================================================================
 
@@ -165,6 +169,11 @@ local function ConfirmRow(row)
 		cancelKey = "LOC_EFV_CONFIRM_SEND_CANCEL_FREE"
 	end
 	text = text .. "[NEWLINE][NEWLINE]" .. Locale.Lookup(cancelKey, EFV_UI_PlayerName(row.recipientID))
+	-- 1.0.5 (proxy war): the turns of denouncement left and the trip warning.
+	local proxyNote = EFV_UI_ProxyWarNote(row, ctx.playerID)
+	if proxyNote ~= "" then
+		text = text .. "[NEWLINE][NEWLINE]" .. proxyNote
+	end
 
 	local params = {
 		unitID      = ctx.unitID,
@@ -196,7 +205,8 @@ end
 -- m_Ctx.playerID, pUnit, m_Ctx.forceType, EFV_UI_ReadStore()): RowLabel =
 -- EFV_UI_PickerRowText(row), SetDisabled(not row.ok), tooltip
 -- EFV_UI_ReasonsText(row.reasons,
--- EFV_UI_RowReasonCtx(row)) for disabled rows, click -> ConfirmRow(row).
+-- EFV_UI_RowReasonCtx(row), forceType) for disabled rows; enabled rows: the
+-- proxy-war note (1.0.5) and the heal warning; click -> ConfirmRow(row).
 -- EmptyLabel when there are no rows. CalculateSize of RowStack / RowScroll.
 -- Params:  none (uses m_Ctx).
 -- Returns: false when the unit no longer exists (caller closes), else true.
@@ -223,9 +233,18 @@ local function Populate()
 		inst.RowButton:SetAlpha((enabled and 1) or 0.6)
 		if enabled then
 			nOk = nOk + 1
-			inst.RowButton:SetToolTipString(RowHealWarning(pUnit, row, m_Ctx))
+			local tipParts = {}
+			local proxyNote = EFV_UI_ProxyWarNote(row, m_Ctx.playerID)
+			if proxyNote ~= "" then
+				tipParts[#tipParts + 1] = proxyNote
+			end
+			local healWarn = RowHealWarning(pUnit, row, m_Ctx)
+			if healWarn ~= "" then
+				tipParts[#tipParts + 1] = healWarn
+			end
+			inst.RowButton:SetToolTipString(table.concat(tipParts, "[NEWLINE]"))
 		else
-			local reasons = EFV_UI_ReasonsText(row.reasons or {}, EFV_UI_RowReasonCtx(row, m_Ctx.playerID))
+			local reasons = EFV_UI_ReasonsText(row.reasons or {}, EFV_UI_RowReasonCtx(row, m_Ctx.playerID), m_Ctx.forceType)
 			inst.RowButton:SetToolTipString(StripLeadingNewline(reasons))
 		end
 		inst.RowButton:RegisterCallback(Mouse.eLClick, function()

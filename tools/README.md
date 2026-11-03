@@ -12,9 +12,9 @@ python tools\check_all.py EFV --strict    # warnings fail too
 
 `check_all.py` runs `check_lua.py`, `validate_data.py` and `api_audit.py` and exits non-zero on any error. Findings look like `path:line: LEVEL [code] message`. At the end it prints a per-tool summary and a list of engine calls that still wait for an in-game test. `--info` shows INFO lines, `--basic` skips the Lua runtime, `--db PATH` picks another gameplay database, `--no-checklist` leaves out the list of untested calls (the install script uses it).
 
-The tools test themselves with `python tools\test_tools.py` (28 tests on `tools\fixtures`, including the `summarize_efv_log.py` modes and the test runner's XFAIL rule). The Lua tests of the mod itself are `python tests\offline\run_tests.py`.
+The tools test themselves with `python tools\test_tools.py` (29 tests on `tools\fixtures`, including the `summarize_efv_log.py` modes and the test runner's XFAIL rule). The Lua tests of the mod itself are `python tests\offline\run_tests.py`.
 
-## check_lua.py: Lua syntax and globals
+## check_lua.py: Lua syntax, globals and registers
 
 ```
 python tools\check_lua.py EFV [--basic] [--no-globals] [--luacheck auto|on|off] [--strict]
@@ -22,6 +22,7 @@ python tools\check_lua.py EFV [--basic] [--no-globals] [--luacheck auto|on|off] 
 
 - Syntax: every file is compiled (never run) with the real Lua 5.1 parser from `lupa`. Firaxis type annotations (`local x:number`), `goto`, `//`, bit operators and unclosed blocks all fail with a line number.
 - Globals: the compiled bytecode is read for global reads and writes. Each modinfo entry point (gameplay script, UI context, replaced UI script) plus everything it includes counts as one Lua state. A global that is read must be defined in every state the file runs in. Unknown reads are errors. A global assigned only inside a function is a warning (missing `local`?). Overwriting an engine global is an error. A file can declare extra globals with `-- EFV:GLOBALS Name1 Name2`.
+- Registers: the same bytecode gives the register count (maxstacksize) of the main chunk and of every function. Above 180 is an error, above 160 a warning. Civ VI's Havok Script allows fewer registers than stock Lua 5.1: in game a main chunk of 172 loads and one of 206 fails with "too many registers (too complex)", although `lupa` compiles both. Every main-chunk `local` holds a register to the end of its block, so keep a section's private helpers inside `do ... end` and build long table constructors inside a function (see the note at the top of `EFV_Dev_Gameplay.lua`). Without `lupa` the check is skipped with a warning.
 - Code between `-- EFV:G-ONLY begin/end` or `-- EFV:UI-ONLY begin/end` counts only for that context.
 - luacheck is used when it is on the PATH or in `tools\bin\`. It is not installed now; the bytecode check covers the same cases.
 - `--basic` skips the Lua runtime and only does a rough block balance check.
@@ -65,10 +66,10 @@ powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Uninstall      # rem
 powershell -ExecutionPolicy Bypass -File tools\install.ps1 -CheckLogs      # only scan the last run's logs
 ```
 
-- Stops at once while Civilization VI is running. `-DevOnly` checks and copies only `EFV_Dev`, for tests against the Workshop VEF, and warns when a local `Mods\EFV` is left over (same mod id as the Workshop copy: delete it). Installing `EFV` itself warns while the Workshop VEF is still subscribed (`-WorkshopDir`, default `M:\Steam\steamapps\workshop\content\289070\3810156577`): unsubscribe from it while you test a local build, and check that Additional Content lists VEF once, with the local version number.
+- Stops at once while Civilization VI is running. `-DevOnly` checks and copies only `EFV_Dev`, for tests against the Workshop VEF, and warns when a local `Mods\EFV` is left over (same mod id as the Workshop copy: delete it). Installing `EFV` itself warns while the Workshop VEF is still subscribed (`-WorkshopDir`, default: item `-WorkshopId` 3810156577 in whichever Steam library has it, found from the registry and `libraryfolders.vdf`): unsubscribe from it while you test a local build, and check that Additional Content lists VEF once, with the local version number.
 - `-Uninstall` removes only `Mods\EFV` (the local VEF) after such a test; `EFV_Dev` stays. Then resubscribe on the Workshop. It also refuses to run while the game is running.
 - Runs `check_all.py` first. Errors stop the install unless you pass `-Force` (`-SkipChecks` skips the checks, `-Strict` also stops on warnings).
-- Mirrors the folders into `S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods\EFV` (and `EFV_Dev`). It refuses targets outside `-ModsDir` or folders not named `EFV*`. Files deleted in the source are deleted in the copy too. `-Src` / `-DevSrc` pick other source folders and `-Python` another Python.
+- Mirrors the folders into `<Documents>\My Games\Sid Meier's Civilization VI\Mods\EFV` (and `EFV_Dev`); the Documents folder is read from Windows, so a OneDrive redirect is followed (`-ModsDir` overrides it). It refuses targets outside `-ModsDir` or folders not named `EFV*`. Files deleted in the source are deleted in the copy too. `-Src` / `-DevSrc` pick other source folders and `-Python` another Python.
 - `-Watch` / `-WatchOnly` follow `Lua.log`, filtered by `-Pattern` (default `EFV|Runtime Error|Syntax Error|stack traceback`), and pick the file up again when the game recreates it.
 - `-CheckLogs` runs `tools\check_logs.py` on Database.log, Modding.log, Lua.log and UserInterface.log. Exit code 1 on errors that involve the mod.
 - Logs: `-LogsDir` defaults to `%LOCALAPPDATA%\Firaxis Games\Sid Meier's Civilization VI\Logs`. The copy under `Documents\My Games` is stale. `Lua.log` is buffered while you play, so read it after quitting to the menu or the desktop.

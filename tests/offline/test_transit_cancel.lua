@@ -947,7 +947,7 @@ test("i1: every cancel text renders with its arguments; no 'EFV', no en or em da
 	H.loadEFV()
 	local texts = {}
 	for _, st in ipairs({ "RECIPIENT_GONE", "DEST_LOST", "WAR", "NOT_PARTNER", "NO_ACCESS", "NO_ACCESS_HOST",
-			"NO_COMMON_WAR", "NOT_ELIGIBLE", "NOT_ELIGIBLE_HOST" }) do
+			"NO_COMMON_WAR", "NO_COMMON_WAR_EXP", "NO_COMMON_WAR_EXP_HOST", "NOT_ELIGIBLE", "NOT_ELIGIBLE_HOST" }) do
 		texts[#texts + 1] = Locale.Lookup("LOC_EFV_CANCEL_REASON_" .. st, "Rome")
 	end
 	texts[#texts + 1] = Locale.Lookup("LOC_EFV_CANCEL_REFUND", 9)

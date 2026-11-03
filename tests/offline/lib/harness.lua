@@ -194,6 +194,8 @@ function H.unitsOf(pid, typeName)
 	return out
 end
 function H.moveUnit(u, x, y) u.x, u.y = x, y end
+-- 1.0.5: a move by the owner, firing GameEvents.OnUnitMoved (FAKE.MoveUnit).
+function H.move(u, x, y) FAKE.MoveUnit(u, x, y) end
 function H.killUnit(u) FAKE.RemoveUnit(u, "DEATH") end
 
 -- Session F models (0.5.2; fake_engine.lua "stale unit objects"):
@@ -310,6 +312,12 @@ function H.meet(a, b)
 	FAKE.PairSet(FAKE.diplo.met, a, b, true); FAKE.PairSet(FAKE.diplo.met, b, a, true)
 end
 function H.team(pid, team) Players[pid].team = team end
+-- Denouncements (1.0.5, SPIKES 8.1): a denounces b (symmetric state, the
+-- turn kept for a); denounceEnd = DENOUNCE_EXPIRES (-> UNFRIENDLY); the
+-- limit (nil = the DB value) used by FAKE.ExpireDenouncements in H.endTurn.
+function H.denounce(a, b, turn) FAKE.Denounce(a, b, turn) end
+function H.denounceEnd(a, b) FAKE.DenounceEnd(a, b) end
+function H.denounceLimit(n) FAKE.denounceLimit = n end
 function H.kill(pid) Players[pid].alive = false end
 
 -- ---------------------------------------------------------------------------
@@ -481,6 +489,7 @@ function H.endTurn(opts)
 		end
 	end
 	FAKE.turn = T + 1
+	FAKE.ExpireDenouncements(FAKE.turn)   -- 1.0.5: assumed at the start of the round (unobserved)
 	FAKE.ExpireGhosts("turnStart")   -- Session F T28: levied objects gone at the next turn start
 	GameEvents.OnGameTurnStarted(FAKE.turn)
 	Events.TurnBegin(FAKE.turn)

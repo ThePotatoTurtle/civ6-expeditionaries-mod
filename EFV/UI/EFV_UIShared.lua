@@ -28,6 +28,8 @@
 -- 1.0.4 (tracker upkeep line): EFV_UI_TransitUpkeep, EFV_UI_TopBarGoldPerTurn,
 -- EFV_UI_SignedNumText, EFV_UI_TransitUpkeepText.
 -- 0.5.2 (fee ruling, band 1 free): EFV_UI_FeeText.
+-- 1.0.5 (proxy war, F4): EFV_UI_DenounceTurnsLeft, EFV_UI_ProxyWarNote;
+-- EFV_UI_ReasonsText takes the force type (EFV_ReasonTextKey).
 -- 0.7 (INTERFACES note 33): EFV_UI_PickerRowText, EFV_UI_PickerHeaderText
 -- (one formatted line per picker row; EFV_UI_FeeCell removed);
 -- EFV_UI_RowReasonCtx names the land owner for WRONG_TERRITORY.
@@ -46,6 +48,9 @@
 --   LOC_EFV_REASON_GOLD / _FEE_CHANGED {1_Num} = fee; LOC_EFV_REASON_NOT_PARTNER /
 --     _VOL_NEEDS_ACCESS / _CS_NOT_MET / _AT_WAR_WITH_RECIPIENT /
 --     _NO_COMMON_WAR {1_Name} (one civ name or a comma list);
+--     LOC_EFV_NO_COMMON_WAR_EXP {1_Name} (the same, Expeditionary, 1.0.5);
+--   LOC_EFV_PICKER_PROXY_WAR {1_Name} enemy {2_Num} turns left;
+--     LOC_EFV_PICKER_PROXY_WAR_ANY {1_Name}; LOC_EFV_PICKER_PROXY_TRIP {1_Num}.
 --     LOC_EFV_REASON_WRONG_TERRITORY {1_Name} = land owner (row.landOwnerID);
 --     LOC_EFV_REASON_RECALL_MIN_TURNS {1_Num}; LOC_EFV_REASON_ENTRUST_NO_PARTNER
 --     {1_Name} = former owner; all other reasons: none.
@@ -540,17 +545,19 @@ function EFV_UI_StateText(rec, turn, viewerID)
 end
 
 -- ---------------------------------------------------------------------------
--- EFV_UI_ReasonsText(codes, ctx) -> text
+-- EFV_UI_ReasonsText(codes, ctx, forceType) -> text
 -- Concatenates, per code, "[NEWLINE][COLOR:Red]" .. Locale.Lookup(
--- "LOC_EFV_REASON_" .. code, unpack(ctx[code] or {})) .. "[ENDCOLOR]"
--- (UnitPanel style, R4 1.4). Duplicate codes are shown once.
+-- EFV_ReasonTextKey(code, forceType), unpack(ctx[code] or {})) ..
+-- "[ENDCOLOR]" (UnitPanel style, R4 1.4). Duplicate codes are shown once.
 -- Params:  codes dense array of reason codes; ctx table or nil mapping a code
 --          to its Lookup argument array, e.g. { RECALL_MIN_TURNS = { 3 },
---          GOLD = { 108 } }.
+--          GOLD = { 108 } }; forceType optional (1.0.5: an Expeditionary
+--          NO_COMMON_WAR gets the proxy-war text; nil = "LOC_EFV_REASON_" ..
+--          code, as for Entrust and recall).
 -- Returns: string ("" for no codes).
 -- PLAN 3.1, 3.7. APIs: U17, A61.
 -- ---------------------------------------------------------------------------
-function EFV_UI_ReasonsText(codes, ctx)
+function EFV_UI_ReasonsText(codes, ctx, forceType)
 	if type(codes) ~= "table" then
 		return ""
 	end
@@ -561,7 +568,7 @@ function EFV_UI_ReasonsText(codes, ctx)
 		if not seen[code] then
 			seen[code] = true
 			local args = ctx[code] or {}
-			parts[#parts + 1] = "[NEWLINE][COLOR:Red]" .. SafeLookup("LOC_EFV_REASON_" .. tostring(code), unpack(args)) .. "[ENDCOLOR]"
+			parts[#parts + 1] = "[NEWLINE][COLOR:Red]" .. SafeLookup(EFV_ReasonTextKey(code, forceType), unpack(args)) .. "[ENDCOLOR]"
 		end
 	end
 	return table.concat(parts)
@@ -672,6 +679,77 @@ function EFV_UI_HealWarning(unitType, ownerID)
 		end
 	end)
 	return "[COLOR:Red]" .. SafeLookup("LOC_EFV_WARN_NO_HEAL", EFV_UI_PlayerName(ownerID), resName) .. "[ENDCOLOR]"
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_DenounceTurnsLeft(s, e) -> n or nil   (1.0.5, F4; display only)
+-- Turns until the denouncement between s and e runs out, by the base game's
+-- own relationship tooltip (DiplomacyActionView.lua:1483-1504, s in the role
+-- of the local player, e of the selected one): the later of the two
+-- denounce turns (GetDiplomacy():GetDenounceTurn, directional, -1 = never,
+-- U23) + GetGameDiplomacy():GetDenounceTimeLimit() (U23) + 1 - the current
+-- turn, + 1 when the later denouncer has the higher player ID. nil when a
+-- reader fails, both turns are -1, or the limit is unreadable.
+-- APIs: U23.
+-- ---------------------------------------------------------------------------
+function EFV_UI_DenounceTurnsLeft(s, e)
+	local ok, n = pcall(function()
+		local ours = Players[s]:GetDiplomacy():GetDenounceTurn(e)
+		local theirs = Players[e]:GetDiplomacy():GetDenounceTurn(s)
+		local limit = Game.GetGameDiplomacy():GetDenounceTimeLimit()
+		if type(ours) ~= "number" or type(theirs) ~= "number" or type(limit) ~= "number" or (ours < 0 and theirs < 0) then
+			return nil
+		end
+		local adj = 0
+		if theirs >= ours then
+			if e > s then adj = 1 end
+		elseif s > e then
+			adj = 1
+		end
+		return 1 + math.max(ours, theirs) + limit - Game.GetCurrentGameTurn() + adj
+	end)
+	if ok and type(n) == "number" then
+		return n
+	end
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_UI_ProxyWarNote(row, senderID) -> text   (1.0.5, F4)
+-- "" unless row.calc.warBasis == "PROXY". Else LOC_EFV_PICKER_PROXY_WAR
+-- {enemy name, N} for the enemy in row.calc.proxyEnemies with the most
+-- turns left (the most favourable: the send holds while any proxy war
+-- lasts; ties -> lowest ID), N clamped to at least 1 (the state still reads
+-- DENOUNCED); when row.calc.transit >= N, "[NEWLINE][COLOR:Red]" ..
+-- LOC_EFV_PICKER_PROXY_TRIP {transit} .. "[ENDCOLOR]" follows. No turns
+-- readable for any enemy -> LOC_EFV_PICKER_PROXY_WAR_ANY {lowest-ID enemy},
+-- no trip line. Used by the destination picker (row tooltip and confirm
+-- dialog).
+-- APIs: U23 (via EFV_UI_DenounceTurnsLeft), U17.
+-- ---------------------------------------------------------------------------
+function EFV_UI_ProxyWarNote(row, senderID)
+	local calc = (type(row) == "table") and row.calc or nil
+	if type(calc) ~= "table" or calc.warBasis ~= "PROXY" or type(calc.proxyEnemies) ~= "table" or #calc.proxyEnemies == 0 then
+		return ""
+	end
+	local best, bestN = nil, nil
+	for _, e in ipairs(calc.proxyEnemies) do
+		local n = EFV_UI_DenounceTurnsLeft(senderID, e)
+		if n ~= nil and (bestN == nil or n > bestN) then
+			best, bestN = e, n
+		end
+	end
+	if best == nil then
+		return SafeLookup("LOC_EFV_PICKER_PROXY_WAR_ANY", EFV_UI_PlayerName(calc.proxyEnemies[1]))
+	end
+	if bestN < 1 then
+		bestN = 1
+	end
+	local text = SafeLookup("LOC_EFV_PICKER_PROXY_WAR", EFV_UI_PlayerName(best), bestN)
+	if type(calc.transit) == "number" and calc.transit >= bestN then
+		text = text .. "[NEWLINE][COLOR:Red]" .. SafeLookup("LOC_EFV_PICKER_PROXY_TRIP", calc.transit) .. "[ENDCOLOR]"
+	end
+	return text
 end
 
 -- ===========================================================================

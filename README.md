@@ -4,7 +4,7 @@ A Civilization VI mod for Gathering Storm. It lets you lend combat units to the 
 
 Get it on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3810156577
 
-Version 1.0.4.
+Version 1.0.5.
 
 ## The four options
 
@@ -28,7 +28,7 @@ Some basics:
 ### Sending a unit
 1. Select a combat unit in your own territory, or in the territory of the partner or city-state you want to send it to. The unit panel gets three buttons: Send as Expeditionary, Send as Volunteers and Send to City-State.
 2. A greyed-out button means the unit can't go right now. Its tooltip lists every reason, for example "not at full health" or "no common enemy".
-3. Click a button to open the destination list. Each line shows the partner, the city, the distance, the travel time, the fee and how long the unit serves. Greyed-out lines say why that city is not possible. A unit standing in a partner's territory can only go to that partner's cities, and the list says so.
+3. Click a button to open the destination list. Each line shows the partner, the city, the distance, the travel time, the fee and how long the unit serves. Greyed-out lines say why that city is not possible. A unit standing in a partner's territory can only go to that partner's cities, and the list says so. For a proxy war, the line's tooltip says how many turns the denouncement has left, and warns you when the trip takes as long or longer.
 4. Pick a city and confirm. You pay the fee at once ("Free" when there is none) and the unit leaves the map.
 
 ### Recalling Volunteers
@@ -70,7 +70,8 @@ If nobody qualifies, the button is greyed out and the tooltip says why. Entrust 
 - Volunteers: a teammate, an ally, or a declared friend who grants you open borders. Open borders without friendship do not count, and neither does friendship without open borders.
 - City-State Expeditionary: any city-state you have met.
 - Entrust: an ally, a teammate or a declared friend who was at war with the city's old owner when you took it (any of them if the old owner was a city-state, a Free City, or has been knocked out of the game).
-- Expeditionary Force and Volunteers: you and the partner must be at war with the same enemy (Barbarians and Free Cities don't count), and not at war with each other.
+- Volunteers also need a shared enemy: you and the partner must both be at war with the same major civ or city-state (Barbarians and Free Cities don't count), and not at war with each other.
+- Expeditionary Forces need a shared enemy or a proxy war. You and the partner must not be at war with each other, and the partner must be at war with a major civ or city-state you are at war with too, or with a major civ you have denounced or that has denounced you. The second case is a proxy war: you back the partner without going to war yourself, for as long as the denouncement lasts. Barbarians and Free Cities never count.
 - City-State Expeditionary needs no shared enemy. You can lend a unit to any city-state you have met, for example to help it in a war of its own, as long as you are not at war with it.
 
 This table shows who can receive units. "Yes" means you can send. "No" means the player's cities are listed but greyed out, with the reason in the tooltip. "Hidden" means the player doesn't appear in the destination list at all. "-" means that option doesn't apply to this kind of player. "any" in the "Shares an enemy" column means it doesn't matter.
@@ -80,6 +81,7 @@ This table shows who can receive units. "Yes" means you can send. "No" means the
 | Teammate | yes | Yes | Yes | - |
 | Ally | yes | Yes | Yes | - |
 | Ally | no | No: no shared enemy | No: no shared enemy | - |
+| Ally or declared friend in a proxy war | no, but a proxy war | Yes | No: no shared enemy | - |
 | Declared friend who gives you open borders | yes | Yes | Yes | - |
 | Declared friend who gives you open borders | no | No: no shared enemy | No: no shared enemy | - |
 | Declared friend without open borders | yes | Yes | No: needs open borders | - |
@@ -91,6 +93,7 @@ This table shows who can receive units. "Yes" means you can send. "No" means the
 | City-state you haven't met | any | - | - | Hidden: not met |
 
 - A shared enemy is a major civ or a city-state that you and the recipient are both at war with. Barbarians and the Free Cities never count, and they can't receive units.
+- A proxy war counts for Expeditionary Forces only. The partner is at war with a major civ that you have denounced or that has denounced you, and you are not at war with it. City-states can't be denounced, so they never make a proxy war. The "No: no shared enemy" rows mean no proxy war either.
 - The unit must stand in your own territory, or in the recipient's territory. From the recipient's land it can only go to that recipient's cities.
 - Entrust has its own rule: the city goes to an ally, teammate or declared friend who was at war with the city's old owner when you took it. If the old owner was a city-state, a Free City, or has been knocked out of the game, any of them can take it.
 
@@ -100,7 +103,8 @@ Land and naval combat units, including Warrior Monks and Nihangs. The unit must:
 - have full movement points, so it can't have moved or attacked this turn;
 - not be embarked;
 - stand in your own territory, or in the territory of the partner or city-state you send it to. From a partner's land it can only go to that partner's cities. Neutral land and anyone else's land don't count;
-- not be part of a Corps, Army, Fleet or Armada.
+- not be part of a Corps, Army, Fleet or Armada;
+- if it's an aircraft carrier, have no planes aboard. Unload them first. Any plane of yours on the carrier's tile counts, even one based in a city there.
 
 A naval unit also needs a free water tile near the destination city.
 
@@ -129,7 +133,7 @@ You pay once, and nobody receives the gold. The trip home is free. While the uni
 A unit on its way out is checked at the start of each of your turns, and once more just before it arrives. The send is called off when:
 - the destination city changes hands in any way: captured, razed, flipped by loyalty, traded or gifted. This counts even if the partner has taken the city back by the time of the check.
 - the partner is knocked out of the game.
-- the partner no longer qualifies for that kind of send. For Expeditionary Forces and Volunteers that means you are now at war with each other, the alliance, team or friendship is gone, or you no longer share an enemy. Volunteers sent to a declared friend also need the friend's open borders to last. A city-state only stops qualifying if you go to war with it.
+- the partner no longer qualifies for that kind of send. For Expeditionary Forces and Volunteers that means you are now at war with each other, the alliance, team or friendship is gone, or you no longer share an enemy. An Expeditionary Force sent for a proxy war also comes back when the proxy war is over (the denouncement runs out, or the partner makes peace with that civ) and no shared enemy or other proxy war is left. Volunteers sent to a declared friend also need the friend's open borders to last. A city-state only stops qualifying if you go to war with it.
 
 What happens then:
 - The unit comes straight back, on the same turn, to the tile it left from. If another unit stands there, or the tile is now enemy land or land you can't enter, it takes the nearest free tile, up to 5 tiles away. If there is none, it appears next to the city it would normally return to, and if even that is full it travels there and arrives when a tile frees up.
@@ -141,7 +145,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 
 ### Service, grace and mutiny
 - Expeditionary units serve 20 turns, City-State units 10. You and the host are warned 3 turns and 1 turn before the end.
-- Making peace with the shared enemy, or the alliance or friendship ending, doesn't shorten an Expeditionary tour. The shared enemy only matters when you send (and while the unit is on its way). Only Volunteers lapse.
+- Making peace with the shared enemy, the end of a proxy war, or the alliance or friendship ending doesn't shorten an Expeditionary tour. The shared enemy or proxy war only matters when you send (and while the unit is on its way). Only Volunteers lapse.
 - When an Expeditionary unit's service ends, it comes home by itself if it stands on the host's land or yours. Anywhere else it gets 5 turns of grace to get back.
 - After grace comes mutiny: 20 damage per turn and no healing. A unit at full health dies on the 5th mutiny turn, a damaged one sooner.
 - An Expeditionary unit that reaches the host's land or yours during grace or mutiny comes home at the next turn. The damage stays.
@@ -159,9 +163,9 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 
 ### War, elimination and losses
 - If you and the host go to war with each other, no matter who declared it: lent Expeditionary and City-State units leave the host and travel home, the same trip as at the end of their service. This also applies to units in grace or mutiny. Deployed Volunteers are simply your units and VEF stops tracking them. Units on the way are called back (see When a send is called off), and units already heading home still arrive.
-- If the host is eliminated: units on the way are called back to where they left, and you get half the fee back. Deployed Expeditionary units come home as they were when the host's last city fell (if VEF has no saved state for a unit, it is lost and you are told). A unit killed in that fight is lost, not sent home. Volunteers are not affected here; the normal lapse follows.
+- If the host is eliminated: units on the way are called back to where they left, and you get half the fee back. Deployed Expeditionary and City-State units come home as they were when the host's last city fell (if VEF has no saved state for a unit, it is lost and you are told). A unit killed in that fight is lost, not sent home. Volunteers are not affected here; the normal lapse follows.
 - If you are eliminated: your deployed Expeditionary and City-State units stay with their hosts for good, and those still on the way arrive on schedule and become the host's own units. If the destination city has changed hands by then, they go to the host's nearest other city. Your Volunteers, deployed or on the way, and any unit on its way home are lost.
-- If a lent unit is killed or disbanded, you get a notification.
+- If an AI civ or a city-state disbands a unit you lent it (the AI sometimes does this to save upkeep), the unit comes home by the normal trip, with its promotions. If that happens on the turn it arrives, you also get half the fee back, rounded down. A lent unit that is killed, or that a human host disbands, is lost. You get a notification either way.
 
 ### Corps and Armies
 - The host can merge a lent Expeditionary unit into a Corps or Army. The game can't prevent it, but the unit panel warns first.
@@ -174,7 +178,7 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - Tested in multiplayer and works well.
 - VEF replaces the unit flag script (UnitFlagManager) with a thin wrapper to show its flag tags. Mods that replace the same script with a higher load order, such as Gift It To Me, win: the tags disappear, but everything else still works. Replacements with a lower load order are overridden, except CQUI and Better Builder Charges Tracking, which VEF loads underneath its wrapper.
 - CQUI should work but has not been tested.
-- VEF is saved with your game. Don't remove it in the middle of a game: units on the way exist only in the mod's records.
+- VEF is saved with your game. Updating it mid-game is safe, but don't remove it in the middle of a game: units on the way exist only in the mod's records.
 
 ## Future plans
 - A matching grievance penalty for the new owner of an entrusted city. The game offers mods no way to add grievances today, so this waits for one.
@@ -183,14 +187,16 @@ Only the checks count: if an alliance ends and is renewed between two of your tu
 - The AI never sends units or entrusts cities. It does use the units it receives.
 - Entrust adds no grievance penalty for the new owner. The capturer takes the normal penalty; the game gives mods no way to add grievances.
 - A unit whose owner has none of its strategic resource doesn't heal. This is a Gathering Storm rule and covers lent units too (a host without Iron can't heal a lent Swordsman). VEF warns you before you send and while it happens.
-- If the host upgrades a lent unit and moves it away in the same turn, VEF can't be sure it's the same unit and reports it lost. The same applies to a city-state unit levied by its suzerain when it can't be told apart from the city-state's own units.
+- A city-state unit levied by its suzerain is reported lost when VEF can't tell it apart from the city-state's own units.
 - If the host is eliminated, anything a deployed Expeditionary unit gained after the host's last city fell is lost.
 - A mutinying unit may briefly show a "+HP" animation before VEF takes the healing back.
 - A host who declares war on you can use your lent units until the next turn starts.
 - Air units (planes) can't be sent yet.
+- AI civs and city-states can merge a lent unit into a Corps or Army without warning. If it gets absorbed, it's lost for good; VEF can't send or bring home a Corps or Army yet.
 - The gold per turn in the top bar doesn't count the upkeep of your units on their way, but VEF still charges it each turn. The VEF tracker shows that upkeep and your real net gold per turn.
 
 ## Changelog
+- 1.0.5: Changed: Expeditionary Forces can now go to a partner in a proxy war: the partner is at war with a civ you have denounced or that has denounced you, and you don't have to be at war yourself. The destination list shows how many turns the denouncement has left. If the denouncement ends or the partner makes peace with that civ before the unit arrives, it comes back and you get half the fee back, like any send that is called off. A unit that has already arrived serves its full tour. Volunteers still need a real shared war. Fixed: an aircraft carrier can no longer be sent with planes aboard; unload them first. Fixed: a unit you lent to an AI civ or a city-state that then disbanded it was lost, along with the fee. It now comes home, and you get half the fee back if it was disbanded on the turn it arrived. Fixed: a lent unit that the host moved and then upgraded in the same turn was reported lost, or absorbed into a Corps or Army it never joined. VEF now follows the upgraded unit, and only reports a merge when a Corps or Army of the same unit type is next to it. New known issue: AI civs and city-states can merge a lent unit into a Corps or Army without warning.
 - 1.0.4: Changed: if you and the host go to war, lent Expeditionary and City-State units now leave and travel home like at the end of their service, keeping their promotions. They no longer switch to you where they stand, which could drop a unit deep in the host's land. Send fees are halved: Expeditionary and City-State units are still free for a 1-turn trip, then cost 5, 10 or 15% of the unit's gold price; Volunteers cost 10 to 25%. Returning veterans now get all their promotions back on the turn they arrive, not one per turn. The tracker now shows the upkeep of your units on their way and your real net gold per turn, since the top bar leaves that upkeep out. The mod description in the game's Additional Content screen is rewritten and shorter. New known issues: a host who declares war on you can use your lent units until the next turn starts, and air units can't be sent yet.
 - 1.0.3: Changed: a unit on its way to a partner is called back when the destination city changes hands or the partner stops qualifying. It returns at once to the tile it left from and you get half the fee back; it no longer goes to another city of the partner. If you are eliminated, Expeditionary and City-State units still on the way arrive and stay with the host. The send confirmation now says so. Entrust no longer needs a partner at war with the old owner when that owner was a city-state or has been knocked out of the game, so a city-state or a civ's last city can be entrusted now. In the tracker, units lent to you show as Inbound while on their way and Departed once they head home.
 - 1.0.2: Changed: city-states can receive units without a shared enemy.

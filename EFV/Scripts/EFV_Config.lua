@@ -30,7 +30,7 @@ EFV_Config = {}
 -- Mod version (keep equal to the version in EFV.modinfo LOC_EFV_MOD_TITLE /
 -- LOC_EFV_MOD_DESCRIPTION and EFV_Dev.modinfo; logged at load by
 -- EFV_Gameplay and EFV_Dev so a Lua.log names the installed build).
-EFV_Config.VERSION = "1.0.4"
+EFV_Config.VERSION = "1.0.5"
 
 -- ---------------------------------------------------------------------------
 -- Spec section 3 constants (verbatim)
@@ -59,6 +59,8 @@ EFV_Config.SPAWN_SEARCH_MAX_RING     = 5
 EFV_Config.SPAWN_MIN_EXITS           = 2     -- minimum passable same-domain neighbours
 EFV_Config.SPAWN_CREATE_TRIES        = 8     -- EFV addition (Session D item 3): plots tried per spawn when Create returns nil (RNG pick first, then the rest of its ring and the next rings in index order)
 EFV_Config.TRANSIT_CANCEL_REFUND_PCT = 50    -- designer ruling 2026-09-30: a cancelled transit refunds half the fee (rounded down); upkeep paid in transit is not refunded
+EFV_Config.DISBAND_REFUND_PCT       = 50    -- 1.0.5 (DECISIONS 2026-10-25, DQ3): share of the fee refunded (rounded down) when an AI or city-state holder disbands a lent unit in the round it arrived (EFV_Lifecycle HostDisbandReturn)
+EFV_Config.DISBAND_REFUND_TURNS     = 1     -- 1.0.5: the refund is paid only when turn - deployedTurn <= this (the arrival round, found at the next turn start); 0 = never
 
 -- Plan additions (PLAN 2.1)
 EFV_Config.EXPIRY_WARN_AT            = { 3, 1 }  -- EFV_NOTIF_EXPIRY_SOON when turns left is one of these (spec 14.3)
@@ -79,6 +81,14 @@ EFV_Config.LEVY_RELINK_MAX_DIST      = 2
 -- message. (Until 0.5.1 the same radius bounded the upgrade relink; since
 -- 0.5.2 that relink requires the snapshot's own plot, Session F T30.)
 EFV_Config.MERGE_SEARCH_EXTRA        = 1
+-- 1.0.5 upgrade relink (FIXPLAN_upgrade_relink.md U5; INTERFACES note 38):
+-- an upgrade seen while the old unit still looked alive leaves a hint
+-- (rec.upgradeHintID / upgradeHintTurn) that lives this many turns (F2); the
+-- [Classify] line of a missing record lists up to CLASSIFY_LOG_MAX units of
+-- its holder within CLASSIFY_LOG_RADIUS hexes of its last tile (F7, logging).
+EFV_Config.UPGRADE_HINT_TURNS        = 1
+EFV_Config.CLASSIFY_LOG_RADIUS       = 5
+EFV_Config.CLASSIFY_LOG_MAX          = 8
 
 -- ---------------------------------------------------------------------------
 -- Force types (PLAN 2.1) and record states (PLAN 1.4)
@@ -185,6 +195,12 @@ EFV_Config.FLAG_DEFEAT_HINT                  = true                   -- DV13; P
 EFV_Config.FLAG_SPAWN_EXCLUDE_NATURAL_WONDER = true                   -- design choice (SPIKES 3 row 11)
 EFV_Config.FLAG_UPGRADE_RELINK               = true                   -- ON since 0.5.2 (Session F T30: an upgrade creates a new unit ID on the same plot; relink only a provable match, unique units included)
 EFV_Config.FLAG_VET_ROUTE_B                  = true                   -- 0.7 (designer ruling "Veteran level restore", final session S6; note 33): a unit restored to a human owner gets its promotions through the owner's own PROMOTE command (keeps the level); false -> FLAG_XP_CLAMP path for everyone
+EFV_Config.FLAG_PROXY_WAR                    = true                   -- 1.0.5 (F4; DECISIONS 2026-10-05 and 2026-10-24): an Expeditionary send also passes on a proxy war (host at war with a major in a denouncement with the sender, either side); false -> the 1.0.4 shared-war rule and texts
+EFV_Config.FLAG_DISBAND_RETURN               = true                   -- 1.0.5 (DECISIONS 2026-10-25): an Expeditionary or City-State unit its AI or city-state holder disbands comes home from its snapshot (EFV_Lifecycle HostDisbandReturn); false -> 1.0.4: lost
+EFV_Config.FLAG_MOVE_TRACK                   = true                   -- 1.0.5 F1 (DECISIONS 2026-10-25 "MP upgrade bugs"): GameEvents.OnUnitMoved keeps a lent unit's last tile up to date, so an upgrade after a move is found on that tile; false -> positions only at turn boundaries (1.0.4). Spike U6 Q-A
+EFV_Config.FLAG_UPGRADE_CREATE_HOOK          = false                  -- 1.0.5 F2, OFF by spike U6 (2026-11-03): GameEvents.UnitCreated fires for an upgrade but the new unit is still off the map (-9999) with no XP, UnitInitialized never fired, and an upgraded unit has 0 moves, so F1 + the boundary relink cover it; true -> relink at UnitCreated / UnitInitialized (also needs FLAG_UPGRADE_RELINK)
+EFV_Config.FLAG_MERGE_STRICT                 = true                   -- 1.0.5 F4: "absorbed into a Corps or Army" only for a Corps or Army of the holder of the lent unit's type or an upgrade of it; false -> the 1.0.4 guess (any non-standard unit)
+EFV_Config.FLAG_KILL_EVIDENCE                = true                   -- 1.0.5 F5: a dead unit object counts as killed anywhere (also off the map), and a fight counts only when the unit was not seen alive after it; false -> the 1.0.4 marker rule and gone-reason order
 EFV_Config.LOG_LEVEL                         = 2                     -- 0 off, 1 errors, 2 events, 3 verbose (stubs log at 3)
 
 -- Phase gates (PLAN 5.1-5.4): which features are released. The single switch

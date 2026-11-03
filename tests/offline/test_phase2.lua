@@ -411,7 +411,7 @@ end)
 
 test("identity: expired unit disbanded, slot reused -> DISBANDED; the new unit is not sent home", function()
 	local S = H.baseScenario()
-	H.loadEFV()
+	H.loadEFV({ flags = { FLAG_DISBAND_RETURN = false } })   -- classification (1.0.5: the AI disband return is test_105_ai_disband d15)
 	local id, u = Deploy(S, { elapsed = 19 })         -- would expire (and return) next turn
 	H.killUnit(u)
 	local nu = H.unitInSlot(u, 1, "UNIT_SWORDSMAN", u.x, u.y)
@@ -506,7 +506,7 @@ test("turn boundary: registration lines; PlayerTurnStarted is hooked, OnPlayerTu
 	H.ok(string.find(all, "GameEvents.PlayerTurnStartComplete", 1, true) ~= nil)
 	H.ok(string.find(all, "GameEvents.OnPlayerTurnEnded", 1, true) ~= nil)
 	H.ok(string.find(all, "GameEvents.OnGameTurnEnded", 1, true) ~= nil, "Session E")
-	H.len(lines, 12, "12 hooks (0.7: EFV_VetStep)")
+	H.len(lines, 15, "15 hooks (0.7: EFV_VetStep; 1.0.5: OnUnitMoved, UnitCreated, UnitInitialized)")
 end)
 
 -- ===========================================================================

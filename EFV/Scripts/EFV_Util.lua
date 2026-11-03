@@ -801,7 +801,13 @@ end
 -- ---------------------------------------------------------------------------
 -- EFV_UnitGoneReason(pUnit, pid, uid) -> why or nil   (added 0.5.2)
 -- Session F 1.3: signals that a unit object returned by FindID is no longer
--- a live unit on the map. Checked in this order:
+-- a live unit on the map. 1.0.5 (F5, EFV_Config.FLAG_KILL_EVIDENCE): the
+-- dead check comes first, so a corpse is "GONE_DEAD" anywhere, also at
+-- -9999,-9999 where every combat death VEF logged lay (12 lines in 6 logs,
+-- FIXPLAN_upgrade_relink.md U1 and U13); an off-map or removed object is
+-- then always below the maximum damage (an upgrade or levy ghost keeps its
+-- own damage, final session L479, T28). Without the flag (1.0.4), in this
+-- order:
 --   "GONE_OFFMAP" GetX() / GetY() negative or Map.GetPlot(x, y) == nil
 --                 (levied unit handed to another owner: -9999,-9999, T28);
 --   "GONE_DEAD"   GetDamage() >= GetMaxDamage() (killed in combat in this
@@ -819,6 +825,12 @@ end
 -- ---------------------------------------------------------------------------
 function EFV_UnitGoneReason(pUnit, pid, uid)
 	local ok, why = pcall(function()
+		if EFV_Config ~= nil and EFV_Config.FLAG_KILL_EVIDENCE == true then
+			local d0, max0 = pUnit:GetDamage(), pUnit:GetMaxDamage()
+			if type(d0) == "number" and type(max0) == "number" and max0 > 0 and d0 >= max0 then
+				return "GONE_DEAD"
+			end
+		end
 		local x, y = pUnit:GetX(), pUnit:GetY()
 		if type(x) ~= "number" or type(y) ~= "number" or x < 0 or y < 0 then
 			return "GONE_OFFMAP"

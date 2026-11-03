@@ -43,9 +43,10 @@ param(
     [switch]$Strict,
     [string]$Src,
     [string]$DevSrc,
-    [string]$ModsDir = "S:\Libraries\Documents\My Games\Sid Meier's Civilization VI\Mods",
+    [string]$ModsDir,       # default: <Documents>\My Games\Sid Meier's Civilization VI\Mods (follows a redirected Documents folder)
     [string]$LogsDir = (Join-Path $env:LOCALAPPDATA "Firaxis Games\Sid Meier's Civilization VI\Logs"),
-    [string]$WorkshopDir = "M:\Steam\steamapps\workshop\content\289070\3810156577",
+    [string]$WorkshopDir,   # default: the VEF Workshop item in whichever Steam library has it
+    [string]$WorkshopId = "3810156577",
     [string]$Python = "python",
     [string]$Pattern = "EFV|Runtime Error|Syntax Error|stack traceback"
 )
@@ -55,6 +56,46 @@ $ToolsDir = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $ToolsDir
 if (-not $Src)    { $Src    = Join-Path $ProjectDir "EFV" }
 if (-not $DevSrc) { $DevSrc = Join-Path $ProjectDir "EFV_Dev" }
+
+# Civ VI keeps Mods under the (possibly redirected) Documents folder
+if (-not $ModsDir) {
+    $ModsDir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "My Games\Sid Meier's Civilization VI\Mods"
+}
+
+# Steam libraries: the install folder from the registry plus every "path" in libraryfolders.vdf
+function Get-SteamLibraries {
+    $libs = @()
+    $steam = $null
+    foreach ($key in 'HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam') {
+        try {
+            $p = Get-ItemProperty -Path $key -ErrorAction Stop
+            if ($p.SteamPath) { $steam = $p.SteamPath } elseif ($p.InstallPath) { $steam = $p.InstallPath }
+        } catch {}
+        if ($steam) { break }
+    }
+    if ($steam) {
+        $steam = $steam -replace '/', '\'
+        $libs += $steam
+        $vdf = Join-Path $steam "steamapps\libraryfolders.vdf"
+        if (Test-Path -LiteralPath $vdf) {
+            foreach ($m in (Select-String -LiteralPath $vdf -Pattern '"path"\s+"([^"]+)"' -AllMatches).Matches) {
+                $libs += ($m.Groups[1].Value -replace '\\\\', '\')
+            }
+        }
+    }
+    return $libs | Select-Object -Unique
+}
+
+if (-not $WorkshopDir) {
+    $libs = @(Get-SteamLibraries)
+    $WorkshopDir = ($libs | ForEach-Object { Join-Path $_ "steamapps\workshop\content\289070\$WorkshopId" } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1)
+    # not subscribed: point at the first library so the "still subscribed" check simply finds nothing
+    if (-not $WorkshopDir) {
+        if ($libs.Count -gt 0) { $WorkshopDir = Join-Path $libs[0] "steamapps\workshop\content\289070\$WorkshopId" }
+        else { $WorkshopDir = "" }
+    }
+}
 
 function Write-Step([string]$msg) { Write-Host ""; Write-Host "== $msg" -ForegroundColor Cyan }
 
@@ -147,7 +188,7 @@ if ($Uninstall) {
     Write-Host "The dev tools (EFV_Dev) stay. Resubscribe to VEF on the Steam Workshop to play with the released version."
     exit 0
 }
-if (-not $DevOnly -and (Test-Path -LiteralPath $WorkshopDir -PathType Container)) {
+if (-not $DevOnly -and $WorkshopDir -and (Test-Path -LiteralPath $WorkshopDir -PathType Container)) {
     Write-Host "WARNING: VEF from the Steam Workshop is still installed ($WorkshopDir). It has the same mod id as" -ForegroundColor Yellow
     Write-Host "         the local copy; unsubscribe from it in Steam while you test the local build, then" -ForegroundColor Yellow
     Write-Host "         check that Additional Content lists VEF once, with the local version number." -ForegroundColor Yellow

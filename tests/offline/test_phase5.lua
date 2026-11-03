@@ -474,7 +474,7 @@ end)
 -- ===========================================================================
 -- Spec 11 rows 6-7: unit killed / disbanded
 -- ===========================================================================
-test("rows 6-7: EXP disbanded -> UNIT_LOST (DISBANDED); CS killed -> UNIT_LOST (KILLED); VOL killed -> silent", function()
+test("rows 6-7: EXP disbanded by an AI host -> home (1.0.5); CS killed -> UNIT_LOST (KILLED); VOL killed -> silent", function()
 	local S = H.baseScenario()
 	H.loadEFV()
 	local re, ue = Deploy(S)
@@ -486,11 +486,11 @@ test("rows 6-7: EXP disbanded -> UNIT_LOST (DISBANDED); CS killed -> UNIT_LOST (
 	H.killUnit(uc); H.killUnit(uv)
 	H.clearNotifs()
 	H.endTurn()
-	H.len(H.records(), 0)
+	local rr = Only()
+	H.eq(rr.id, re.id); H.eq(rr.state, "RETURNING"); H.eq(rr.returnReason, "DISBANDED")
 	local lost = Sent(0, "UNIT_LOST")
-	H.len(lost, 2, "EXP and CS only")
-	local texts = Summary(lost[1]) .. Summary(lost[2])
-	H.ok(Has(texts, "LOC_EFV_LOSS_DISBANDED")); H.ok(Has(texts, "LOC_EFV_LOSS_KILLED"))
+	H.len(lost, 1, "CS only")
+	H.ok(Has(Summary(lost[1]), "LOC_EFV_LOSS_KILLED"))
 	H.len(Sent(0, "MERGED"), 0)
 	H.clean()
 end)
@@ -566,7 +566,7 @@ end)
 
 test("row 8: a Corps farther than the search radius -> DISBANDED (UNIT_LOST), not absorbed", function()
 	local S = H.baseScenario()
-	H.loadEFV()
+	H.loadEFV({ flags = { FLAG_DISBAND_RETURN = false } })   -- classification (1.0.5: an AI disband comes home)
 	local r, u = Deploy(S)
 	local far = FreeAt(u:GetX(), u:GetY(), 5)       -- radius = BaseMoves 2 + 1 = 3
 	H.unit(1, "UNIT_SWORDSMAN", far.x, far.y, { formation = CORPS() })
@@ -718,7 +718,7 @@ test("upgrade: FLAG_UPGRADE_RELINK off (the pre-0.5.2 default) -> a new-ID upgra
 
 test("upgrade relink never takes an untracked twin of the SAME type", function()
 	local S = H.baseScenario()
-	H.loadEFV({ flags = { FLAG_UPGRADE_RELINK = true } })
+	H.loadEFV({ flags = { FLAG_UPGRADE_RELINK = true, FLAG_DISBAND_RETURN = false } })   -- identity (1.0.5: an AI disband comes home)
 	local r, u = Deploy(S)
 	local p = FreeAt(u:GetX(), u:GetY(), 1)
 	H.unit(1, "UNIT_SWORDSMAN", p.x, p.y)

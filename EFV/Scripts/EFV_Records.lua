@@ -729,6 +729,19 @@ function EFV_Records.IDs(store)
 end
 
 -- ---------------------------------------------------------------------------
+-- EFV_Records.Rev() -> number   (added 1.0.5, FIXPLAN_upgrade_relink.md F1)
+-- The synced EFV_Rev (0 when unset): one property read, no store load. Every
+-- commit that wrote something bumps it, so a value derived from the store
+-- (EFV_Lifecycle's tracked-unit index) is current while Rev() is unchanged.
+-- Params:  none.
+-- Returns: number.
+-- APIs: A06.
+-- ---------------------------------------------------------------------------
+function EFV_Records.Rev()
+	return ReadNumberProp(EFV_Config.PROP.REV, 0)
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_Records.Touch(store)
 -- Marks EFV_Records dirty. Call after mutating fields of a record in place.
 -- Params:  store.

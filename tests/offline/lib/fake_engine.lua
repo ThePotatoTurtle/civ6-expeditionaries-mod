@@ -42,6 +42,17 @@
 --     turn start (FAKE.LevyTransfer: new IDs, originalOwner kept, tile kept
 --     or shifted, T28). These "ghosts" live in FAKE.ghosts, never heal and
 --     expire through FAKE.ExpireGhosts (called by the harness turn loop).
+--     1.0.5 upgrade relink (FIXPLAN_upgrade_relink.md U7), all off by default
+--     (the 1.0.4 model): FAKE.MoveUnit fires GameEvents.OnUnitMoved;
+--     FAKE.upgradeEvents = "live" | "ghost" fires GameEvents.UnitCreated and
+--     UnitInitialized for the upgraded unit while the old one is still live
+--     on its tile, or after it became a ghost; FAKE.upgradeGhostOffMap moves
+--     the old object to -9999,-9999 (final session L479); FAKE.upgradeKeepsMoves
+--     gives the new unit the old one's remaining moves; FAKE.createEvents makes
+--     a script Create fire UnitCreated; FAKE.supportFormation (-1, the Medic in
+--     Sessions C to E) is the formation of FORMATION_CLASS_SUPPORT units;
+--     FAKE.corpseOffMap puts a combat corpse at -9999,-9999 with 100 damage
+--     (the 12 corpse lines of 6 logs);
 --     Whether the engine still lists them in Units.GetUnitsInPlot is
 --     unmeasured: FAKE.ghostsInPlot (default true = worst case);
 --   * T08 (Session F): a unit created by script is level 1 whatever
@@ -49,7 +60,22 @@
 --     above the current next-level threshold (a pending promotion);
 --   * every script write of unit damage is recorded in FAKE.damageWrites
 --     ({ id, owner, from, to, turn, ghost }; the harness heal writes
---     directly and is not recorded).
+--     directly and is not recorded);
+--   * denouncements (SPIKES 8.1, 1.0.5): G reads the pair state with
+--     Players[a]:GetAi_Diplomacy():GetDiplomaticState(b) (a StateType
+--     string; GetAi_Diplomacy is nil in UI), UI with
+--     Players[a]:GetDiplomaticAI():GetDiplomaticStateIndex(b) (an index into
+--     GameInfo.DiplomaticStates; GetDiplomaticAI is nil in G). The DENOUNCED
+--     state is symmetric (FAKE.Denounce sets both directions); who
+--     denounced is only in the UI's GetDiplomacy():GetDenounceTurn (-1 =
+--     never) and the limit only in the UI's
+--     Game.GetGameDiplomacy():GetDenounceTimeLimit() (both nil in G). At
+--     expiry the pair goes to UNFRIENDLY (DENOUNCE_EXPIRES); a war replaces
+--     the state. FAKE.ExpireDenouncements (called by H.endTurn at the start
+--     of the round) ends a pair when the later denounce turn + limit + 1 <=
+--     the turn (the base tooltip's count without the player-order term; the
+--     in-game moment is unobserved). DiplomacyManager.RequestSession (UI)
+--     records its calls and acts by FAKE.requestSessionMode.
 --
 -- Hex layout: Civ VI "odd-r" offset coordinates, y = 0 at the south edge,
 -- odd rows shifted half a hex east. Directions (DirectionTypes) 0..5 =
@@ -63,6 +89,7 @@ FAKE = {
 	props = {},              -- Game properties (deep-copied in/out)
 	propViolations = {},     -- SPIKES S3 storage-rule violations seen by SetProperty
 	propWrites = {},         -- key -> number of SetProperty calls
+	propReads = {},          -- key -> number of Game:GetProperty calls (1.0.5 upgrade relink cost test u18)
 	rngSeed = 20260928,
 	rngCalls = {},           -- { n, label, result }
 	forbidden = {},          -- MP-unsafe calls seen in gameplay (math.random, Game.GetLocalPlayer)
@@ -87,6 +114,7 @@ FAKE = {
 	createRefused = {},      -- { pid, x, y, why } for every refused Create/InitUnit
 	ghosts = {},             -- id -> stale unit object FindID still returns (Session F 1.3)
 	ghostsInPlot = true,     -- ghosts on a plot still listed by Units.GetUnitsInPlot (unmeasured: worst case)
+	airInPlot = true,        -- air units (planes on a carrier or base) listed by Units.GetUnitsInPlot (unmeasured, FIXPLAN_air_units E11)
 	combatDamageBeforeEvent = true, -- H.combat applies damage before GameEvents.OnCombatOccurred (T31 open)
 	damageWrites = {},       -- { id, owner, from, to, turn, ghost } for every Unit:SetDamage / ChangeDamage
 	permanentWars = true,    -- Free Cities <-> majors and barbarians <-> everyone always at war (Session E H_DIPLO)
@@ -243,6 +271,9 @@ local function NewPropertyHolder(label, store)
 			store[k] = copy
 		end,
 		GetProperty = function(self, k)
+			if store == FAKE.props then
+				FAKE.propReads[k] = (FAKE.propReads[k] or 0) + 1
+			end
 			return DeepCopy(store[k])
 		end,
 	}
@@ -435,6 +466,34 @@ Game.GetRandNum = function(n, label)
 	FAKE.rngCalls[#FAKE.rngCalls + 1] = { n = n, label = label, result = r }
 	return r
 end
+-- Game.GetGameDiplomacy() exists in both contexts; GetDenounceTimeLimit only
+-- in UI (SPIKES 8.1 L244 / L310).
+Game.GetGameDiplomacy = function()
+	return setmetatable({}, { __index = function(_, k)
+		if k == "GetDenounceTimeLimit" and FAKE.context == "UI" then
+			return function() return FAKE.DenounceLimit() end
+		end
+		return nil
+	end })
+end
+
+-- UI DiplomacyManager.RequestSession(a, b, kind) (DiplomacyActionView.lua:469):
+-- recorded; "DENOUNCE" acts by FAKE.requestSessionMode.
+DiplomacyManager = {
+	RequestSession = function(a, b, kind)
+		FAKE.diploSessions[#FAKE.diploSessions + 1] = { a = a, b = b, kind = kind }
+		if kind ~= "DENOUNCE" then return end
+		local mode = FAKE.requestSessionMode or "INITIATOR"
+		if mode == "INITIATOR" then
+			FAKE.Denounce(a, b)
+		elseif mode == "LOCAL" then
+			local me = FAKE.localPlayer or 0
+			local other = (a == me) and b or a
+			FAKE.Denounce(me, other)
+		end
+	end,
+}
+
 Game.GetLocalPlayer = function()
 	if FAKE.context == "G" then
 		FAKE.forbidden[#FAKE.forbidden + 1] = "Game.GetLocalPlayer"
@@ -779,8 +838,19 @@ function FAKE.NewUnit(ownerID, typeName, x, y)
 		moves = row.BaseMoves or 2, maxMoves = row.BaseMoves or 2,
 		attacks = 1, formation = 0, embarked = false, createdTurn = FAKE.turn,
 	}, Unit)
+	if FAKE.supportFormation ~= nil and row.FormationClass == "FORMATION_CLASS_SUPPORT" then
+		u.formation = FAKE.supportFormation
+	end
 	FAKE.units[id] = u
 	return u
+end
+
+-- 1.0.5: a move by the unit's owner (the engine's GameEvents.OnUnitMoved,
+-- once per move order; whether per tile is the spike's Q-A). H.moveUnit
+-- stays silent for test setup.
+function FAKE.MoveUnit(u, x, y)
+	u.x, u.y = x, y
+	GameEvents.OnUnitMoved(u.owner, u.id)
 end
 
 function FAKE.RemoveUnit(u, how)
@@ -860,11 +930,31 @@ end
 -- same plot, keeping damage, XP, promotions, name and formation, with 0
 -- moves; the old object stays findable (old type, same plot) until
 -- OnGameTurnEnded. Returns the new unit.
-function FAKE.UpgradeUnit(u, newType)
-	local nu = FAKE.NewUnit(u.owner, newType, u.x, u.y)
-	CopyUnitState(u, nu)
-	nu.moves = 0
+-- 1.0.5 (U7): FAKE.upgradeEvents "live" fires UnitCreated and
+-- UnitInitialized while the old unit is still live on its tile, then ghosts
+-- it; "ghost" ghosts it first; nil fires nothing (1.0.4 model).
+local function UpgradeGhost(u)
 	FAKE.MakeGhost(u, "turnEnd", "UPGRADE")
+	if FAKE.upgradeGhostOffMap then
+		u.x, u.y = -9999, -9999
+	end
+end
+function FAKE.UpgradeUnit(u, newType)
+	local mode = FAKE.upgradeEvents
+	local x, y, moves = u.x, u.y, u.moves
+	if mode == "ghost" then
+		UpgradeGhost(u)
+	end
+	local nu = FAKE.NewUnit(u.owner, newType, x, y)
+	CopyUnitState(u, nu)
+	nu.moves = FAKE.upgradeKeepsMoves and moves or 0
+	if mode == "live" or mode == "ghost" then
+		GameEvents.UnitCreated(nu.owner, nu.id)
+		GameEvents.UnitInitialized(nu.owner, nu.id)
+	end
+	if mode ~= "ghost" then
+		UpgradeGhost(u)
+	end
 	return nu
 end
 
@@ -899,7 +989,11 @@ function FAKE.CombatKill(u)
 		return false
 	end
 	u.damage = 100
-	return FAKE.MakeGhost(u, "frame", "COMBAT")
+	local ok = FAKE.MakeGhost(u, "frame", "COMBAT")
+	if FAKE.corpseOffMap then
+		u.x, u.y = -9999, -9999
+	end
+	return ok
 end
 
 Units = {}
@@ -910,7 +1004,8 @@ function Units.GetUnitsInPlot(p)
 	local out = {}
 	if p == nil then return out end
 	for _, u in pairs(FAKE.units) do
-		if u.x == p.x and u.y == p.y then
+		if u.x == p.x and u.y == p.y
+				and (FAKE.airInPlot or GameInfo.Units[u.typeIndex].Domain ~= "DOMAIN_AIR") then
 			out[#out + 1] = u
 		end
 	end
@@ -1011,6 +1106,9 @@ function FAKE.ScriptCreate(pid, typeName, x, y)
 		for _, p in ipairs(Map.GetNeighborPlots(x, y, 2)) do FAKE.unrevealed[pid][p.index] = nil end
 	end
 	u.level = 1   -- Session F T08: SetPromotion never raises a created unit's level
+	if FAKE.createEvents then
+		GameEvents.UnitCreated(pid, u.id)
+	end
 	return u
 end
 
@@ -1129,7 +1227,19 @@ end
 -- ---------------------------------------------------------------------------
 -- Players
 -- ---------------------------------------------------------------------------
-FAKE.diplo = { war = {}, allied = {}, friend = {}, ob = {}, met = {} }
+FAKE.diplo = { war = {}, allied = {}, friend = {}, ob = {}, met = {},
+	denounced = {},     -- pair set, symmetric (1.0.5, SPIKES 8.1)
+	denounceTurn = {},  -- [a][b] = turn a denounced b (directional)
+	unfriendly = {},    -- pair set, symmetric (after DENOUNCE_EXPIRES)
+	score = {},         -- [a][b] = a's opinion of b (directional, default 0)
+}
+FAKE.denounceLimit = nil       -- nil -> GlobalParameters DIPLOMACY_DENOUNCE_TIME_LIMIT, else 30
+FAKE.aiDiploMissing = false    -- G GetAi_Diplomacy is nil (reader failure tests)
+FAKE.aiDiploThrows = false     -- G GetAi_Diplomacy():GetDiplomaticState throws
+FAKE.diploAIThrows = false     -- UI GetDiplomaticAI():GetDiplomaticStateIndex throws
+FAKE.denounceTurnMissing = false -- UI GetDiplomacy():GetDenounceTurn is nil
+FAKE.diploSessions = {}        -- DiplomacyManager.RequestSession calls { a, b, kind }
+FAKE.requestSessionMode = "INITIATOR" -- "INITIATOR" (a denounces b) | "LOCAL" (the local player denounces the other) | "IGNORE"
 
 local function PairGet(t, a, b)
 	return t[a] ~= nil and t[a][b] == true
@@ -1169,8 +1279,16 @@ local function NewDiplomacy(pid)
 	-- UI only (Session A T09: nil in G); G reads open borders via deals.
 	local ui = {}
 	function ui.HasOpenBordersFrom(self, b) return PairGet(FAKE.diplo.ob, pid, b) end
+	-- UI only (SPIKES 8.1: nil in G): the turn pid denounced b, -1 = never.
+	function ui.GetDenounceTurn(self, b)
+		local row = FAKE.diplo.denounceTurn[pid]
+		return (row ~= nil and row[b]) or -1
+	end
 	setmetatable(d, { __index = function(t, k)
 		if FAKE.context == "UI" then
+			if k == "GetDenounceTurn" and FAKE.denounceTurnMissing then
+				return nil
+			end
 			return ui[k]
 		end
 		return nil
@@ -1188,7 +1306,8 @@ local function NewDiplomacy(pid)
 	return d
 end
 
--- War is symmetric; it ends alliance, friendship and open borders both ways.
+-- War is symmetric; it ends alliance, friendship and open borders both ways
+-- (and a denouncement: the war replaces the state, 1.0.5).
 function FAKE.SetWar(a, b, v)
 	PairSet(FAKE.diplo.war, a, b, v)
 	PairSet(FAKE.diplo.war, b, a, v)
@@ -1198,15 +1317,78 @@ function FAKE.SetWar(a, b, v)
 		PairSet(FAKE.diplo.allied, a, b, false); PairSet(FAKE.diplo.allied, b, a, false)
 		PairSet(FAKE.diplo.friend, a, b, false); PairSet(FAKE.diplo.friend, b, a, false)
 		PairSet(FAKE.diplo.ob, a, b, false); PairSet(FAKE.diplo.ob, b, a, false)
+		PairSet(FAKE.diplo.denounced, a, b, false); PairSet(FAKE.diplo.denounced, b, a, false)
+		PairSet(FAKE.diplo.unfriendly, a, b, false); PairSet(FAKE.diplo.unfriendly, b, a, false)
 	end
+end
+
+-- Denouncements (1.0.5; SPIKES 8.1): a denounces b. Both directions read
+-- DENOUNCED; the turn is kept for a only (directional, UI GetDenounceTurn).
+function FAKE.Denounce(a, b, turn)
+	PairSet(FAKE.diplo.denounced, a, b, true); PairSet(FAKE.diplo.denounced, b, a, true)
+	PairSet(FAKE.diplo.unfriendly, a, b, false); PairSet(FAKE.diplo.unfriendly, b, a, false)
+	FAKE.diplo.denounceTurn[a] = FAKE.diplo.denounceTurn[a] or {}
+	FAKE.diplo.denounceTurn[a][b] = turn or FAKE.turn
+	PairSet(FAKE.diplo.met, a, b, true); PairSet(FAKE.diplo.met, b, a, true)
+end
+
+-- DENOUNCE_EXPIRES (DiplomaticActions.xml:265,282): DENOUNCED -> UNFRIENDLY.
+function FAKE.DenounceEnd(a, b)
+	PairSet(FAKE.diplo.denounced, a, b, false); PairSet(FAKE.diplo.denounced, b, a, false)
+	PairSet(FAKE.diplo.unfriendly, a, b, true); PairSet(FAKE.diplo.unfriendly, b, a, true)
+end
+
+function FAKE.DenounceLimit()
+	if type(FAKE.denounceLimit) == "number" then
+		return FAKE.denounceLimit
+	end
+	local row = GameInfo.GlobalParameters and GameInfo.GlobalParameters["DIPLOMACY_DENOUNCE_TIME_LIMIT"]
+	return (row ~= nil and tonumber(row.Value)) or 30
+end
+
+-- Ends every denounced pair (ascending IDs) whose later denounce turn +
+-- limit + 1 <= turn.
+function FAKE.ExpireDenouncements(turn)
+	local limit = FAKE.DenounceLimit()
+	local ids = {}
+	for a in pairs(FAKE.diplo.denounced) do ids[#ids + 1] = a end
+	table.sort(ids)
+	for _, a in ipairs(ids) do
+		local bs = {}
+		for b in pairs(FAKE.diplo.denounced[a] or {}) do
+			if b > a then bs[#bs + 1] = b end
+		end
+		table.sort(bs)
+		for _, b in ipairs(bs) do
+			local tab = (FAKE.diplo.denounceTurn[a] or {})[b] or -1
+			local tba = (FAKE.diplo.denounceTurn[b] or {})[a] or -1
+			if math.max(tab, tba) + limit + 1 <= turn then
+				FAKE.DenounceEnd(a, b)
+			end
+		end
+	end
+end
+
+-- The pair state as a GameInfo.DiplomaticStates StateType (both readers).
+function FAKE.DiploStateName(a, b)
+	if PairGet(FAKE.diplo.war, a, b) then return "DIPLO_STATE_WAR" end
+	if PairGet(FAKE.diplo.allied, a, b) then return "DIPLO_STATE_ALLIED" end
+	if PairGet(FAKE.diplo.friend, a, b) then return "DIPLO_STATE_DECLARED_FRIEND" end
+	if PairGet(FAKE.diplo.denounced, a, b) then return "DIPLO_STATE_DENOUNCED" end
+	if PairGet(FAKE.diplo.unfriendly, a, b) then return "DIPLO_STATE_UNFRIENDLY" end
+	return "DIPLO_STATE_NEUTRAL"
 end
 
 local Player = {}
 local PlayerUI = {}  -- UI-only player methods (nil in G, Session A T09)
+local PlayerG = {}   -- gameplay-only player methods (nil in UI, SPIKES 8.1)
 Player.__index = function(t, k)
 	local v = Player[k]
-	if v == nil and FAKE.context == "UI" then
-		return PlayerUI[k]
+	if v == nil then
+		if FAKE.context == "UI" then
+			return PlayerUI[k]
+		end
+		return PlayerG[k]
 	end
 	return v
 end
@@ -1234,17 +1416,37 @@ function Player:GetInfluence()
 	end
 	return inf
 end
-function Player:GetDiplomaticAI()
+-- UI only (SPIKES 8.1 L281: nil in G). U20.
+function PlayerUI.GetDiplomaticAI(self)
 	local me = self.id
 	return {
 		GetDiplomaticStateIndex = function(_, other)
-			local name = "DIPLO_STATE_NEUTRAL"
-			if PairGet(FAKE.diplo.war, me, other) then name = "DIPLO_STATE_WAR"
-			elseif PairGet(FAKE.diplo.allied, me, other) then name = "DIPLO_STATE_ALLIED"
-			elseif PairGet(FAKE.diplo.friend, me, other) then name = "DIPLO_STATE_DECLARED_FRIEND" end
-			local row = GameInfo.DiplomaticStates and GameInfo.DiplomaticStates[name]
+			if FAKE.diploAIThrows then error("fake GetDiplomaticStateIndex failure") end
+			local row = GameInfo.DiplomaticStates and GameInfo.DiplomaticStates[FAKE.DiploStateName(me, other)]
 			return row and row.Index or -1
 		end,
+		GetDiplomaticModifiers = function() return {} end,
+	}
+end
+-- G only (SPIKES 8.1: nil in UI). A64; the tuner's score calls
+-- (Debug\Diplomacy.ltp:19-33, 260) for the dev tools.
+function PlayerG.GetAi_Diplomacy(self)
+	if FAKE.aiDiploMissing then return nil end
+	local me = self.id
+	return {
+		GetDiplomaticState = function(_, other)
+			if FAKE.aiDiploThrows then error("fake GetDiplomaticState failure") end
+			return FAKE.DiploStateName(me, other)
+		end,
+		GetDiplomaticScore = function(_, other)
+			local row = FAKE.diplo.score[me]
+			return (row ~= nil and row[other]) or 0
+		end,
+		AdjustBaseDiplomacy = function(_, other, delta)
+			FAKE.diplo.score[me] = FAKE.diplo.score[me] or {}
+			FAKE.diplo.score[me][other] = ((FAKE.diplo.score[me][other]) or 0) + (delta or 0)
+		end,
+		GetDiplomaticModifiers = function() return {} end,
 	}
 end
 

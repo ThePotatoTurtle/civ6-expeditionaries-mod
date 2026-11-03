@@ -12,7 +12,10 @@ What it does for every .lua under <root>:
      (PLAN Appendix A / 6.1 + api_allowlist_extra.json), nor assigned at top level by a file in the same
      include group is an ERROR (typos such as `Plyers`, missing include). Assigning a global inside
      a function that no file defines at top level is a WARN (missing `local`?).
-  3. luacheck (optional): if `luacheck` is on PATH or in tools/bin, runs it with tools/.luacheckrc.
+  3. Registers: reads maxstacksize of the main chunk and of every nested function from the same
+     bytecode. Above REG_ERROR (180) is an ERROR, above REG_WARN (160) a WARN: Civ VI's Havok Script
+     rejects a function that needs too many registers, which stock Lua 5.1 still compiles.
+  4. luacheck (optional): if `luacheck` is on PATH or in tools/bin, runs it with tools/.luacheckrc.
   --basic: no Lua runtime; weak block/bracket balance scan only.
 Exit code 1 on any ERROR (or WARN with --strict).
 """
@@ -77,8 +80,27 @@ class BytecodeError(Exception):
     pass
 
 
+# Register limit. Civ VI runs Havok Script (a modified Lua 5.1) whose per-function register ceiling
+# is lower than stock Lua 5.1's 250 (MAXSTACK). Measured in game (EFV_Dev 1.0.4.5): a main chunk with
+# maxstacksize 172 loads, 206 fails with "Function or expression requires too many registers (too
+# complex)", although lupa's stock Lua 5.1 compiles both. Every main-chunk local holds one register to
+# the end of its block, and a long table constructor holds up to 50 more until it flushes.
+REG_ERROR = 180
+REG_WARN = 160
+
+
 def read_globals(dump: bytes):
     """Returns list of (op, name, line, depth) where op is 'get' or 'set'."""
+    return read_chunk(dump)[0]
+
+
+def read_protos(dump: bytes):
+    """Returns list of (linedefined, lastlinedefined, maxstacksize, depth), main chunk first (line 0)."""
+    return read_chunk(dump)[1]
+
+
+def read_chunk(dump: bytes):
+    """Walks a Lua 5.1 string.dump: returns (globals, protos) as read_globals / read_protos describe."""
     if dump[:4] != b"\x1bLua" or dump[4] != 0x51:
         raise BytecodeError("not a Lua 5.1 chunk")
     little = dump[6] == 1
@@ -113,10 +135,12 @@ def read_globals(dump: bytes):
         return s.decode("utf-8", "replace")
 
     out = []
+    protos = []
 
     def func(depth):
         r_str()                 # source
-        r_int(); r_int()        # linedefined, lastlinedefined
+        first, last = r_int(), r_int()   # linedefined, lastlinedefined
+        protos.append((first, last, dump[pos[0] + 3], depth))
         pos[0] += 4             # nups, numparams, is_vararg, maxstacksize
         ncode = r_int()
         code = [rd(ufmt[s_ins], s_ins) for _ in range(ncode)]
@@ -155,7 +179,7 @@ def read_globals(dump: bytes):
                 out.append(("get" if op == 5 else "set", name, line, depth))
 
     func(0)
-    return out
+    return out, protos
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +259,7 @@ def check(root, basic=False, globals_check=True, luacheck="auto", rep=None):
     rt = None if basic else lua_runtime()
     if not basic and rt is None:
         rep.warn("", 0, "no-runtime", "lupa (Lua 5.1) not importable: falling back to --basic scan. Run: pip install lupa")
+        rep.warn("", 0, "registers-skipped", "register-limit check skipped (needs lupa Lua 5.1 bytecode)")
         basic = True
     proj = L.LuaProject(root)
     if not proj.files:
@@ -266,11 +291,14 @@ def check(root, basic=False, globals_check=True, luacheck="auto", rep=None):
             ln, msg = (int(m.group(1)), m.group(2)) if m else (0, res)
             rep.error(f, ln, "syntax", msg)
             continue
+        try:
+            gl, protos = read_chunk(res)
+        except (BytecodeError, struct.error, IndexError) as e:
+            rep.warn(f, 0, "bytecode", "could not read bytecode for the globals and register checks: %s" % e)
+            continue
         if globals_check:
-            try:
-                gl_by_file[f] = read_globals(res)
-            except (BytecodeError, struct.error, IndexError) as e:
-                rep.warn(f, 0, "bytecode", "could not read bytecode for the globals check: %s" % e)
+            gl_by_file[f] = gl
+        check_registers(f, protos, rep)
 
     if globals_check and gl_by_file:
         check_globals(proj, gl_by_file, rep)
@@ -285,6 +313,21 @@ def check(root, basic=False, globals_check=True, luacheck="auto", rep=None):
         else:
             rep.info("", 0, "luacheck", "luacheck not installed; built-in bytecode globals check used instead")
     return rep
+
+
+def check_registers(f, protos, rep):
+    """ERROR above REG_ERROR, WARN above REG_WARN registers for any function (see REG_ERROR)."""
+    for first, last, mss, depth in protos:
+        if mss <= REG_WARN:
+            continue
+        where = "main chunk" if depth == 0 else "function at lines %d-%d" % (first, last)
+        hint = ("scope section-private locals in do ... end blocks" if depth == 0
+                else "split the function or scope its locals in do ... end blocks")
+        msg = "%s needs %d registers (limit %d, warn above %d): Havok Script fails to load it as "               "'too many registers (too complex)'; %s" % (where, mss, REG_ERROR, REG_WARN, hint)
+        if mss > REG_ERROR:
+            rep.error(f, max(first, 1), "registers", msg)
+        else:
+            rep.warn(f, max(first, 1), "registers-high", msg)
 
 
 def _inline_globals(src):

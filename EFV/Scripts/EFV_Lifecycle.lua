@@ -37,6 +37,9 @@
 --     EXP / CS keep the spec 9.1 auto-return.
 --
 -- Loss classification (rec deleted): "KILLED", "DISBANDED", "MERGED_ABSORBED".
+-- Since 1.0.5 an EXP / CS "DISBANDED" with an AI or city-state holder comes
+-- home instead (HostDisbandReturn, RETURNING "DISBANDED") unless the fail
+-- safe applies; a human holder's disband stays a loss.
 -- ===========================================================================
 
 if EFV_Lifecycle ~= nil and EFV_Lifecycle.LOADED == 1 then
@@ -107,6 +110,38 @@ EFV_Lifecycle = {}
 --     hands (OnCityConquered marks it) or whose send conditions lapsed; a
 --     dead sender's EXP / CS in transit still arrive for the recipient (R2).
 --     The DV16 boundary war check covers on-map records only.
+--   1.0.5 AI disband (DECISIONS 2026-10-25, INTERFACES note 37): an EXP /
+--     CS unit that step 0c classifies DISBANDED while its holder
+--     (onMapPlayerID, else recipientID) is an AI civ or a city-state comes
+--     home from its last snapshot (HostDisbandReturn -> StartReturn
+--     "DISBANDED", the normal trip). Fail safe = 1.0.4 (lost): a human or
+--     unreadable holder, no usable snapshot, or a possible successor (an
+--     untracked upgrade-type unit with the record's promotions within the
+--     merge radius, or for CS any levy candidate). Refund: DISBAND_REFUND_PCT
+--     of the fee, only when turn - deployedTurn <= DISBAND_REFUND_TURNS (the
+--     arrival round), paid once (rec.disbandTurn / disbandBy /
+--     disbandRefund). Kill switch FLAG_DISBAND_RETURN.
+--   1.0.5 upgrade relink (DECISIONS 2026-10-25 "MP upgrade bugs: the U11
+--     answers"; FIXPLAN_upgrade_relink.md U5; INTERFACES note 38). In
+--     multiplayer no boundary runs while the humans play, so a lent unit
+--     moved and then upgraded was not found on its last snapshot tile and
+--     was misread as merged or disbanded. F1 (FLAG_MOVE_TRACK):
+--     GameEvents.OnUnitMoved keeps rec.lastX / lastY current (OnUnitMoved).
+--     F2 (FLAG_UPGRADE_CREATE_HOOK): GameEvents.UnitCreated /
+--     UnitInitialized pair the new unit with the one record whose unit stood
+--     on its tile (OnUnitCreated): relinked at once when the old object is a
+--     removed ghost, else a hint (rec.upgradeHintID / upgradeHintTurn)
+--     confirmed later (ConfirmHint). F3: the boundary relink tries the hint
+--     first, and a hint beats a fight marker. F4 (FLAG_MERGE_STRICT): only a
+--     Corps or Army of the lent unit's type (or an upgrade of it) absorbs it.
+--     F5 (FLAG_KILL_EVIDENCE): a corpse anywhere is GONE_DEAD; a fight counts
+--     as a death only when the unit was not seen alive after it
+--     (rec.combatSeq / aliveSeq, CombatDeathPossible). F6: a hint or an
+--     ambiguous upgrade is a possible successor for the AI disband guard. F7:
+--     a "[Classify]" line for every missing record. All four flags false =
+--     1.0.4. A derived index of the tracked units (TrackedIndex, rebuilt
+--     whenever EFV_Rev changes) lets the move and create handlers skip
+--     untracked units with one property read.
 --
 -- Turn-boundary abstraction (INTERFACES note 23). In-game order (Session C
 -- T04, confirmed for every round by Session E T26): OnGameTurnStarted(N) ->
@@ -502,6 +537,58 @@ local function MarkKilled(store, rec, turn, hook)
 end
 
 -- ---------------------------------------------------------------------------
+-- Kill evidence (1.0.5 F5, FLAG_KILL_EVIDENCE; INTERFACES note 38). OnCombat
+-- counts the record's fights (rec.combatSeq); NoteAlive copies the count to
+-- rec.aliveSeq whenever the record's unit is seen alive after them (found
+-- live at a boundary, in step 0c or by OnUnitMoved) or its old object is
+-- found removed below the maximum damage (an upgrade or levy ghost: removed,
+-- not killed). A corpse is not always seen (rec 16 and 14 of the 1.0.4 MP
+-- game, FIXPLAN_upgrade_relink.md U13), so the rule does not need one.
+-- ---------------------------------------------------------------------------
+local function NoteAlive(store, rec)
+	if EFV_Config.FLAG_KILL_EVIDENCE ~= true or rec.combatSeq == nil or rec.aliveSeq == rec.combatSeq then
+		return
+	end
+	rec.aliveSeq = rec.combatSeq
+	Touch(store)
+end
+
+-- Killed for sure (rec.killedTurn), or a fight in this or the last turn that
+-- the unit was not seen alive after. A record without combatSeq (older than
+-- 1.0.5) counts as not seen; without FLAG_KILL_EVIDENCE every fight of this
+-- or the last turn counts (the 1.0.4 marker rule).
+local function CombatDeathPossible(rec, turn)
+	if rec.killedTurn ~= nil then
+		return true
+	end
+	local last = tonumber(rec.lastCombatTurn)
+	if last == nil or last < turn - 1 then
+		return false
+	end
+	if EFV_Config.FLAG_KILL_EVIDENCE ~= true then
+		return true
+	end
+	return (tonumber(rec.combatSeq) or 1) ~= (tonumber(rec.aliveSeq) or 0)
+end
+
+-- An upgrade hint (F2) younger than EFV_Config.UPGRADE_HINT_TURNS.
+local function HasLiveHint(rec, turn)
+	return rec.upgradeHintID ~= nil
+		and (tonumber(rec.upgradeHintTurn) or -999) >= turn - (EFV_Config.UPGRADE_HINT_TURNS or 1)
+end
+
+local function UnitTypeOf(pU)
+	local ok, t = pcall(function()
+		local row = GameInfo.Units[pU:GetType()]
+		return row and row.UnitType or nil
+	end)
+	if ok then
+		return t
+	end
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_Lifecycle.ReconcilePlayers(store, turn)
 -- Pipeline step 0b (spec 11 rows 1, 4, 5; DECISIONS 2026-09-30 transit
 -- rulings). OUTBOUND records: sender not alive -> EXP / CS with a living
@@ -710,7 +797,8 @@ end
 -- non-STANDARD unit of onMapPlayerID (untracked or a fresh tracked merge
 -- survivor) stands within MergeSearchRadius of lastX/lastY; else DISBANDED.
 -- KILLED / DISBANDED: delete, EXP/CS queue EFV_NOTIF_UNIT_LOST (sender); VOL
--- delete only (spec 11 rows 6-7). MERGED_ABSORBED: delete, EFV_NOTIF_MERGED
+-- delete only (spec 11 rows 6-7). 1.0.5: an EXP / CS DISBANDED with an AI or
+-- city-state holder goes home instead (HostDisbandReturn). MERGED_ABSORBED: delete, EFV_NOTIF_MERGED
 -- (text _ABSORBED) to the sender and the recipient (EXP/CS, D3 ruling) or
 -- (text _VOLUNTEER) to the sender (VOL). Complete since Phase 5 (WP5.2).
 -- Logs "[Refresh] ...".
@@ -863,11 +951,14 @@ end
 -- ("[Levy] ambiguous"). Relinks onMapPlayerID / onMapUnitID / lastX / lastY;
 -- the timer, grace and return rules continue unchanged (valid territory
 -- stays the city-state's or the sender's). Logs "[Levy] relink ...".
+-- 1.0.5: the candidate scan is LevyCandidates (every candidate, each with
+-- agree = SnapshotAgreement), shared with the AI disband guard
+-- (PossibleSuccessors); RelinkLevied keeps the agreeing ones as before.
 -- ---------------------------------------------------------------------------
-local function RelinkLevied(store, rec, turn, hook)
+local function LevyCandidates(store, rec)
 	local cs = rec.recipientID
 	if not IsAliveID(cs) or not EFV_Units.ValidPosition(rec.lastX, rec.lastY) then
-		return nil
+		return {}, nil
 	end
 	local owners = {}
 	if rec.onMapPlayerID ~= cs then
@@ -876,7 +967,10 @@ local function RelinkLevied(store, rec, turn, hook)
 	local okS, suz = pcall(function()
 		return Players[cs]:GetInfluence():GetSuzerain()
 	end)
-	if okS and type(suz) == "number" and suz >= 0 and suz ~= cs and suz ~= rec.onMapPlayerID then
+	if not okS then
+		suz = nil
+	end
+	if type(suz) == "number" and suz >= 0 and suz ~= cs and suz ~= rec.onMapPlayerID then
 		owners[#owners + 1] = suz
 	end
 	table.sort(owners)
@@ -894,12 +988,21 @@ local function RelinkLevied(store, rec, turn, hook)
 					local d = Map.GetPlotDistance(rec.lastX, rec.lastY, ux, uy)
 					if d ~= nil and d <= maxDist then
 						local agree, exact = SnapshotAgreement(rec, pU)
-						if agree then
-							cands[#cands + 1] = { u = pU, o = o, d = d, exact = exact, id = uid }
-						end
+						cands[#cands + 1] = { u = pU, o = o, d = d, exact = exact, id = uid, agree = agree }
 					end
 				end
 			end
+		end
+	end
+	return cands, suz
+end
+
+local function RelinkLevied(store, rec, turn, hook)
+	local all, suz = LevyCandidates(store, rec)
+	local cands = {}
+	for _, c in ipairs(all) do
+		if c.agree then
+			cands[#cands + 1] = c
 		end
 	end
 	local pick, n = PickUnique(cands)
@@ -927,10 +1030,22 @@ end
 -- (FLAG_UPGRADE_RELINK, on since 0.5.2: T30 proved the new ID) and, for CS
 -- records, the levy relink. Runs in step 0c AND at every turn boundary
 -- (BoundaryOne), so a new unit is found before it can move away.
+-- 1.0.5 (F3, F5): the marker test is CombatDeathPossible (a fight the unit
+-- was seen alive after does not block), and an upgrade hint beats it (an
+-- engine-created upgrade-type unit on the unit's tile is not a death): then
+-- only ConfirmHint may relink, which refuses a corpse, or no object at all
+-- after a fight.
 -- ---------------------------------------------------------------------------
+local ConfirmHint   -- 1.0.5 F2 / F3, defined with the upgrade pairing below
+
 local function TryRelink(store, rec, turn, hook)
-	if rec.killedTurn ~= nil or (rec.lastCombatTurn ~= nil and rec.lastCombatTurn >= turn - 1) then
-		return nil
+	if CombatDeathPossible(rec, turn) then
+		-- Only a confirmed hint, never the tile rule: a unit bought on the
+		-- tile of a lent unit that may have died there is not its upgrade.
+		if not (EFV_Config.FLAG_UPGRADE_RELINK and HasLiveHint(rec, turn)) then
+			return nil
+		end
+		return ConfirmHint(store, rec, turn, hook)
 	end
 	if EFV_Config.FLAG_UPGRADE_RELINK then
 		local pU = EFV_Lifecycle.RelinkUpgraded(store, rec, turn, hook)
@@ -951,6 +1066,23 @@ end
 -- formation differs from that record's, or OnMergeSurvivor saw it this or
 -- last turn: rec.mergedTurn). Nearest wins, ties lowest unit ID
 -- (deterministic). Returns the survivor unit or nil.
+-- 1.0.5 F4 (FLAG_MERGE_STRICT; the game merges identical units only:
+-- "Requires adjacent unit of the same type", LOC_HUD_UNIT_ACTION_REQUIRES_
+-- ADJACENT_SAME_UNIT): the survivor must be a real Corps or Army
+-- (CORPS_FORMATION / ARMY_FORMATION; support units read -1, Sessions C-E)
+-- of rec.unitType or an upgrade of it (an upgrade then a merge in one turn).
+-- Also returns the distance, the survivor's type and formation (log).
+local function RealFormation(f)
+	local ok, c, a = pcall(function()
+		return MilitaryFormationTypes.CORPS_FORMATION, MilitaryFormationTypes.ARMY_FORMATION
+	end)
+	return ok and f ~= nil and (f == c or f == a)
+end
+
+local function SameKind(rec, typeName, pid)
+	return typeName ~= nil and (typeName == rec.unitType or EFV_UpgradeTargets(rec.unitType, pid)[typeName] == true)
+end
+
 local function AbsorbedIntoFormation(store, rec, turn)
 	local pid = rec.onMapPlayerID
 	local std = StandardFormation()
@@ -965,11 +1097,14 @@ local function AbsorbedIntoFormation(store, rec, turn)
 		end
 	end
 	table.sort(list, function(a, b) return a:GetID() < b:GetID() end)
-	local best, bestDist = nil, nil
+	local strict = EFV_Config.FLAG_MERGE_STRICT == true
+	local best, bestDist, bestType, bestF = nil, nil, nil, nil
 	for _, pU in ipairs(list) do
 		local okF, f = pcall(function() return pU:GetMilitaryFormation() end)
+		local t = UnitTypeOf(pU)
 		-- Session F: skip unit objects that are no longer live units.
-		if okF and f ~= nil and f ~= std and EFV_UnitGoneReason(pU, pid, pU:GetID()) == nil then
+		if okF and f ~= nil and f ~= std and EFV_UnitGoneReason(pU, pid, pU:GetID()) == nil
+			and (not strict or (RealFormation(f) and SameKind(rec, t, pid))) then
 			local other = EFV_Records.FindByUnit(store, pid, pU:GetID())
 			local eligible = (other == nil)
 			if other ~= nil and other.id ~= rec.id then
@@ -979,12 +1114,164 @@ local function AbsorbedIntoFormation(store, rec, turn)
 			if eligible then
 				local d = Map.GetPlotDistance(rec.lastX, rec.lastY, pU:GetX(), pU:GetY())
 				if d ~= nil and d <= radius and (bestDist == nil or d < bestDist) then
-					best, bestDist = pU, d
+					best, bestDist, bestType, bestF = pU, d, t, f
 				end
 			end
 		end
 	end
-	return best
+	return best, bestDist, bestType, bestF
+end
+
+-- ---------------------------------------------------------------------------
+-- AI disband return (1.0.5; DECISIONS "AI disband fix: the DQ answers",
+-- 2026-10-25; FIXPLAN_proxy_war.md "AI disband fix (1.0.5)"; INTERFACES
+-- note 37). An AI civ or a city-state may delete a lent unit (seen twice,
+-- both on the arrival turn, with a positive gold balance: not the engine's
+-- -10 bankruptcy line). No delete event exists, so such a unit reaches step
+-- 0c as DISBANDED ("gone, and nothing else fits"). For an Expeditionary or
+-- City-State record whose holder is not human, the unit comes home from its
+-- last snapshot (StartReturn reason "DISBANDED"), with half the fee back
+-- when it was disbanded in the round it arrived. Fail safe = 1.0.4 (lost):
+-- a human holder (or an error reading it), no usable snapshot, or a
+-- possible upgraded or levied copy of the unit near its last position.
+-- ---------------------------------------------------------------------------
+
+-- True when pid is a human player; an error or a missing player counts as
+-- human (fail safe: the 1.0.4 loss).
+local function IsHumanID(pid)
+	if pid == nil or Players[pid] == nil then
+		return true
+	end
+	local ok, v = pcall(function()
+		return Players[pid]:IsHuman()
+	end)
+	return (not ok) or v == true
+end
+
+-- The number of units that could be the record's unit in another form:
+-- (i) an untracked live unit of the holder of an upgrade type of
+-- rec.unitType (EFV_UpgradeTargets, never the same type) within
+-- MergeSearchRadius(<its type>) of lastX / lastY holding every promotion of
+-- the record; (ii) for a CS record, every levy candidate (LevyCandidates),
+-- agreeing with the snapshot or not. Sorted iteration, pcall per unit.
+-- 1.0.5 F6: plus 1 for a live upgrade hint (F2) or an upgrade found
+-- ambiguous this or last turn (rec.upgradeAmbiguousTurn), so an AI host's
+-- upgraded copy never sends the record home.
+local function PossibleSuccessors(store, rec, holder, turn)
+	local n = 0
+	if HasLiveHint(rec, turn) or (tonumber(rec.upgradeAmbiguousTurn) or -999) >= turn - 1 then
+		n = n + 1
+	end
+	if EFV_Units.ValidPosition(rec.lastX, rec.lastY) and IsAliveID(holder) then
+		local targets = EFV_UpgradeTargets(rec.unitType, holder)
+		if next(targets) ~= nil then
+			for _, pU in ipairs(SortedUnits(holder)) do
+				local okT, t, uid, ux, uy = pcall(function()
+					local row = GameInfo.Units[pU:GetType()]
+					return row and row.UnitType or nil, pU:GetID(), pU:GetX(), pU:GetY()
+				end)
+				if okT and t ~= nil and targets[t] and uid ~= rec.onMapUnitID
+					and EFV_UnitGoneReason(pU, holder, uid) == nil
+					and EFV_Records.FindByUnit(store, holder, uid) == nil then
+					local d = Map.GetPlotDistance(rec.lastX, rec.lastY, ux, uy)
+					if d ~= nil and d <= MergeSearchRadius(t) and HasRecordPromotions(rec, pU) then
+						n = n + 1
+					end
+				end
+			end
+		end
+	end
+	if rec.forceType == EFV_Config.FT_CS then
+		n = n + #(LevyCandidates(store, rec))
+	end
+	return n
+end
+
+-- HostDisbandReturn(store, rec, turn) -> handled. false: the caller closes
+-- the record as lost (CloseLost), exactly as in 1.0.4. true: the record is
+-- RETURNING "DISBANDED" (or, with no return city, closed by StartReturn
+-- with UNIT_LOST NO_CITY). The refund is write-once (rec.disbandTurn set
+-- before the gold moves), so a resumed record never pays twice.
+local function HostDisbandReturn(store, rec, turn)
+	if EFV_Config.FLAG_DISBAND_RETURN ~= true or rec.forceType == EFV_Config.FT_VOL then
+		return false
+	end
+	local holder = rec.onMapPlayerID
+	if holder == nil then
+		holder = rec.recipientID
+	end
+	if IsHumanID(holder) or not SnapshotUsable(rec) then
+		return false
+	end
+	local n = PossibleSuccessors(store, rec, holder, turn)
+	if n > 0 then
+		EFV_Log(2, "Disband", "possible successor id=%d n=%d -> lost (fail safe)", rec.id, n)
+		return false
+	end
+	local fee = math.max(0, math.floor(tonumber(rec.feePaid) or 0))
+	if rec.disbandTurn == nil then
+		rec.disbandTurn = turn
+		rec.disbandBy = holder
+		local deployed = tonumber(rec.deployedTurn)
+		if deployed ~= nil and turn - deployed <= (EFV_Config.DISBAND_REFUND_TURNS or 0) then
+			rec.disbandRefund = math.floor(fee * (EFV_Config.DISBAND_REFUND_PCT or 0) / 100)
+		end
+		Touch(store)
+		if (tonumber(rec.disbandRefund) or 0) > 0 then
+			local okG, errG = pcall(function()
+				Players[rec.senderID]:GetTreasury():ChangeGoldBalance(rec.disbandRefund)
+			end)
+			if not okG then
+				EFV_Log(1, "Disband", "refund failed id=%d gold=%d: %s", rec.id, rec.disbandRefund, tostring(errG))
+			end
+		end
+	end
+	EFV_Log(2, "Refresh", "missing id=%d class=DISBANDED owner=%s unit=%s last=%s,%s force=%s where=Refresh -> home",
+		rec.id, tostring(rec.onMapPlayerID), tostring(rec.onMapUnitID),
+		tostring(rec.lastX), tostring(rec.lastY), tostring(rec.forceType))
+	EFV_Log(2, "Disband", "home id=%d force=%s holder=%d deployed=%s turn=%d fee=%d refund=%s snapTurn=%s",
+		rec.id, tostring(rec.forceType), holder, tostring(rec.deployedTurn), turn, fee,
+		tostring(rec.disbandRefund), tostring(rec.snapTurn))
+	EFV_Transit.StartReturn(store, rec, nil, "DISBANDED", turn)
+	return true
+end
+
+-- 1.0.5 F7: one line per missing record before it is classified: its
+-- fight and sighting counters, its last tile and the holder's live units
+-- near it (uid:TYPE:f<formation>:d<distance>, nearest first, then by ID), so
+-- the next multiplayer log answers what U3 had to infer. Logging only.
+local function ClassifyLog(rec, class, why)
+	local near = {}
+	local pid = rec.onMapPlayerID
+	if pid ~= nil and IsAliveID(pid) and EFV_Units.ValidPosition(rec.lastX, rec.lastY) then
+		local radius = EFV_Config.CLASSIFY_LOG_RADIUS or 5
+		for _, pU in ipairs(SortedUnits(pid)) do
+			local ok, uid, f, ux, uy = pcall(function()
+				return pU:GetID(), pU:GetMilitaryFormation(), pU:GetX(), pU:GetY()
+			end)
+			if ok and EFV_UnitGoneReason(pU, pid, uid) == nil then
+				local d = Map.GetPlotDistance(rec.lastX, rec.lastY, ux, uy)
+				if d ~= nil and d <= radius then
+					near[#near + 1] = { uid = uid, t = UnitTypeOf(pU), f = f, d = d }
+				end
+			end
+		end
+		table.sort(near, function(a, b)
+			if a.d ~= b.d then
+				return a.d < b.d
+			end
+			return a.uid < b.uid
+		end)
+	end
+	local parts = {}
+	for i = 1, math.min(#near, EFV_Config.CLASSIFY_LOG_MAX or 8) do
+		local n = near[i]
+		parts[#parts + 1] = tostring(n.uid) .. ":" .. tostring(n.t) .. ":f" .. tostring(n.f) .. ":d" .. tostring(n.d)
+	end
+	EFV_Log(2, "Classify", "id=%d class=%s why=%s killedTurn=%s combat=%s seq=%s/%s last=%s,%s posTurn=%s hint=%s near=%s",
+		rec.id, class, tostring(why), tostring(rec.killedTurn), tostring(rec.lastCombatTurn), tostring(rec.combatSeq),
+		tostring(rec.aliveSeq), tostring(rec.lastX), tostring(rec.lastY), tostring(rec.posTurn), tostring(rec.upgradeHintID),
+		(#parts > 0) and table.concat(parts, ",") or "-")
 end
 
 local function RefreshOne(store, rec, turn)
@@ -997,6 +1284,7 @@ local function RefreshOne(store, rec, turn)
 			rec.lastX, rec.lastY = x, y
 			EFV_Records.Touch(store)
 		end
+		NoteAlive(store, rec)
 		if FormationChanged(rec, pUnit) then
 			CallMergeSurvivor(store, rec, pUnit)
 		end
@@ -1004,27 +1292,32 @@ local function RefreshOne(store, rec, turn)
 	end
 
 	-- Missing. A dead unit object (Session F) or a combat marker of this or
-	-- the last turn wins (KILLED).
+	-- the last turn wins (KILLED). 1.0.5 F5: a removed object below the
+	-- maximum damage (off the map or off its plot) is a sighting, and a fight
+	-- counts only when the unit was not seen alive after it.
 	if why == "GONE_DEAD" then
 		MarkKilled(store, rec, turn, "Refresh")
+	elseif why == "GONE_OFFMAP" or why == "GONE_PLOT" then
+		NoteAlive(store, rec)
 	end
 	local class = "DISBANDED"
-	if rec.killedTurn ~= nil or (rec.lastCombatTurn ~= nil and rec.lastCombatTurn >= turn - 1) then
+	if CombatDeathPossible(rec, turn) then
 		class = "KILLED"
 	end
+	ClassifyLog(rec, class, why)
 	-- Upgrade relink (spec 11 "(added)" row, PLAN 2.12; FLAG_UPGRADE_RELINK,
 	-- on since 0.5.2: T30 proved that an upgrade creates a NEW unit ID) and,
 	-- for CS records, the levy relink (T28: new IDs too). Both relink only a
 	-- provably identical unit (TryRelink / RelinkUpgraded / RelinkLevied,
 	-- Session F item 2); otherwise the record falls through to the loss
 	-- classification below. Normally a boundary pass has relinked already.
-	if class ~= "KILLED" and TryRelink(store, rec, turn, "Refresh") ~= nil then
+	if (class ~= "KILLED" or HasLiveHint(rec, turn)) and TryRelink(store, rec, turn, "Refresh") ~= nil then
 		return
 	end
 	-- D3 (Phase 3 for VOL, WP5.2 for EXP / CS): absorbed into a Corps / Army.
 	-- The record is closed either way; only the message differs.
 	if class ~= "KILLED" then
-		local survivor = AbsorbedIntoFormation(store, rec, turn)
+		local survivor, sDist, sType, sForm = AbsorbedIntoFormation(store, rec, turn)
 		if survivor ~= nil then
 			local sx, sy = survivor:GetX(), survivor:GetY()
 			if rec.forceType == EFV_Config.FT_VOL then
@@ -1034,14 +1327,18 @@ local function RefreshOne(store, rec, turn)
 			else
 				-- D3 ruling: absorbed into another unit -> lost to the sender,
 				-- never returns; both players are told.
-				EFV_Log(2, "Merge", "absorbed id=%d force=%s owner=%s into unit=%d at=%d,%d (last %s,%s) -> lost to sender=%d, record closed (D3)",
+				EFV_Log(2, "Merge", "absorbed id=%d force=%s owner=%s into unit=%d at=%d,%d (last %s,%s) -> lost to sender=%d, record closed (D3) type=%s formation=%s dist=%s",
 					rec.id, tostring(rec.forceType), tostring(rec.onMapPlayerID), survivor:GetID(), sx, sy,
-					tostring(rec.lastX), tostring(rec.lastY), rec.senderID)
+					tostring(rec.lastX), tostring(rec.lastY), rec.senderID, tostring(sType), tostring(sForm), tostring(sDist))
 				NotifyMerged(rec, "ABSORBED", sx, sy)
 			end
 			EFV_Records.Delete(store, rec.id)
 			return
 		end
+	end
+	-- 1.0.5: disbanded by an AI or city-state holder -> home (HostDisbandReturn).
+	if class == "DISBANDED" and HostDisbandReturn(store, rec, turn) then
+		return
 	end
 	CloseLost(store, rec, class, "Refresh")
 end
@@ -1595,11 +1892,15 @@ local function BoundaryOne(store, rec, turn, hook)
 			MarkKilled(store, rec, turn, hook)
 			return
 		end
+		if why == "GONE_OFFMAP" or why == "GONE_PLOT" then
+			NoteAlive(store, rec)   -- 1.0.5 F5: removed (upgrade / levy ghost), not killed
+		end
 		pUnit = TryRelink(store, rec, turn, hook)
 		if pUnit == nil then
 			return
 		end
 	end
+	NoteAlive(store, rec)
 	if IsLapsedVolunteer(rec) then
 		local valid = UnitPosition(store, rec, pUnit)
 		SetLapsePaused(store, rec, valid, pUnit, hook)
@@ -1892,6 +2193,9 @@ function EFV_Lifecycle.OnCombat(aP, aU, dP, dU)
 				if (rec.onMapPlayerID == aP and rec.onMapUnitID == aU)
 					or (rec.onMapPlayerID == dP and rec.onMapUnitID == dU) then
 					rec.lastCombatTurn = turn
+					if EFV_Config.FLAG_KILL_EVIDENCE == true then
+						rec.combatSeq = (tonumber(rec.combatSeq) or 0) + 1   -- 1.0.5 F5
+					end
 					changed = true
 					EFV_Log(2, "Combat", "id=%d unit=%d owner=%d", rec.id, rec.onMapUnitID, rec.onMapPlayerID)
 					ForRecord("Floor", rec, RaiseFloorOnCombat, rec, turn)
@@ -2087,6 +2391,117 @@ function EFV_Lifecycle.OnPlayerDefeatHint(pid)
 end
 
 -- ---------------------------------------------------------------------------
+-- Upgrade pairing (1.0.5 F2 / F3; FIXPLAN_upgrade_relink.md U5; INTERFACES
+-- note 38). Shared by OnUnitCreated, ConfirmHint and RelinkUpgraded.
+-- ---------------------------------------------------------------------------
+
+-- The record's old unit object, read raw (EFV_Units.FindRaw): "live" (a live
+-- unit), "dead" (damage at the maximum, wherever it lies), "ghost" (any other
+-- object: removed, off the map or off its plot) or "none". Returns state,
+-- object.
+local function OldObjectState(rec)
+	local old = EFV_Units.FindRaw(rec.onMapPlayerID, rec.onMapUnitID)
+	if old == nil then
+		return "none", nil
+	end
+	local okD, d, maxD = pcall(function() return old:GetDamage(), old:GetMaxDamage() end)
+	if okD and type(d) == "number" and type(maxD) == "number" and maxD > 0 and d >= maxD then
+		return "dead", old
+	end
+	if EFV_UnitGoneReason(old, rec.onMapPlayerID, rec.onMapUnitID) == nil then
+		return "live", old
+	end
+	return "ghost", old
+end
+
+-- pU (type t) can be the record's unit after an upgrade: t is an upgrade of
+-- rec.unitType for this owner (EFV_UpgradeTargets: never the same type), it
+-- holds every promotion of the snapshot and at least its XP (an upgrade
+-- keeps both: spike Q-E).
+local function UpgradeCandidate(rec, pU, t, pid)
+	if t == nil or not EFV_UpgradeTargets(rec.unitType, pid)[t] or not HasRecordPromotions(rec, pU) then
+		return false
+	end
+	local okX, xp = pcall(function() return pU:GetExperience():GetExperiencePoints() end)
+	return okX and type(xp) == "number" and xp >= (tonumber(rec.experience) or 0)
+end
+
+-- Re-points the record at pU (type t): unit, type, tile, posTurn; the hint
+-- is cleared. Logs "[Upgrade] relink ... dist= hook= old=".
+local function RelinkTo(store, rec, pU, t, turn, hook, dist, old)
+	local x, y = pU:GetX(), pU:GetY()
+	EFV_Log(2, "Upgrade", "relink id=%d owner=%s unit=%s->%d type=%s->%s at=%d,%d dist=%s hook=%s old=%s",
+		rec.id, tostring(rec.onMapPlayerID), tostring(rec.onMapUnitID), pU:GetID(), tostring(rec.unitType), tostring(t),
+		x, y, tostring(dist or 0), tostring(hook), tostring(old))
+	rec.onMapUnitID = pU:GetID()
+	rec.unitType = t
+	if EFV_Units.ValidPosition(x, y) then
+		rec.lastX, rec.lastY = x, y
+	end
+	rec.posTurn = turn
+	rec.upgradeHintID, rec.upgradeHintTurn = nil, nil
+	Touch(store)
+end
+
+-- ---------------------------------------------------------------------------
+-- ConfirmHint(store, rec, turn, hook) -> pUnit or nil   (1.0.5 F2 / F3)
+-- An upgrade hint (rec.upgradeHintID, set by OnUnitCreated while the old unit
+-- still looked alive) becomes a relink when, within UPGRADE_HINT_TURNS:
+-- the record's old unit is not live any more and is no corpse (or there is
+-- no object at all and CombatDeathPossible is false), and the hinted unit is
+-- live, of the same owner, untracked, of an upgrade type and holds the
+-- record's promotions and XP. Then lastX / lastY = the hinted unit's tile
+-- (the log's dist = its distance from the old tile). A live old unit keeps
+-- the hint (not an upgrade yet); an expired or failed hint is dropped
+-- ("[Upgrade] hint dropped", level 3). Called from RelinkUpgraded (every
+-- boundary and step 0c), OnUnitMoved (the hinted unit moves) and
+-- OnUnitCreated (a second event about it).
+-- ---------------------------------------------------------------------------
+function ConfirmHint(store, rec, turn, hook)   -- the local declared before TryRelink
+	local hid = tonumber(rec.upgradeHintID)
+	if hid == nil then
+		return nil
+	end
+	local pid = rec.onMapPlayerID
+	local function Drop(why)
+		rec.upgradeHintID, rec.upgradeHintTurn = nil, nil
+		Touch(store)
+		EFV_Log(3, "Upgrade", "hint dropped id=%d unit=%d why=%s hook=%s", rec.id, hid, why, tostring(hook))
+		return nil
+	end
+	if not HasLiveHint(rec, turn) then
+		return Drop("expired")
+	end
+	local state = OldObjectState(rec)
+	if state == "live" then
+		return nil
+	end
+	if state == "dead" then
+		return Drop("old unit dead")
+	end
+	if state == "none" and CombatDeathPossible(rec, turn) then
+		return Drop("fight and no old object")
+	end
+	local pU = EFV_Units.Get(pid, hid)
+	if pU == nil or EFV_Records.FindByUnit(store, pid, hid) ~= nil then
+		return Drop("hinted unit gone or tracked")
+	end
+	local t = UnitTypeOf(pU)
+	if not UpgradeCandidate(rec, pU, t, pid) then
+		return Drop("not an upgrade of the record's unit")
+	end
+	local d = 0
+	if EFV_Units.ValidPosition(rec.lastX, rec.lastY) then
+		d = Map.GetPlotDistance(rec.lastX, rec.lastY, pU:GetX(), pU:GetY()) or 0
+	end
+	if state == "ghost" then
+		NoteAlive(store, rec)
+	end
+	RelinkTo(store, rec, pU, t, turn, hook, d, state)
+	return pU
+end
+
+-- ---------------------------------------------------------------------------
 -- EFV_Lifecycle.RelinkUpgraded(store, rec, turn, hook) -> pUnit
 -- (Phase 5, WP5.2; rewritten 0.5.2, Session F items 2 and 3; INTERFACES
 -- note 30). Called by TryRelink (every turn boundary and step 0c) when
@@ -2096,8 +2511,10 @@ end
 -- -> UNIT_MACEDONIAN_HYPASPIST 0/1048584 at 15,33); the old object stays
 -- findable for the rest of the owner's turn (then GONE, or matched by the
 -- identity check until it disappears). Relink rule (provably the same unit):
+-- 1.0.5 (F3): an upgrade hint first (ConfirmHint). Else the tile rule:
 -- a live unit (EFV_UnitGoneReason nil) of rec.onMapPlayerID (the owner does
--- not change) standing exactly on rec.lastX / lastY (the last snapshot),
+-- not change) standing exactly on rec.lastX / lastY (the last snapshot,
+-- since 1.0.5 F1 the tile of the last move),
 -- whose type is in EFV_UpgradeTargets(rec.unitType, owner) (UnitUpgrades
 -- chain plus the owner's unique replacements; never the same type, so an
 -- unrelated twin is not grabbed), untracked by any record, holding every
@@ -2113,7 +2530,14 @@ function EFV_Lifecycle.RelinkUpgraded(store, rec, turn, hook)
 	if turn == nil then
 		turn = CurrentTurn()
 	end
-	if pid == nil or not EFV_Units.ValidPosition(rec.lastX, rec.lastY) or not IsAliveID(pid) then
+	if pid == nil or not IsAliveID(pid) then
+		return nil
+	end
+	local hinted = ConfirmHint(store, rec, turn, hook)
+	if hinted ~= nil then
+		return hinted
+	end
+	if not EFV_Units.ValidPosition(rec.lastX, rec.lastY) then
 		return nil
 	end
 	local targets = EFV_UpgradeTargets(rec.unitType, pid)
@@ -2146,8 +2570,196 @@ function EFV_Lifecycle.RelinkUpgraded(store, rec, turn, hook)
 		rec.lastX, rec.lastY, tostring(hook))
 	rec.onMapUnitID = c.id
 	rec.unitType = c.t
+	rec.upgradeHintID, rec.upgradeHintTurn = nil, nil
 	Touch(store)
 	return c.u
+end
+
+-- ---------------------------------------------------------------------------
+-- Tracked-unit index (1.0.5 F1 / F2). Derived and read-only: for the
+-- on-map records (DEPLOYED / GRACE / MUTINY), in ID order, units[pid:uid] =
+-- record ID, holders[pid] = true, hints[pid:hintID] = record ID. Rebuilt
+-- whenever the synced EFV_Rev differs from the one it was built from
+-- (EFV_Records.Rev: every commit that wrote something bumps it), so it is
+-- never stale; a load starts a fresh Lua state. Deliberate exception to
+-- "load once per handler, never cache the store" (INTERFACES note 38): it is
+-- a skip filter, not state; every decision reloads the store. It lets the
+-- move and create handlers return after one property read for the units
+-- VEF does not track.
+-- ---------------------------------------------------------------------------
+local m_Index = nil
+
+local function UnitKey(pid, uid)
+	return tostring(pid) .. ":" .. tostring(uid)
+end
+
+local function TrackedIndex()
+	local rev = EFV_Records.Rev()
+	if m_Index ~= nil and m_Index.rev == rev then
+		return m_Index
+	end
+	local store = EFV_Records.Load()
+	local idx = { rev = rev, units = {}, holders = {}, hints = {} }
+	for _, id in ipairs(EFV_Records.IDs(store)) do
+		local rec = EFV_Records.Get(store, id)
+		if rec ~= nil and IsOnMapState(rec.state) and rec.onMapPlayerID ~= nil and rec.onMapUnitID ~= nil then
+			idx.units[UnitKey(rec.onMapPlayerID, rec.onMapUnitID)] = id
+			idx.holders[rec.onMapPlayerID] = true
+			if rec.upgradeHintID ~= nil then
+				idx.hints[UnitKey(rec.onMapPlayerID, rec.upgradeHintID)] = id
+			end
+		end
+	end
+	m_Index = idx
+	return idx
+end
+
+-- Loads the store, confirms the hint of the record that names (pid, uid)
+-- (ConfirmHint), commits.
+local function ConfirmHintFor(pid, uid, hook)
+	local store = EFV_Records.Load()
+	local turn = CurrentTurn()
+	for _, id in ipairs(EFV_Records.IDs(store)) do
+		local rec = EFV_Records.Get(store, id)
+		if rec ~= nil and IsOnMapState(rec.state) and rec.onMapPlayerID == pid and tonumber(rec.upgradeHintID) == uid then
+			ConfirmHint(store, rec, turn, hook)
+		end
+	end
+	EFV_Records.Commit(store)
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Lifecycle.OnUnitMoved(pid, uid)   (1.0.5 F1; owns load / commit)
+-- Hook body of GameEvents.OnUnitMoved (EFV_Gameplay: FLAG_MOVE_TRACK, not
+-- while EFV's own code runs). A hinted unit (F2) is confirmed first. For a
+-- tracked unit found live: rec.lastX / lastY = its tile (only a valid one)
+-- and rec.posTurn = turn when the tile changed ("[Move]", level 3), and it
+-- counts as seen alive (NoteAlive, F5). An off-map ghost (the old object of
+-- an upgrade) fails EFV_Units.GetForRecord, so nothing is written. Untracked
+-- units cost one property read (TrackedIndex). No notifications.
+-- Params:  pid, uid (event arguments).
+-- Returns: nil.
+-- ---------------------------------------------------------------------------
+function EFV_Lifecycle.OnUnitMoved(pid, uid)
+	local key = UnitKey(pid, uid)
+	local idx = TrackedIndex()
+	if idx.hints[key] ~= nil then
+		ConfirmHintFor(pid, uid, "OnUnitMoved")
+		idx = TrackedIndex()
+	end
+	if idx.units[key] == nil then
+		return nil
+	end
+	local store = EFV_Records.Load()
+	local rec = EFV_Records.FindByUnit(store, pid, uid)
+	if rec ~= nil then
+		local pUnit = EFV_Units.GetForRecord(rec)
+		if pUnit ~= nil then
+			local x, y = pUnit:GetX(), pUnit:GetY()
+			if EFV_Units.ValidPosition(x, y) and (x ~= rec.lastX or y ~= rec.lastY) then
+				local fx, fy = rec.lastX, rec.lastY
+				rec.lastX, rec.lastY = x, y
+				rec.posTurn = CurrentTurn()
+				Touch(store)
+				EFV_Log(3, "Move", "id=%d unit=%d at=%d,%d from=%s,%s", rec.id, uid, x, y, tostring(fx), tostring(fy))
+			end
+			NoteAlive(store, rec)
+		end
+	end
+	EFV_Records.Commit(store)
+	return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- EFV_Lifecycle.OnUnitCreated(pid, uid, hook)   (1.0.5 F2; owns load / commit)
+-- Hook body of GameEvents.UnitCreated and UnitInitialized (EFV_Gameplay:
+-- FLAG_UPGRADE_RELINK and FLAG_UPGRADE_CREATE_HOOK, not for EFV's own units).
+-- Idempotent (both events may fire, Firaxis' handlers allow repeats):
+--   1. pid holds no lent unit, or (pid, uid) is tracked -> return; a hinted
+--      unit -> ConfirmHint (the second event);
+--   2. the new unit must be live on a valid tile (EFV_Units.Get);
+--   3. candidates: on-map records held by pid whose unit type it upgrades
+--      to, with the record's promotions and XP (UpgradeCandidate); kept when
+--      the tile matches (a live old unit's own tile, else rec.lastX / lastY)
+--      and the old object is no corpse;
+--   4. none -> return; several -> "[Upgrade] ambiguous" and
+--      rec.upgradeAmbiguousTurn on each (F6), commit;
+--   5. one: old object a removed ghost, or gone with no fight that could
+--      have killed it -> relink now ("[Upgrade] relink ... old=ghost");
+--      the old unit still live (or gone after a fight) -> hint
+--      (rec.upgradeHintID / upgradeHintTurn, "[Upgrade] hint ..."), which
+--      ConfirmHint turns into a relink later. Commit.
+-- MP: a synchronous gameplay event; synced state only; records and units in
+-- ID order; no RNG, no request, no UI value.
+-- Params:  pid, uid (event arguments); hook string (log).
+-- Returns: nil.
+-- ---------------------------------------------------------------------------
+function EFV_Lifecycle.OnUnitCreated(pid, uid, hook)
+	local key = UnitKey(pid, uid)
+	local idx = TrackedIndex()
+	if not idx.holders[pid] or idx.units[key] ~= nil then
+		return nil
+	end
+	if idx.hints[key] ~= nil then
+		ConfirmHintFor(pid, uid, hook)
+		return nil
+	end
+	local pU = EFV_Units.Get(pid, uid)
+	if pU == nil then
+		return nil
+	end
+	local x, y = pU:GetX(), pU:GetY()
+	local t = UnitTypeOf(pU)
+	if t == nil or not EFV_Units.ValidPosition(x, y) then
+		return nil
+	end
+	local turn = CurrentTurn()
+	local store = EFV_Records.Load()
+	local matches = {}
+	for _, id in ipairs(EFV_Records.IDs(store)) do
+		local rec = EFV_Records.Get(store, id)
+		if rec ~= nil and IsOnMapState(rec.state) and rec.onMapPlayerID == pid and rec.onMapUnitID ~= uid
+			and UpgradeCandidate(rec, pU, t, pid) then
+			local state, old = OldObjectState(rec)
+			local tile = false
+			if state == "live" then
+				local okP, ox, oy = pcall(function() return old:GetX(), old:GetY() end)
+				tile = okP and ox == x and oy == y
+			else
+				tile = (rec.lastX == x and rec.lastY == y)
+			end
+			if tile and state ~= "dead" then
+				matches[#matches + 1] = { rec = rec, state = state }
+			end
+		end
+	end
+	if #matches == 0 then
+		return nil
+	end
+	if #matches > 1 then
+		for _, m in ipairs(matches) do
+			LogAmbiguous("Upgrade", m.rec, turn, #matches, "hook=" .. tostring(hook) .. " unit=" .. tostring(uid))
+			m.rec.upgradeAmbiguousTurn = turn
+		end
+		Touch(store)
+		EFV_Records.Commit(store)
+		return nil
+	end
+	local m = matches[1]
+	local rec = m.rec
+	if m.state == "ghost" or (m.state == "none" and not CombatDeathPossible(rec, turn)) then
+		if m.state == "ghost" then
+			NoteAlive(store, rec)
+		end
+		RelinkTo(store, rec, pU, t, turn, hook, 0, m.state)
+	else
+		rec.upgradeHintID = uid
+		rec.upgradeHintTurn = turn
+		Touch(store)
+		EFV_Log(2, "Upgrade", "hint id=%d unit=%d at=%d,%d hook=%s old=%s", rec.id, uid, x, y, tostring(hook), m.state)
+	end
+	EFV_Records.Commit(store)
+	return nil
 end
 
 -- ---------------------------------------------------------------------------

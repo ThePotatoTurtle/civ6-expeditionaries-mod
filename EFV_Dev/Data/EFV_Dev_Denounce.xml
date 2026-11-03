@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- EFV_Dev_Denounce.xml (EFV_Dev 1.0.5.1, TESTING ONLY; DECISIONS 2026-10-24 Q3): every
+     denouncement lasts 3 turns instead of 30 while the dev tools are enabled, so
+     EFV/TESTING_1.0.5.md sees one run out while a unit is on its way.
+     Row form and base value: GAME\Base\Assets\Gameplay\Data\GlobalParameters.xml:238
+     (<Replace Name="DIPLOMACY_DENOUNCE_TIME_LIMIT" Value="30"/>); Gathering Storm does not
+     override it (DLC\Expansion2\Data\Expansion2_GlobalParameters.xml uses the same Replace form).
+     Whether the engine takes it shows at once in UI Game.GetGameDiplomacy():GetDenounceTimeLimit()
+     (P1's status line). Side effect in dev games: a formal war needs a denouncement 5 turns old
+     (DIPLOMACY_DENOUNCE_WAR_DELAY, :240), which a 3-turn denouncement never reaches. -->
+<GameInfo>
+	<GlobalParameters>
+		<Replace Name="DIPLOMACY_DENOUNCE_TIME_LIMIT" Value="3"/>
+	</GlobalParameters>
+</GameInfo>

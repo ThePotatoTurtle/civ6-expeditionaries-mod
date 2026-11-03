@@ -16,7 +16,12 @@
   "EFV_Dev 0.6.1-dev.1 (2026-09-28): the final session starts from a brand-new game, so S0 (and S5/S7/S11) build what a new game lacks: PlayersVisibility :ChangeVisibilityCount (reveal), :GetCulture / :SetCivic (Early Empire for open borders, S5 target civic), the scripted open-borders deal (DealManager working deal, DealDirection.OUTGOING, :AddItemOfType / :SetSubType / :SetDuration / :SetLocked / :Validate), CityManager.GetDistrictAt + DefenseTypes (city HP / walls for S7 / S11), UnitManager.RestoreMovementToFormation (created unit without moves), GameInfo.Civics. EFV_Dev only; evidence in refs.",
   "0.7.0-dev WP3 (2026-09-28, INTERFACES note 33): veteran route B. EFV/UI/EFV_VetRestore.lua may issue UnitManager.RequestCommand(unit, UnitCommandTypes.PROMOTE, { [UnitCommandTypes.PARAM_PROMOTION_TYPE] = index }) for the local player's own unit, and reads UnitManager.CanStartCommand / UnitCommandResults.PROMOTIONS (base UnitPromotionPopup pattern). Gameplay owns the job state (EFV_Veteran).",
   "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons (2026-09-29, workshop/SCREENSHOTS.md B5, FIXPLAN_0.7 item 13): the panel's map zoom (UI.GetMapZoom / UI.SetMapZoom, base WorldInput.lua) and Shot 4's Tank attack, the base RequestMoveOperation call (UnitManager.CanStartOperation / RequestOperation with UnitOperationTypes.MOVE_TO, PARAM_X / PARAM_Y / PARAM_MODIFIERS and UnitOperationMoveModifiers.ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, Civ6Common.lua:147-163). EFV_Dev only; all pcall-guarded and not yet run from a mod context (level L until the screenshot session).",
-  "EFV_Dev 1.0.3.2 (2026-09-30): the veteran one-turn restore spike (V button) grants and removes its hidden unit abilities with unit:GetAbility():ChangeAbilityCount / :GetAbilityCount and refills a copy's moves with unit:ChangeMovesRemaining(max - remaining). All three are used by shipped gameplay scripts (refs); R2 lists them CONFIRMED (research/R2_unit_map_apis.md rows for ChangeMovesRemaining and GetAbility():ChangeAbilityCount). EFV_Dev only."
+  "EFV_Dev 1.0.3.2 (2026-09-30): the veteran one-turn restore spike (V button) grants and removes its hidden unit abilities with unit:GetAbility():ChangeAbilityCount / :GetAbilityCount and refills a copy's moves with unit:ChangeMovesRemaining(max - remaining). All three are used by shipped gameplay scripts (refs); R2 lists them CONFIRMED (research/R2_unit_map_apis.md rows for ChangeMovesRemaining and GetAbility():ChangeAbilityCount). EFV_Dev only.",
+  "EFV_Dev 1.0.4.3 (2026-10-05): the air-unit spike (FIXPLAN_air_units.md section 7) takes the DEPLOY / REBASE hashes from GameInfo.UnitOperations (UnitPanel.lua:546-558) and reads the REBASE targets as the base game does, tResults[UnitOperationResults.PLOTS] after UnitManager.GetOperationTargets (WorldInput.lua:2499-2503, UI). Gameplay reads it too, pcall-guarded, as an unverified probe. The air readers themselves (GetAirSlots / GetAirUnits, CanStartOperation, GetOperationTargets, GetCombat) are looked up by name and are not listed. EFV_Dev only.",
+  "EFV_Dev 1.0.4.4 (2026-10-11): the Corps spike (FIXPLAN_corps.md section 5). Gameplay sets ARMY_FORMATION (WarMachineScenario.lua:188-189). The panel logs the Form Corps / Form Army mode as the base WorldInput.lua does: Events.InterfaceModeChanged, UnitManager.GetCommandTargets with UnitCommandTypes.FORM_CORPS / FORM_ARMY and tResults[UnitCommandResults.UNITS] (WorldInput.lua:2900-2903, 2971-2974, 3819-3820), read only. The unverified readers (HasCivic, GetTotalMaintenance, GetUnitResourceDemandPerTurn, UnitManager.GetUnit*Maintenance, CanFormMilitaryFormation, GetCombat, GetVeteranName in the UI) are looked up by name and are not listed. EFV_Dev only.",
+  "EFV_Dev 1.0.4.5 (2026-10-11): Corps spike additions (FIXPLAN_corps.md R2.7). Gameplay listens to GameEvents.OnUnitMoved (CivRoyaleScenario_StartScript.lua:1613, PiratesScenario_StartScript.lua:1615) for the passive merge trace, read only. The panel's C10 merge guard (block mode) reads MouseEvents.LButtonUp and UI.GetCursorPlotID as the base WorldInput.lua does (:3926-3927, :798), UI only, sends nothing. EFV_Dev only.",
+  "EFV_Dev 1.0.5.1 (2026-10-24): the VEF 1.0.5 test (FIXPLAN_proxy_war.md B5). P2 asks the engine for an AI-started denouncement with the base game's UI call DiplomacyManager.RequestSession (DiplomacyActionView.lua:469), an AI as the first argument. P3 lowers an AI's opinion with the GameCore tuner's AdjustBaseDiplomacy and reads it with GetDiplomaticScore (Debug/Diplomacy.ltp:19-33, 260), G, pcall-guarded. The pair-state reader GetAi_Diplomacy():GetDiplomaticState is PLAN Appendix A A64 (VEF itself). EFV_Dev only.",
+  "1.0.5 upgrade relink (2026-10-25, FIXPLAN_upgrade_relink.md U5, U6): GameEvents.UnitCreated / UnitInitialized (G, PENDING: refs are the Pirates, Civ Royale and Black Death scenarios' gameplay scripts; whether they fire for an upgrade is the U6 spike's Q-B) for VEF's F2 and the EFV_Dev 1.0.5.2 U1 trace; GameEvents.OnUnitMoved now also VEF's (F1, no longer EFV_Dev only); MilitaryFormationTypes.ARMY_FORMATION for F4; Events.UnitUpgraded UI (PENDING, base UnitFlagManager.lua:1810, 2065) and UnitCommandTypes.UPGRADE / UnitCommandResults.UNIT_TYPE (UI, UnitPanel.lua:467-478) for the U1 panel, EFV_Dev only."
  ],
  "globals": {
   "include": {
@@ -106,6 +111,18 @@
     "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
    ],
    "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "MouseEvents": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:3799, 3926-3927 (MouseEvents.LButtonUp handlers, FORM_CORPS / FORM_ARMY)"
+   ],
+   "note": "EFV_Dev 1.0.4.5 C10 merge guard (block mode): the panel's input handler checks for LButtonUp.",
    "only_paths": [
     "EFV_Dev/"
    ]
@@ -849,6 +866,142 @@
     "GAME/Base/Assets/UI/Civ6Common.lua:147-163 (RequestMoveOperation: PARAM_MODIFIERS = ATTACK + MOVE_IGNORE_UNEXPLORED_DESTINATION, CanStartOperation(kUnit, op, nil, t) then RequestOperation(kUnit, MOVE_TO, t))"
    ],
    "note": "EFV_Dev 0.7.0-dev.1 Workshop Shot buttons only (pcall-guarded; not yet run from a mod context).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperationResults.PLOTS": {
+   "ctx": {
+    "UI": "L",
+    "G": "NV"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:2499-2503 (tResults = UnitManager.GetOperationTargets(pSelectedUnit, UnitOperationTypes.REBASE); tResults[UnitOperationResults.PLOTS])"
+   ],
+   "note": "EFV_Dev 1.0.4.3 air-unit spike only (pcall-guarded probe; G unverified).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "MilitaryFormationTypes.ARMY_FORMATION": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/DLC/WarMachineScenario/Scripts/WarMachineScenario.lua:188-189 (G: CanFormMilitaryFormation / SetMilitaryFormation(ARMY_FORMATION))",
+    "GAME/Base/Assets/UI/Screens/ReportScreen.lua:320, 330 (UI: unitMilitaryFormation == ARMY_FORMATION)"
+   ],
+   "note": "EFV_Dev 1.0.4.4 Corps spike: C1 / C2 / C6 / C7 set Armies. VEF 1.0.5 F4 (strict merge guess) reads it by name in a pcall."
+  },
+  "UnitManager.GetCommandTargets": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:2900 (FORM_CORPS), :2971 (FORM_ARMY): tResults = UnitManager.GetCommandTargets(pSelectedUnit, UnitCommandTypes.FORM_CORPS)"
+   ],
+   "note": "EFV_Dev 1.0.4.4 Corps spike: the panel lists the units the selected unit can merge with (read only, pcall-guarded).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandTypes.FORM_CORPS": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:2881-2882, 2900",
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:488"
+   ],
+   "note": "EFV_Dev 1.0.4.4 Corps spike (Form Corps mode log).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandTypes.FORM_ARMY": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:2951-2952, 2971",
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:494"
+   ],
+   "note": "EFV_Dev 1.0.4.4 Corps spike (Form Army mode log).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandResults.UNITS": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:2901-2903, 2972-2974 (tResults[UnitCommandResults.UNITS]: list of unit component IDs, .id)"
+   ],
+   "note": "EFV_Dev 1.0.4.4 Corps spike (Form Corps mode log).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "MouseEvents.LButtonUp": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:3926-3927 (InterfaceModeMessageHandler[FORM_CORPS / FORM_ARMY][MouseEvents.LButtonUp] = FormCorps / FormArmy)"
+   ],
+   "note": "EFV_Dev 1.0.4.5 C10 merge guard (block mode).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UI.GetCursorPlotID": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/WorldInput.lua:630, 798, 903 (local plotID = UI.GetCursorPlotID())",
+    "GAME/DLC/Expansion2/UI/Replacements/WorldInput_Expansion2.lua:22, 32"
+   ],
+   "note": "EFV_Dev 1.0.4.5 C10 merge guard (block mode): the plot under the cursor at the click, pcall-guarded by the panel's input handler.",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "DiplomacyManager.RequestSession": {
+   "ctx": {
+    "UI": "L"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/DiplomacyActionView.lua:469 (DiplomacyManager.RequestSession(ms_LocalPlayerID, ms_SelectedPlayerID, \"DENOUNCE\"))",
+    "SPIKES.md 8.1, last row (candidate way to force an AI denouncement)"
+   ],
+   "note": "EFV_Dev 1.0.5.1 P2: passes an AI as the initiator: that is the test (pcall-guarded).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandTypes.UPGRADE": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:467-475 (UnitManager.CanStartCommand(pUnit, actionHash, false, true); actionHash == UnitCommandTypes.UPGRADE)"
+   ],
+   "note": "EFV_Dev 1.0.5.2 U1: the panel logs whether Upgrade is available for the two spike units (read only).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitCommandResults.UNIT_TYPE": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:477-478 (tResults[UnitCommandResults.UNIT_TYPE]: the upgrade's unit type index)"
+   ],
+   "note": "EFV_Dev 1.0.5.2 U1 (read only).",
    "only_paths": [
     "EFV_Dev/"
    ]
@@ -2379,6 +2532,30 @@
     "Lua.log 2026-10-05 (EFV_Dev 1.0.3.2 spike V2, in game: after each landed promotion ChangeMovesRemaining(max - remaining) let the next PROMOTE land in the same turn, 3/3)"
    ],
    "note": "PLAN Appendix A A63. EFV_Dev 1.0.3.2 veteran spike (V button); EFV 1.0.4 one-turn veteran restore (EFV_Veteran Refill)"
+  },
+  "AdjustBaseDiplomacy": {
+   "ctx": {
+    "G": "L"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:19-33 (GameCore tuner \"Lower Score\": Players[p]:GetAi_Diplomacy():AdjustBaseDiplomacy(other, -n))"
+   ],
+   "note": "EFV_Dev 1.0.5.1 P3 only (pcall-guarded): pushes an AI's opinion into the UNFRIENDLY -> DENOUNCED window (DiplomaticActions.xml:239-242).",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "GetDiplomaticScore": {
+   "ctx": {
+    "G": "L"
+   },
+   "refs": [
+    "GAME/Debug/Diplomacy.ltp:260 (GameCore tuner: GetAi_Diplomacy():GetDiplomaticScore(i))"
+   ],
+   "note": "EFV_Dev 1.0.5.1 P3 only (pcall-guarded): logged before and after AdjustBaseDiplomacy.",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
   }
  },
  "events": {
@@ -2504,12 +2681,65 @@
   },
   "Events.UnitUpgraded": {
    "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "spike/1.0.5_testing_logs/Logs/Lua.log (spike U6, 2026-11-03): fires in G and UI after an upgrade, the new unit placed, XP kept",
+    "research/phase0_results/SESSION_F_REPORT.md 2 (T30, T22: sessionF_Lua.log:2083 args=(0, 1048584, 101), the NEW unit ID)",
+    "GAME/Base/Assets/UI/UnitFlagManager.lua:1810, 2065 (UI: Events.UnitUpgraded.Add(OnUnitUpgraded), (player, unitID, eUpgradeUnitType))",
+    "GAME/DLC/Expansion2/UI/CityBanners/CityBannerManager.lua:3810 (UI)"
+   ],
+   "note": "fires in G but is asynchronous (DV13): not used for rules; EFV relinks at the turn boundaries and in GameEvents.UnitCreated / UnitInitialized (1.0.5 F2) instead. G and UI: read only by the EFV_Dev 1.0.5.2 U1 trace; UI confirmed by spike U6."
+  },
+  "Events.InterfaceModeChanged": {
+   "ctx": {
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:3413, 4183 (Events.InterfaceModeChanged.Add(OnInterfaceModeChanged), (eOldMode, eNewMode))",
+    "GAME/Base/Assets/UI/WorldInput.lua:3819-3820 (InterfaceModeTypes.FORM_CORPS / FORM_ARMY enter handlers)"
+   ],
+   "note": "EFV_Dev 1.0.4.4 Corps spike: logs the Form Corps / Form Army mode, the hook a VEF merge warning could use. UI only, read only.",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "GameEvents.OnUnitMoved": {
+   "ctx": {
     "G": "C"
    },
    "refs": [
-    "research/phase0_results/SESSION_F_REPORT.md 2 (T30, T22: sessionF_Lua.log:2083 args=(0, 1048584, 101), the NEW unit ID)"
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1615 (GameEvents.OnUnitMoved.Add(OnUnitMoved), gameplay)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_StartScript.lua:1613",
+    "FIXPLAN_corps.md R2.1 (in the GS gamecore's GameEvents name list)",
+    "research/spike_1.0.4.5/session1_Lua.log (dev tools 1.0.4.5 registered it, no 'trace MISSING' line)"
    ],
-   "note": "fires in G but is asynchronous (DV13): not used for rules; EFV relinks at the turn boundaries instead"
+   "note": "EFV_Dev 1.0.4.5 passive merge trace and 1.0.5.2 U1 trace (read only); VEF 1.0.5 F1 follows the moves of lent units with it (FIXPLAN_upgrade_relink.md U5 F1). Non-nil in a normal GS game (spike session 1, no 'trace MISSING' line); Spike U6 Q-A: fires once per move for the moved unit (spike/1.0.5_testing_logs/Logs/Lua.log)."
+  },
+  "GameEvents.UnitCreated": {
+   "ctx": {
+    "G": "C"
+   },
+   "refs": [
+    "spike/1.0.5_testing_logs/Logs/Lua.log (spike U6, 2026-11-03): fires for an upgraded unit, but the unit is still off the map (-9999) with no XP",
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1534-1536, 1623 (GameEvents.UnitCreated.Add(OnUnitCreated), gameplay: (playerID, unitID) -> NewUnitCreated)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_StartScript.lua:1378-1380, 1612",
+    "FIXPLAN_corps.md R2.1 (in the GS gamecore's GameEvents name list); FIXPLAN_upgrade_relink.md U5 F2"
+   ],
+   "note": "1.0.5 (FIXPLAN_upgrade_relink.md F2) and EFV_Dev 1.0.5.2 U1 trace. Spike U6 Q-B: fires before the new unit is placed, so F2 cannot pair there; F2 ships off (FLAG_UPGRADE_CREATE_HOOK = false). The handlers are safe no-ops when it never fires. Firaxis' handler 'can be called multiple times for the same unit': EFV's is idempotent."
+  },
+  "GameEvents.UnitInitialized": {
+   "ctx": {
+    "G": "PENDING"
+   },
+   "refs": [
+    "GAME/DLC/PiratesScenario/Scripts/PiratesScenario_StartScript.lua:1530-1532, 1622 (GameEvents.UnitInitialized.Add(OnUnitInitialized), gameplay)",
+    "GAME/DLC/CivRoyaleScenario/Scripts/CivRoyaleScenario_StartScript.lua:1374-1376, 1611",
+    "GAME/DLC/BlackDeathScenario/Scripts/BlackDeathScenario.lua:57",
+    "FIXPLAN_corps.md R2.1 (in the GS gamecore's GameEvents name list); FIXPLAN_upgrade_relink.md U5 F2"
+   ],
+   "note": "1.0.5 (FIXPLAN_upgrade_relink.md F2) and EFV_Dev 1.0.5.2 U1 trace. Spike U6 Q-B: did not fire for an upgrade (still PENDING); F2 ships off. Safe no-op when it never fires."
   }
  },
  "gameinfo": {
@@ -2581,6 +2811,20 @@
     "GAME/DLC/Indonesia_KhmerScenario/Scripts/IndonesiaKhmerScenario.lua:31 (GameInfo.Civics[\"CIVIC_EARLY_EMPIRE\"].Index in a gameplay script)"
    ],
    "note": "EFV_Dev 0.6.1-dev.1 only: S0 builds the final session from a brand-new game",
+   "only_paths": [
+    "EFV_Dev/"
+   ]
+  },
+  "UnitOperations": {
+   "ctx": {
+    "G": "C",
+    "UI": "C"
+   },
+   "refs": [
+    "GAME/Base/Assets/UI/Panels/UnitPanel.lua:546-558 (for operationRow in GameInfo.UnitOperations(); actionHash = operationRow.Hash; UnitManager.CanStartOperation(pUnit, actionHash, ...))",
+    "DB schema UnitOperations(OperationType, Hash); GameInfo tables are the same DB in both contexts"
+   ],
+   "note": "EFV_Dev 1.0.4.3 air-unit spike: the DEPLOY / REBASE operation hashes.",
    "only_paths": [
     "EFV_Dev/"
    ]
